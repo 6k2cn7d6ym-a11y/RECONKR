@@ -932,6 +932,7 @@ function updateClock(){
 // Worker 프록시
 // ═══════════════════════════════════════
 var WORKER_URL = 'https://recon.miinonnnn.workers.dev';
+var DART_URL   = 'https://maria-mario-melbourne-plan.trycloudflare.com'; // Oracle DART 프록시 (Cloudflare Tunnel)
 
 async function fetchWithProxy(url){
   var bust = '&_t='+Date.now(); // 캐시 버스팅
@@ -1744,12 +1745,13 @@ function scCandidateTap(ticker, mode){
 
 // ── DART 전용 fetch 헬퍼 ──
 // Worker: /dart/{path}?{query} → https://opendart.fss.or.kr/{path}?{query}
+// Oracle 서버 직접 경유 (Cloudflare IP 차단 우회)
 async function fetchDart(apiPath, params){
   var qs = '?crtfc_key='+encodeURIComponent(G.dartApiKey);
   Object.keys(params||{}).forEach(function(k){
     qs += '&'+k+'='+encodeURIComponent(params[k]);
   });
-  var url = WORKER_URL + '/dart' + apiPath + qs + '&_t='+Date.now();
+  var url = DART_URL + '/dart' + apiPath + qs + '&_t='+Date.now();
   var resp = await fetch(url, {cache:'no-store'});
   if(!resp.ok) throw new Error('DART HTTP '+resp.status);
   return resp.json();
