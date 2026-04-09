@@ -1168,7 +1168,7 @@ async function loadMarketData(){
   try{
     // KOSPI(^KS11), KOSDAQ(^KQ11), VKOSPI(^VKOSPI)
     var d = await fetchWithProxy(
-      'https://query1.finance.yahoo.com/v6/finance/quote?symbols=%5EKS11,%5EKQ11,%5EVKOSPI' +
+      'https://query1.finance.yahoo.com/v8/finance/quote?symbols=%5EKS11,%5EKQ11,%5EVKOSPI' +
       '&fields=regularMarketPrice,regularMarketChangePercent,regularMarketPreviousClose'
     );
     var results = d?.quoteResponse?.result || [];
@@ -1200,7 +1200,7 @@ async function loadFearGreed(){
   // 역방향으로 0~100 점수로 변환
   try{
     var d = await fetchWithProxy(
-      'https://query1.finance.yahoo.com/v6/finance/quote?symbols=%5EVKOSPI&fields=regularMarketPrice,regularMarketChangePercent'
+      'https://query1.finance.yahoo.com/v8/finance/quote?symbols=%5EVKOSPI&fields=regularMarketPrice,regularMarketChangePercent'
     );
     var qt = d?.quoteResponse?.result?.[0];
     if(!qt) throw new Error('no data');
@@ -1811,7 +1811,7 @@ async function fetchYahooData(ticker){
   try{
     // 1. v6 Quote (한국 티커 추가 필드)
     var d1 = await fetchWithProxy(
-      'https://query1.finance.yahoo.com/v6/finance/quote?symbols='+ticker+
+      'https://query1.finance.yahoo.com/v8/finance/quote?symbols='+ticker+
       '&fields=regularMarketPrice,regularMarketPreviousClose,preMarketPrice,preMarketChangePercent,regularMarketVolume,averageVolume,averageDailyVolume10Day,floatShares,shortPercentOfFloat,bid,ask,exchangeName,fiftyTwoWeekHigh,marketCap,sharesOutstanding,currency'
     );
     var qt = d1?.quoteResponse?.result?.[0] || null;
