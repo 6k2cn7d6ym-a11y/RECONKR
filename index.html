@@ -529,7 +529,7 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
   <div class="sg-row"><div><div class="sg-label">BLOCK 알림</div></div><button class="toggle on" id="tgBlock" onclick="this.classList.toggle('on')"></button></div>
 
   <div class="sg-title">앱</div>
-  <div class="sg-row"><div class="sg-label">RECON KR v2.1</div><div style="font-family:var(--mono);font-size:11px;color:var(--t2)">한국 주식 전용 · DART/KIS 준비중</div></div>
+  <div class="sg-row"><div class="sg-label">RECON KR v2.2</div><div style="font-family:var(--mono);font-size:11px;color:var(--t2)">SWING 패치 · KIS캔들/손절/스크리너</div></div>
   <div class="sg-row" style="flex-direction:column;align-items:flex-start;gap:6px">
     <div class="sg-label">API 사용량</div>
     <div id="usageBar" style="font-family:var(--mono);font-size:12px;color:var(--bl)">-</div>
@@ -589,6 +589,7 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
     <div class="sg-row"><div><div class="sg-label">최소 R:R (T1 기준)</div><div class="sg-sub">이하이면 BLOCK 처리</div></div><div class="sg-val" id="swingMinRR" onclick="cycle('swingMinRR',['1.3','1.5','2.0'])">1.5</div></div>
     <div class="sg-row"><div><div class="sg-label">RSI 상단 기준</div><div class="sg-sub">한국 SWING 기준 65 권장</div></div><div class="sg-val" id="swingRsiMax" onclick="cycle('swingRsiMax',['60','65','70'])">65</div></div>
     <div class="sg-row"><div><div class="sg-label">시간 손절 (일)</div><div class="sg-sub">N일 내 움직임 없으면 청산</div></div><div class="sg-val" id="swingHoldDays" onclick="cycle('swingHoldDays',['7','10','14'])">10</div></div>
+    <div class="sg-row"><div><div class="sg-label">최소 거래대금(억)</div><div class="sg-sub">일 거래대금 미달 시 BLOCK</div></div><div class="sg-val" id="swingMinTV" onclick="cycle('swingMinTV',['20','50','100','200'])">50</div></div>
     <div class="sg-title">공통 설정</div>
     <div class="sg-row"><div><div class="sg-label">API Key</div><div class="sg-sub">MOMO 설정에서 입력</div></div><div style="font-family:var(--mono);font-size:11px;color:var(--g)" id="swingKeyStatus">--</div></div>
   </div>
@@ -1406,9 +1407,11 @@ async function fetchCandidatePool(mode){
       'https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=day_gainers&count=50&formatted=false&region=KR&lang=ko-KR',
       'https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=most_actives&count=50&formatted=false&region=KR&lang=ko-KR',
     ],
-    // SWING: 52주 고점 근처 + 중간 거래량 종목
+    // SWING: most_actives(활발한 거래) + day_losers(눌림목 후보) 조합
+    // 소폭 하락 중인 종목에서 MA20 눌림목 후보가 나오는 경우가 많음
     swing: [
       'https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=most_actives&count=60&formatted=false&region=KR&lang=ko-KR',
+      'https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=day_losers&count=40&formatted=false&region=KR&lang=ko-KR',
     ],
     // CORE: 거래량 증가 + 상승 종목 (저점 탈출 후보)
     core: [
@@ -1479,15 +1482,17 @@ function hardCut_swing(q){
   var vol    = q.regularMarketVolume        || 0;
   var avgVol = q.averageDailyVolume3Month   || q.averageDailyVolume10Day || 0;
   var volRatio = avgVol>0 ? vol/avgVol : null;
+  var tv     = q._kisTV !== undefined ? q._kisTV : (price*vol)/100_000_000; // 거래대금 억원
 
   if(price < 500)                                  return null;
   if(cap !== null && cap < 1000)                   return null; // 시총 1000억+ (스윙은 유동성 더 필요)
-  if(chgPct < -5 || chgPct > 10)                  return null; // 너무 급등/급락 제외
+  if(chgPct < -7 || chgPct > 10)                  return null; // 너무 급등/급락 제외 (-7%까지 허용: 눌림목 후보 포함)
   if(volRatio !== null && volRatio > 5)            return null; // 거래량 폭발 = MOMO 영역
   if(volRatio !== null && volRatio < 0.3)          return null; // 거래량 너무 없음
+  if(tv < 50)                                      return null; // [이슈 D] 최소 거래대금 50억
 
   return { symbol:q.symbol, name:q.shortName||q.longName||q.symbol,
-    price, chgPct, cap, vol, avgVol, volRatio };
+    price, chgPct, cap, vol, avgVol, volRatio, tv, _source: q._source||'Yahoo' };
 }
 
 function hardCut_core(q){
@@ -1564,27 +1569,33 @@ function score_swing(s){
   var score = 0;
   var reasons = [];
 
-  // 갭 구간 (-1%~+5% 눌림목 구간이 최적)
-  if(s.chgPct >= -1 && s.chgPct <= 3)       { score+=20; reasons.push('눌림목 구간 '+s.chgPct.toFixed(1)+'%'); }
-  else if(s.chgPct > 3 && s.chgPct <= 7)    { score+=10; }
-  else if(s.chgPct < -1 && s.chgPct >= -3)  { score+=12; reasons.push('소폭 조정 '+s.chgPct.toFixed(1)+'%'); }
+  // ── 당일 변동률: 눌림목 구간 (-2%~+1%) 최고점, 완만 상승도 허용 ──
+  if(s.chgPct >= -2 && s.chgPct <= 1)        { score+=25; reasons.push('눌림목 구간 '+s.chgPct.toFixed(1)+'%'); }
+  else if(s.chgPct > 1 && s.chgPct <= 3)     { score+=16; reasons.push('소폭 상승 '+s.chgPct.toFixed(1)+'%'); }
+  else if(s.chgPct > 3 && s.chgPct <= 7)     { score+=8; }
+  else if(s.chgPct < -2 && s.chgPct >= -4)   { score+=12; reasons.push('단기 조정 '+s.chgPct.toFixed(1)+'%'); }
+  else if(s.chgPct < -4 && s.chgPct >= -7)   { score+=5; } // 깊은 조정, MA60 근접 가능성
 
-  // 거래량 비율 (0.5~1.2x가 눌림목 이상적)
-  if(s.volRatio >= 0.5 && s.volRatio <= 1.2)  { score+=25; reasons.push('거래량 눌림 '+s.volRatio.toFixed(1)+'x'); }
-  else if(s.volRatio > 1.2 && s.volRatio <= 2) { score+=12; }
+  // ── 거래량 비율: 0.4~1.5x = 조용한 눌림목 (스윙 핵심 신호) ──
+  if(s.volRatio >= 0.4 && s.volRatio <= 1.5)  { score+=25; reasons.push('거래량 눌림 '+s.volRatio.toFixed(1)+'x'); }
+  else if(s.volRatio > 1.5 && s.volRatio <= 2.5){ score+=12; }
+  else if(s.volRatio > 2.5 && s.volRatio <= 4)  { score+=5; }
 
-  // 시총 (1000억~3조 적정)
-  if(s.cap >= 1000 && s.cap <= 30000)          { score+=15; }
+  // ── 시총: 3000억~5조 = SWING 최적 유니버스 ──
+  if(s.cap >= 3000 && s.cap <= 50000)          { score+=20; reasons.push('시총 '+Math.round(s.cap/10000).toFixed(1)+'조'); }
+  else if(s.cap >= 1000 && s.cap < 3000)        { score+=10; }
 
-  // 절대 거래대금 (유동성)
-  var tv = (s.price*s.vol)/100_000_000;
-  if(tv >= 50) { score+=15; reasons.push('거래대금 '+tv.toFixed(0)+'억'); }
-  else if(tv >= 20) { score+=8; }
+  // ── 절대 거래대금 (일 유동성 확인) ──
+  var tv = s.tv !== undefined ? s.tv : (s.price*s.vol)/100_000_000;
+  if(tv >= 200)      { score+=15; reasons.push('거래대금 '+tv.toFixed(0)+'억'); }
+  else if(tv >= 100) { score+=10; reasons.push('거래대금 '+tv.toFixed(0)+'억'); }
+  else if(tv >= 50)  { score+=4; }
 
-  // MA/기술지표는 Yahoo 기본값으로 추산 불가 → KIS 연결 후 +20점 추가 예정
-  reasons.push('* MA/MACD KIS 연결 후 추가');
+  // ── KIS 실시간 보너스 ──
+  if(s._source === 'KIS') { score+=5; reasons.push('KIS 실시간'); }
 
-  return { score: Math.min(100, score), reasons };
+  reasons.push('MA20/RSI/MACD → 분석 탭에서 확인');
+  return { score: Math.min(100, Math.max(0, score)), reasons };
 }
 
 function score_core(s){
@@ -2326,7 +2337,7 @@ async function fetchYahooData(ticker){
 }
 
 // ── SWING 전용: 한국 5/20/60일선 기준 지표 계산 ──
-async function fetchSwingData(ticker){
+async function fetchSwingData(ticker, kisPrice){
   var sw = {
     ma5:null, ma20:null, ma60:null, ma120:null,
     rsi14:null, macd:null, macd_signal:null, macd_hist:null, macd_hist_prev:null,
@@ -2442,6 +2453,27 @@ async function fetchSwingData(ticker){
     var open  = opens[opens.length-1];
     if(sw.ma20) sw.ma20_gap_pct = parseFloat(((price-sw.ma20)/sw.ma20*100).toFixed(1));
 
+    // ── [KIS] 당일 시가/현재가/거래량으로 c4/c8 보정 ──
+    // 야후 일봉 당일 캔들은 장중 미완성 → KIS 실시간값으로 덮어씀
+    if(kisPrice && kisPrice.price > 0) price = kisPrice.price;
+    if(kisPrice && kisPrice.open  > 0) open  = kisPrice.open;
+    if(kisPrice && kisPrice.vol   > 0 && sw.vol20avg > 0){
+      sw.vol_ratio = parseFloat((kisPrice.vol / sw.vol20avg).toFixed(2));
+    }
+    if(kisPrice && kisPrice.price > 0 && sw.ma20){
+      sw.ma20_gap_pct = parseFloat(((price-sw.ma20)/sw.ma20*100).toFixed(1));
+    }
+    sw._kisUpdated = !!(kisPrice && kisPrice.price > 0);
+
+    // ── [이슈 E] 눌림목 품질: 최근 5일 거래량 vs 이전 10일 비교 ──
+    sw.pullback_vol_quiet = false;
+    var vclean2 = vols.filter(function(v){return v>0;});
+    if(vclean2.length >= 15){
+      var recentAvgVol = vclean2.slice(-5).reduce(function(a,b){return a+b;},0)/5;
+      var priorAvgVol  = vclean2.slice(-15,-5).reduce(function(a,b){return a+b;},0)/10;
+      sw.pullback_vol_quiet = priorAvgVol > 0 && recentAvgVol < priorAvgVol * 0.85;
+    }
+
     // ─────────────────────────────────────────
     // 한국 SWING 8조건
     // ─────────────────────────────────────────
@@ -2477,11 +2509,12 @@ async function fetchSwingData(ticker){
       (c1?'✓':'✗')+' 정배열 MA5>MA20>MA60'+(sw.ma5?(' (MA5:'+Math.round(sw.ma5).toLocaleString()+' MA20:'+Math.round(sw.ma20).toLocaleString()+')'):' (데이터부족)'),
       (c2?'✓':'✗')+' 수급선(60일) 위'+(sw.ma60?' (MA60:'+Math.round(sw.ma60).toLocaleString()+')':' (데이터부족)'),
       (c3?'✓':'✗')+' 심리선(20일) 눌림목 ±3%'+(sw.ma20?' (이격:'+((price-sw.ma20)/sw.ma20*100).toFixed(1)+'%)':' (데이터부족)'),
-      (c4?'✓':'✗')+' 양봉 (몸통 '+bodyPct.toFixed(2)+'%)',
+      (c4?'✓':'✗')+' 양봉 (몸통 '+bodyPct.toFixed(2)+'%)'+(sw._kisUpdated?' [KIS실시간]':''),
       (c5?'✓':'✗')+' RSI 40~65'+(sw.rsi14?' ('+sw.rsi14+')':' (데이터부족)'),
       (c6?'✓':'✗')+' MACD 히스토그램 상향'+(sw.macd_hist!==null?' (hist:'+sw.macd_hist.toFixed(4)+')':' (데이터부족)'),
       (c7?'✓':'✗')+' 20일선 기울기 +0.1%+'+(sw.ma20_slope!==null?' ('+sw.ma20_slope+'%)':' (데이터부족)'),
-      (c8?'✓':'✗')+' 반등 거래량 1.3배+'+(sw.vol_ratio?' ('+sw.vol_ratio+'x, '+(price>open?'양봉':'음봉')+')':' (데이터부족)'),
+      (c8?'✓':'✗')+' 반등 거래량 1.3배+'+(sw.vol_ratio?' ('+sw.vol_ratio+'x, '+(price>open?'양봉':'음봉')+(sw._kisUpdated?' KIS':'')+')':' (데이터부족)'),
+      (sw.pullback_vol_quiet?'✓':'✗')+' 눌림목 품질: 최근 5일 거래량 감소'+(sw.pullback_vol_quiet?' (조용한 눌림목)':' (확인 안됨)'),
     ];
 
     sw.above_ma60       = c2;
@@ -3672,6 +3705,14 @@ function swingEngine(ydata, swingData){
   r.conditions_met = swingData.conditions_met || 0;
   r.swing_detail   = swingData.condition_detail || [];
 
+  // ── [이슈 D] 최소 거래대금 필터 ──
+  var swingMinTV = parseFloat((document.getElementById('swingMinTV')||{textContent:'50'}).textContent)||50;
+  var tv_m = ydata.trading_value_m || 0;
+  if(tv_m > 0 && tv_m < swingMinTV){
+    r.blockers.push('[유동성] 거래대금 '+tv_m+'억 — SWING 최소 '+swingMinTV+'억 미달');
+    r.action='BLOCK'; return r;
+  }
+
   var ma20 = swingData.ma20, ma60 = swingData.ma60, price = ydata.price;
   var swingMinRR = parseFloat((document.getElementById('swingMinRR')||{textContent:'1.5'}).textContent||'1.5');
 
@@ -3684,11 +3725,14 @@ function swingEngine(ydata, swingData){
     else if(ma20)                                      sEntry = parseFloat((ma20*1.01).toFixed(0));
     else                                               sEntry = parseFloat(price.toFixed(0));
 
-    var sStop = Math.min(
-      parseFloat((sEntry*0.97).toFixed(0)),
-      ma20 ? parseFloat((ma20*0.98).toFixed(0)) : Infinity,
-      ma60 ? parseFloat((ma60*0.98).toFixed(0)) : Infinity
-    );
+    // ── [이슈 B] 손절 계산: 진입가 아래에서 가장 높은(타이트한) 손절선 ──
+    // 후보: MA5-0.5%, MA20-0.5%, 진입가-3% 중 entry보다 낮으면서 가장 높은 것
+    var ma5sw = swingData ? swingData.ma5 : null;
+    var stopCandidates = [parseFloat((sEntry*0.97).toFixed(0))];
+    if(ma5sw  && ma5sw  < sEntry) stopCandidates.push(parseFloat((ma5sw *0.995).toFixed(0)));
+    if(ma20   && ma20   < sEntry) stopCandidates.push(parseFloat((ma20  *0.995).toFixed(0)));
+    var sStop = Math.max.apply(null, stopCandidates.filter(function(s){return s < sEntry;}));
+    if(!sStop || isNaN(sStop) || sStop >= sEntry) sStop = parseFloat((sEntry*0.97).toFixed(0));
     var sRisk = sEntry - sStop;
     var sT1 = swingData.high10 && swingData.high10>sEntry*1.02 ? parseFloat((swingData.high10*0.99).toFixed(0)) : parseFloat((sEntry+sRisk*2).toFixed(0));
     var fw = ydata.fiftyTwoWeekHigh;
@@ -3703,6 +3747,7 @@ function swingEngine(ydata, swingData){
   // ── 점수 계산 ──
   var score = Math.round(r.conditions_met / 8 * 60); // conditions 기본 60점
   if(swingData.pullback_to_ma20 && swingData.bullish_candle) { score+=15; r.signals.push('MA20 눌림목+양봉 확인'); }
+  if(swingData.pullback_to_ma20 && swingData.pullback_vol_quiet) { score+=8; r.signals.push('조용한 눌림목 (거래량 감소)'); }
   if(swingData.ma20_slope!==null && swingData.ma20_slope>=0.1) { score+=8; r.signals.push('MA20 기울기 상승'); }
   if(swingData.vol_ratio && swingData.vol_ratio>=1.5) { score+=8; r.signals.push('거래량 '+swingData.vol_ratio+'x'); }
   if(G.spyAboveMA200===true) score+=5;
@@ -3983,7 +4028,7 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
       '<div class="analyzing-card"><div class="analyzing-spinner"></div>'+
       '<div><div class="analyzing-ticker">'+ticker+'</div>'+
       '<div class="analyzing-text">일봉 데이터 계산 중... (MA/RSI/MACD)</div></div></div>';
-    swingData = await fetchSwingData(ticker);
+    swingData = await fetchSwingData(ticker, kisPrice);
   }
 
   // CORE: 물밑 포착 지표 계산
@@ -5847,9 +5892,9 @@ async function checkMarketRegime(){
     );
     var closes = dc?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || [];
     closes = closes.filter(function(v){return v&&v>0;});
-    if(closes.length >= 200){
-      var ma200 = closes.slice(-200).reduce(function(a,b){return a+b;},0)/200;
-      G.spyAboveMA200 = closes[closes.length-1] > ma200;
+    if(closes.length >= 120){
+      var ma120 = closes.slice(-120).reduce(function(a,b){return a+b;},0)/120; // 한국 경기선 = 120일
+      G.spyAboveMA200 = closes[closes.length-1] > ma120;
     }
   }catch(e){}
 
