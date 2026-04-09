@@ -370,31 +370,27 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
     </div>
   </div>
 
-  <!-- 오늘의 후보 -->
+  <!-- 시장 국면 + 유용 링크 -->
   <div class="mkt-section">
     <div class="mkt-label" style="justify-content:space-between">
-      <span>오늘의 급등 후보</span>
+      <span>시장 국면</span>
       <button onclick="loadAllMarket()" id="moversRefreshBtn" style="font-family:var(--mono);font-size:9px;color:var(--g);background:none;border:none;cursor:pointer;letter-spacing:.06em">↺ 새로고침</button>
     </div>
   </div>
   <div id="marketRegimeEl" style="margin:0 16px 8px;font-family:var(--mono);font-size:11px;color:var(--t2)">시장 국면 분석 중...</div>
   <div class="screener-btns">
-    <a href="https://finance.yahoo.com/markets/stocks/gainers/?start=0&count=25" target="_blank" class="s-btn">
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Yahoo 급등주
+    <a href="https://dart.fss.or.kr" target="_blank" class="s-btn">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg>DART 공시
     </a>
     <a href="https://finance.naver.com/sise/sise_rise.naver" target="_blank" class="s-btn">
       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>네이버 상승률
     </a>
-    <a href="https://dart.fss.or.kr" target="_blank" class="s-btn">
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg>DART 공시
+    <a href="https://finance.naver.com/sise/sise_quant.naver" target="_blank" class="s-btn">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="3 9 21 9"/><polyline points="9 21 9 9"/></svg>네이버 시세
     </a>
   </div>
 
-  <div id="moversList" class="movers-list">
-    <div style="text-align:center;padding:20px;color:var(--t3);font-size:12px;font-family:var(--mono)">로딩 중...</div>
-  </div>
-
-  <div style="height:10px"></div>
+  <div style="height:16px"></div>
 </div>
 
 <!-- ══════════════════════════════════════ -->
@@ -1230,64 +1226,7 @@ async function loadFearGreed(){
   }
 }
 
-async function loadMovers(){
-  var btn = document.getElementById('moversRefreshBtn');
-  if(btn){ btn.textContent = '로딩...'; }
-  document.getElementById('moversList').innerHTML =
-    '<div style="text-align:center;padding:20px;color:var(--t3);font-size:12px;font-family:var(--mono)">로딩 중...</div>';
 
-  try{
-    var d = await fetchWithProxy(
-      'https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=day_gainers&count=15&formatted=false&region=KR&lang=ko-KR'
-    );
-    var quotes = d?.finance?.result?.[0]?.quotes || [];
-    if(!quotes.length){
-      // fallback to most_actives
-      var d2 = await fetchWithProxy(
-        'https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=most_actives&count=15&formatted=false&region=KR&lang=ko-KR'
-      );
-      quotes = d2?.finance?.result?.[0]?.quotes || [];
-    }
-
-    if(!quotes.length){
-      document.getElementById('moversList').innerHTML =
-        '<div class="empty-state"><div class="es-icon">◎</div>데이터 없음<br>장 마감 후에는 데이터가 제한될 수 있습니다</div>';
-      if(btn) btn.textContent = '↺ 새로고침';
-      return;
-    }
-
-    var html = quotes.slice(0,12).map(function(q){
-      var chg = q.regularMarketChangePercent || 0;
-      var chgStr = (chg>=0?'+':'')+chg.toFixed(1)+'%';
-      var chgCls = chg>0?'var(--g)':chg<0?'var(--r)':'var(--t2)';
-      var price = Math.round(q.regularMarketPrice||0).toLocaleString();
-      var name = (q.shortName||q.longName||q.symbol||'').substring(0,28);
-      return '<div class="mover-row" onclick="quickScanToMomo(\''+q.symbol+'\')">' +
-        '<div>'+
-          '<div class="mover-ticker">'+q.symbol+'</div>'+
-          '<div class="mover-name">'+name+'</div>'+
-        '</div>'+
-        '<div class="mover-right">'+
-          '<div class="mover-price">₩'+price+'</div>'+
-          '<div class="mover-chg" style="color:'+chgCls+'">'+chgStr+'</div>'+
-        '</div>'+
-      '</div>';
-    }).join('');
-
-    document.getElementById('moversList').innerHTML = html;
-  }catch(e){
-    document.getElementById('moversList').innerHTML =
-      '<div class="empty-state"><div class="es-icon">◎</div>데이터 로드 실패<br>'+e.message+'</div>';
-  }
-
-  if(btn) btn.textContent = '↺ 새로고침';
-}
-
-function quickScanToMomo(ticker){
-  switchMode('momo');
-  document.getElementById('momoInput').value = ticker;
-  runModeScan('momo');
-}
 
 // ═══════════════════════════════════════════════════════════════
 // ███  KIS / SCREENER ENGINE  ███
@@ -5879,7 +5818,6 @@ updateKeyStatus();
 function loadAllMarket(){
   loadMarketData();
   loadFearGreed();
-  loadMovers();
   checkMarketRegime();
 }
 
