@@ -370,40 +370,35 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
     </div>
   </div>
 
-  <!-- 오늘의 후보 -->
+  <!-- 시장 국면 + 유용 링크 -->
   <div class="mkt-section">
     <div class="mkt-label" style="justify-content:space-between">
-      <span>오늘의 급등 후보</span>
+      <span>시장 국면</span>
       <button onclick="loadAllMarket()" id="moversRefreshBtn" style="font-family:var(--mono);font-size:9px;color:var(--g);background:none;border:none;cursor:pointer;letter-spacing:.06em">↺ 새로고침</button>
     </div>
   </div>
   <div id="marketRegimeEl" style="margin:0 16px 8px;font-family:var(--mono);font-size:11px;color:var(--t2)">시장 국면 분석 중...</div>
   <div class="screener-btns">
-    <a href="https://finance.yahoo.com/markets/stocks/gainers/?start=0&count=25" target="_blank" class="s-btn">
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Yahoo 급등주
-    </a>
-    <a href="https://finance.naver.com/sise/sise_rise.naver" target="_blank" class="s-btn">
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>네이버 상승률
-    </a>
     <button onclick="loadDartFeed()" class="s-btn" id="dartFeedBtn">
       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg>DART 공시피드
     </button>
+    <a href="https://finance.naver.com/sise/sise_rise.naver" target="_blank" class="s-btn">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>네이버 상승률
+    </a>
+    <a href="https://finance.naver.com/sise/sise_quant.naver" target="_blank" class="s-btn">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="3 9 21 9"/><polyline points="9 21 9 9"/></svg>네이버 시세
+    </a>
   </div>
+  <div style="height:16px"></div>
+</div>
 
-  <!-- DART 공시 피드 -->
-  <div id="dartFeedSection" style="display:none;margin:0 16px 10px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-      <div style="font-family:var(--mono);font-size:9px;color:var(--t2);letter-spacing:.1em">▸ DART 최신 공시</div>
-      <button onclick="document.getElementById('dartFeedSection').style.display='none'" style="font-family:var(--mono);font-size:10px;color:var(--t3);background:none;border:none;cursor:pointer">닫기</button>
-    </div>
-    <div id="dartFeedList"></div>
+<!-- DART 공시 피드 (대시보드) -->
+<div id="dartFeedSection" style="display:none;margin:-8px 16px 10px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+    <div style="font-family:var(--mono);font-size:9px;color:var(--t2);letter-spacing:.1em">▸ DART 최신 공시 (주요사항)</div>
+    <button onclick="document.getElementById('dartFeedSection').style.display='none'" style="font-family:var(--mono);font-size:10px;color:var(--t3);background:none;border:none;cursor:pointer">닫기</button>
   </div>
-
-  <div id="moversList" class="movers-list">
-    <div style="text-align:center;padding:20px;color:var(--t3);font-size:12px;font-family:var(--mono)">로딩 중...</div>
-  </div>
-
-  <div style="height:10px"></div>
+  <div id="dartFeedList"></div>
 </div>
 
 <!-- ══════════════════════════════════════ -->
@@ -698,7 +693,7 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
 // 전역 상태
 // ═══════════════════════════════════════
 var G = {
-  apiKey:   localStorage.getItem('apexKey') || '',
+  apiKey:    localStorage.getItem('apexKey') || '',
   dartApiKey: localStorage.getItem('dartApiKey') || '',
   ntfy:     localStorage.getItem('ntfyCh') || '',
   alerts:   JSON.parse(localStorage.getItem('apexAlerts')||'[]'),
@@ -1257,64 +1252,7 @@ async function loadFearGreed(){
   }
 }
 
-async function loadMovers(){
-  var btn = document.getElementById('moversRefreshBtn');
-  if(btn){ btn.textContent = '로딩...'; }
-  document.getElementById('moversList').innerHTML =
-    '<div style="text-align:center;padding:20px;color:var(--t3);font-size:12px;font-family:var(--mono)">로딩 중...</div>';
 
-  try{
-    var d = await fetchWithProxy(
-      'https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=day_gainers&count=15&formatted=false&region=KR&lang=ko-KR'
-    );
-    var quotes = d?.finance?.result?.[0]?.quotes || [];
-    if(!quotes.length){
-      // fallback to most_actives
-      var d2 = await fetchWithProxy(
-        'https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=most_actives&count=15&formatted=false&region=KR&lang=ko-KR'
-      );
-      quotes = d2?.finance?.result?.[0]?.quotes || [];
-    }
-
-    if(!quotes.length){
-      document.getElementById('moversList').innerHTML =
-        '<div class="empty-state"><div class="es-icon">◎</div>데이터 없음<br>장 마감 후에는 데이터가 제한될 수 있습니다</div>';
-      if(btn) btn.textContent = '↺ 새로고침';
-      return;
-    }
-
-    var html = quotes.slice(0,12).map(function(q){
-      var chg = q.regularMarketChangePercent || 0;
-      var chgStr = (chg>=0?'+':'')+chg.toFixed(1)+'%';
-      var chgCls = chg>0?'var(--g)':chg<0?'var(--r)':'var(--t2)';
-      var price = Math.round(q.regularMarketPrice||0).toLocaleString();
-      var name = (q.shortName||q.longName||q.symbol||'').substring(0,28);
-      return '<div class="mover-row" onclick="quickScanToMomo(\''+q.symbol+'\')">' +
-        '<div>'+
-          '<div class="mover-ticker">'+q.symbol+'</div>'+
-          '<div class="mover-name">'+name+'</div>'+
-        '</div>'+
-        '<div class="mover-right">'+
-          '<div class="mover-price">₩'+price+'</div>'+
-          '<div class="mover-chg" style="color:'+chgCls+'">'+chgStr+'</div>'+
-        '</div>'+
-      '</div>';
-    }).join('');
-
-    document.getElementById('moversList').innerHTML = html;
-  }catch(e){
-    document.getElementById('moversList').innerHTML =
-      '<div class="empty-state"><div class="es-icon">◎</div>데이터 로드 실패<br>'+e.message+'</div>';
-  }
-
-  if(btn) btn.textContent = '↺ 새로고침';
-}
-
-function quickScanToMomo(ticker){
-  switchMode('momo');
-  document.getElementById('momoInput').value = ticker;
-  runModeScan('momo');
-}
 
 // ═══════════════════════════════════════════════════════════════
 // ███  KIS / SCREENER ENGINE  ███
@@ -1827,37 +1765,32 @@ function saveDart(){
 function updateDartStatus(){
   var el = document.getElementById('dartConnStatus');
   if(!el) return;
-  if(G.dartApiKey){
-    el.textContent = '키 설정됨 ✓';
-    el.style.color = 'var(--gold)';
-  } else {
-    el.textContent = '미설정';
-    el.style.color = 'var(--t3)';
-  }
+  if(G.dartApiKey){ el.textContent='키 설정됨 ✓'; el.style.color='var(--gold)'; }
+  else             { el.textContent='미설정';      el.style.color='var(--t3)'; }
 }
 
 async function testDartConnection(){
-  var el  = document.getElementById('dartTestResult');
-  var st  = document.getElementById('dartConnStatus');
-  if(!G.dartApiKey){ if(el) el.textContent = '⚠ API 키를 먼저 입력하세요'; return; }
-  if(el) el.textContent = '연결 확인 중...';
+  var el = document.getElementById('dartTestResult');
+  var st = document.getElementById('dartConnStatus');
+  if(!G.dartApiKey){ if(el) el.textContent='⚠ API 키를 먼저 입력하세요'; return; }
+  if(el) el.textContent='연결 확인 중...';
   try{
     var data = await fetchDart('/api/list.json', { page_count:'1' });
     if(data && data.status === '000'){
-      if(el) el.textContent = '✓ 연결 성공 · 공시 조회 가능';
+      if(el) el.textContent='✓ 연결 성공 · 공시 조회 가능';
       if(st){ st.textContent='연결됨 ✓'; st.style.color='var(--gold)'; }
       showToast('DART 연결 성공 ✓');
     } else {
       throw new Error(data?.message || '응답 오류 (status:'+data?.status+')');
     }
   }catch(e){
-    if(el) el.textContent = '✗ 실패: '+e.message;
+    if(el) el.textContent='✗ 실패: '+e.message;
     if(st){ st.textContent='연결 실패'; st.style.color='var(--r)'; }
     showToast('DART 연결 실패: '+e.message);
   }
 }
 
-// ── corp_code 조회 (종목코드 → DART 고유번호) ──
+// ── corp_code 조회 (종목코드 6자리 → DART 고유 corp_code) ──
 var _dartCorpCache = {};
 async function fetchDartCorpCode(stockCode){
   var code = stockCode.replace(/\.(KS|KQ)$/i,'');
@@ -1870,31 +1803,27 @@ async function fetchDartCorpCode(stockCode){
   return null;
 }
 
-// ── 공시 목록 조회 (종목 분석용) ──
-// 최근 30일, 최대 10건
+// ── 공시 목록 조회 (종목 분석용 — 최근 30일, 최대 10건) ──
 async function fetchDartDisclosures(stockCode){
   if(!G.dartApiKey) return null;
   try{
     var corpCode = await fetchDartCorpCode(stockCode);
     if(!corpCode) return null;
-
     var now  = new Date();
     var from = new Date(now - 30*24*60*60*1000);
     var fmt  = function(d){ return d.getFullYear()+(String(d.getMonth()+1).padStart(2,'0'))+(String(d.getDate()).padStart(2,'0')); };
-
     var data = await fetchDart('/api/list.json', {
-      corp_code: corpCode,
-      bgn_de:    fmt(from),
-      end_de:    fmt(now),
-      page_count:'10'
+      corp_code:  corpCode,
+      bgn_de:     fmt(from),
+      end_de:     fmt(now),
+      page_count: '10'
     });
     if(!data || data.status !== '000' || !data.list) return [];
-
     return data.list.map(function(d){
       return {
         title:    d.report_nm,
         date:     d.rcept_dt,
-        type:     d.pblntf_ty,
+        type:     d.pblntf_ty,   // 'A' 정기, 'B' 주요사항, 'D' 외부감사 등
         corpName: d.corp_name,
         rcept_no: d.rcept_no,
         url:      'https://dart.fss.or.kr/dsaf001/main.do?rcpNo='+d.rcept_no,
@@ -1906,123 +1835,95 @@ async function fetchDartDisclosures(stockCode){
   }
 }
 
-// ── 공시 품질 분류 (news_quality hint 생성) ──
-// type 기준: 'B' (주요사항 — 거래 관련) = 팩트, 기타 = 일반
-var DART_FACT_TYPES   = ['B','E']; // 주요사항보고서, 외부감사관련
-var DART_FACT_KEYWORDS = ['계약','수주','임상','허가','인수','합병','영업이익','배당','자사주','유상증자','전환사채','상장','투자','파트너','제휴'];
+// ── 공시 품질 분류 ──
+var DART_FACT_TYPES    = ['B','E'];
+var DART_FACT_KW       = ['계약','수주','임상','허가','인수','합병','영업이익','배당','자사주','유상증자','전환사채','상장','투자','파트너','제휴'];
 var DART_NEGATIVE_KEYWORDS = ['불성실공시','정정','취소','부적정','경고','감리','상장폐지','주의종목'];
 
 function classifyDartDisclosures(list){
   if(!list || !list.length) return { quality:'none', factList:[], negList:[], text:'공시 없음 (최근 30일)' };
-  var factList = [], negList = [];
+  var factList=[], negList=[];
   list.forEach(function(d){
-    var t = d.title;
-    var isNeg  = DART_NEGATIVE_KEYWORDS.some(function(k){ return t.includes(k); });
-    var isFact = DART_FACT_TYPES.indexOf(d.type) !== -1
-              || DART_FACT_KEYWORDS.some(function(k){ return t.includes(k); });
+    var isNeg  = DART_NEGATIVE_KEYWORDS.some(function(k){ return d.title.includes(k); });
+    var isFact = DART_FACT_TYPES.indexOf(d.type) !== -1 || DART_FACT_KW.some(function(k){ return d.title.includes(k); });
     if(isNeg) negList.push(d);
     else if(isFact) factList.push(d);
   });
-  var quality = negList.length  ? 'negative'
-              : factList.length ? 'factual'
-              : 'vague';
-  var textArr = list.slice(0,5).map(function(d){
-    var dt = d.date.replace(/(\d{4})(\d{2})(\d{2})/,'$1.$2.$3');
-    return '['+dt+'] '+d.title;
-  });
-  return { quality, factList, negList, text: textArr.join(' | ') };
+  var quality = negList.length ? 'negative' : factList.length ? 'factual' : 'vague';
+  var text = list.slice(0,5).map(function(d){
+    return '['+d.date.replace(/(\d{4})(\d{2})(\d{2})/,'$1.$2.$3')+'] '+d.title;
+  }).join(' | ');
+  return { quality, factList, negList, text };
 }
 
-// ── 대시보드 공시 피드 로딩 ──
+// ── 대시보드 공시 피드 ──
 async function loadDartFeed(){
   var section = document.getElementById('dartFeedSection');
   var list    = document.getElementById('dartFeedList');
   if(!section || !list) return;
-
   if(!G.dartApiKey){
     section.style.display='';
     list.innerHTML='<div style="font-family:var(--mono);font-size:11px;color:var(--t3);padding:8px 0">DART API 키를 설정해주세요 (설정 → DART API)</div>';
     return;
   }
-
   section.style.display='';
   list.innerHTML='<div style="font-family:var(--mono);font-size:11px;color:var(--t2);padding:8px 0">공시 조회 중...</div>';
-
   try{
     var now = new Date();
     var fmt = function(d){ return d.getFullYear()+(String(d.getMonth()+1).padStart(2,'0'))+(String(d.getDate()).padStart(2,'0')); };
     var data = await fetchDart('/api/list.json', {
       bgn_de:     fmt(new Date(now - 3*24*60*60*1000)),
       end_de:     fmt(now),
-      pblntf_ty:  'B',    // 주요사항만
+      pblntf_ty:  'B',
       page_count: '20'
     });
-
     if(!data || data.status !== '000' || !data.list || !data.list.length){
       list.innerHTML='<div style="font-family:var(--mono);font-size:11px;color:var(--t3);padding:8px 0">최근 3일 주요 공시 없음</div>';
       return;
     }
-
-    var html = '';
-    data.list.slice(0, 15).forEach(function(d){
-      var dt = d.rcept_dt.replace(/(\d{4})(\d{2})(\d{2})/,'$2.$3');
+    var html='';
+    data.list.slice(0,15).forEach(function(d){
+      var dt    = d.rcept_dt.replace(/(\d{4})(\d{2})(\d{2})/,'$2.$3');
       var isNeg = DART_NEGATIVE_KEYWORDS.some(function(k){ return d.report_nm.includes(k); });
       var color = isNeg ? 'var(--r)' : 'var(--t)';
       html += '<div style="display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-bottom:1px solid var(--b)">'
-        + '<span style="font-family:var(--mono);font-size:9px;color:var(--t3);flex-shrink:0;padding-top:1px">'+dt+'</span>'
-        + '<div style="flex:1;min-width:0">'
-          + '<div style="font-family:var(--mono);font-size:9px;color:var(--t2);margin-bottom:2px">'+d.corp_name+'</div>'
-          + '<a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo='+d.rcept_no+'" target="_blank" '
-            + 'style="font-size:11px;color:'+color+';text-decoration:none;line-height:1.4;word-break:keep-all">'
-            + d.report_nm
-          + '</a>'
-        + '</div>'
-      + '</div>';
+        +'<span style="font-family:var(--mono);font-size:9px;color:var(--t3);flex-shrink:0;padding-top:2px">'+dt+'</span>'
+        +'<div style="flex:1;min-width:0">'
+          +'<div style="font-family:var(--mono);font-size:9px;color:var(--t2);margin-bottom:2px">'+d.corp_name+'</div>'
+          +'<a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo='+d.rcept_no+'" target="_blank" '
+            +'style="font-size:11px;color:'+color+';text-decoration:none;line-height:1.4;word-break:keep-all">'+d.report_nm+'</a>'
+        +'</div>'
+      +'</div>';
     });
-
-    list.innerHTML = html || '<div style="font-family:var(--mono);font-size:11px;color:var(--t3);padding:8px 0">조회된 공시 없음</div>';
+    list.innerHTML = html;
   }catch(e){
     list.innerHTML='<div style="font-family:var(--mono);font-size:11px;color:var(--r);padding:8px 0">오류: '+e.message+'</div>';
   }
 }
 
-// ── 스크리너 공시 필터 토글 ──
+// ── 스크리너 공시 필터 ──
 var _dartFilter = { momo:'all', swing:'all', core:'all' };
-
 function toggleDartFilter(mode){
-  var states = ['all','has','none'];
-  var labels = {'all':'전체','has':'공시있음','none':'공시없음'};
-  var colors = {'all':'var(--t3)','has':'var(--g)','none':'var(--r)'};
-  var borders = {'all':'var(--b)','has':'rgba(0,240,122,.35)','none':'rgba(255,45,78,.35)'};
-
+  var states  = ['all','has','none'];
+  var labels  = { all:'전체', has:'공시있음', none:'공시없음' };
+  var colors  = { all:'var(--t3)', has:'var(--g)', none:'var(--r)' };
+  var borders = { all:'var(--b)', has:'rgba(0,240,122,.35)', none:'rgba(255,45,78,.35)' };
   var idx = states.indexOf(_dartFilter[mode]);
   _dartFilter[mode] = states[(idx+1) % states.length];
   var next = _dartFilter[mode];
-
   var btn = document.getElementById('dartFilter'+mode.charAt(0).toUpperCase()+mode.slice(1));
-  if(btn){
-    btn.textContent     = labels[next];
-    btn.style.color     = colors[next];
-    btn.style.borderColor = borders[next];
-  }
-  // 필터 반영해서 재렌더링
+  if(btn){ btn.textContent=labels[next]; btn.style.color=colors[next]; btn.style.borderColor=borders[next]; }
   applyDartFilterAndRender(mode);
 }
-
 function applyDartFilterAndRender(mode){
   var filter  = _dartFilter[mode];
-  var results = G.screenerResults[mode] || [];
-  if(filter === 'all'){
-    renderScreenerResults(mode);
-    return;
-  }
-  // _dartHasDisclosure 플래그 기반 필터 (분석 시 세팅됨, 스크리너엔 없으면 skip)
+  if(filter === 'all'){ renderScreenerResults(mode); return; }
+  var results  = G.screenerResults[mode] || [];
   var filtered = results.filter(function(s){
-    if(filter === 'has')  return s._dartHasDisclosure === true;
-    if(filter === 'none') return s._dartHasDisclosure === false;
+    if(filter==='has')  return s._dartHasDisclosure === true;
+    if(filter==='none') return s._dartHasDisclosure === false;
     return true;
   });
-  // 임시로 G.screenerResults 바꿔치기 후 복원
   var orig = G.screenerResults[mode];
   G.screenerResults[mode] = filtered;
   renderScreenerResults(mode);
@@ -2539,22 +2440,18 @@ async function fetchYahooData(ticker){
         if(dartList && dartList.length){
           result.dartDisclosures = dartList;
           var dartInfo = classifyDartDisclosures(dartList);
-          // DART 공시 텍스트를 newsText 앞에 붙이기 (Claude가 가장 먼저 읽도록)
           result.newsText = '[DART공시] '+dartInfo.text
             + (result.newsText ? ' || [뉴스] '+result.newsText : '');
-          // DART 공시가 있으면 factualCount 반영
-          if(dartInfo.quality === 'factual')  factualCount += 2; // 팩트공시 가중치 높임
-          if(dartInfo.quality === 'negative') factualCount = -99; // 부정공시 → 강제 negative hint
-          result.dartQuality = dartInfo.quality;
-          result.dartFactTitles  = dartInfo.factList.map(function(d){ return d.title; }).slice(0,3);
-          result.dartNegTitles   = dartInfo.negList.map(function(d){ return d.title; }).slice(0,3);
+          if(dartInfo.quality === 'factual')  factualCount += 2;
+          if(dartInfo.quality === 'negative') factualCount = -99;
+          result.dartQuality    = dartInfo.quality;
+          result.dartFactTitles = dartInfo.factList.map(function(d){ return d.title; }).slice(0,3);
+          result.dartNegTitles  = dartInfo.negList.map(function(d){ return d.title; }).slice(0,3);
         } else if(dartList !== null){
-          // 조회 성공했으나 공시 없음
           result.newsText = '[DART공시 없음]'
             + (result.newsText ? ' || [뉴스] '+result.newsText : '');
           result.dartQuality = 'none';
         }
-        // _dartHasDisclosure 플래그 (스크리너 필터용)
         result._dartHasDisclosure = !!(dartList && dartList.length);
       }catch(e){
         console.warn('[DART] 분석 중 공시 조회 실패:', e.message);
@@ -3170,10 +3067,10 @@ function makePrompt(mode, ticker, ydata, swingData, openTrade, coreData){
     '【공시/뉴스】 '+newsStr+'\n' +
     (ydata.dartDisclosures && ydata.dartDisclosures.length
       ? '\n=== DART 전자공시 (최근 30일) ===\n'
-        + '공시품질: '+(ydata.dartQuality==='factual'?'✅ 팩트공시 확인':ydata.dartQuality==='negative'?'🚨 부정/정정공시 존재':ydata.dartQuality==='none'?'공시 없음':'일반공시')
-        + (ydata.dartFactTitles&&ydata.dartFactTitles.length ? '\n팩트공시: '+ydata.dartFactTitles.join(' / ') : '')
-        + (ydata.dartNegTitles&&ydata.dartNegTitles.length  ? '\n⚠ 부정공시: '+ydata.dartNegTitles.join(' / ')  : '')
-        + '\n전체 공시 수: '+ydata.dartDisclosures.length+'건\n'
+        + '공시품질: '+(ydata.dartQuality==='factual'?'✅ 팩트공시 확인':ydata.dartQuality==='negative'?'🚨 부정/정정공시 존재':'일반공시')+'\n'
+        + (ydata.dartFactTitles&&ydata.dartFactTitles.length ? '팩트공시: '+ydata.dartFactTitles.join(' / ')+'\n' : '')
+        + (ydata.dartNegTitles&&ydata.dartNegTitles.length  ? '⚠ 부정공시: '+ydata.dartNegTitles.join(' / ')+'\n' : '')
+        + '공시 건수: '+ydata.dartDisclosures.length+'건\n'
       : '') +
     '\n=== 시장 국면 ===\n' +
     '시간대: '+phaseLabel+'\n' +
@@ -4129,15 +4026,15 @@ function swingEngine(ydata, swingData){
   // A1. 중기 레짐: KOSPI 120일선 위 (+8)
   if(G.spyAboveMA200 === true)       { mktScore += 8; r.signals.push('KOSPI 120일선 위'); }
   else if(G.spyAboveMA200 === false) { r.warnings.push('KOSPI 120일선 아래 — 약세 구조'); }
-  // A2. 단기 레짐: KOSPI 최근 5일 방향 (+6)
+  // A2+A3 통합: 당일 KOSPI 레짐 점수 (최대 12pt)
+  // A2와 A3는 같은 "당일 시장 방향"을 중복 측정하고 있어 하나로 합침
   if(kospiChgSW !== null){
-    if(kospiChgSW >= 0.3)       { mktScore += 6; }
-    else if(kospiChgSW >= -0.3) { mktScore += 3; }
-    else if(kospiChgSW <= -0.8) { r.warnings.push('KOSPI '+kospiChgSW.toFixed(1)+'% — 시장 약세'); }
-  } else { mktScore += 3; } // 데이터 없으면 중립
-  // A3. 당일 충격 없음 (+6, 단 -0.8%~-1.5% 충격 시 감점)
-  if(kospiChgSW === null || kospiChgSW > -0.8)    { mktScore += 6; }
-  else if(kospiChgSW <= -0.8 && kospiChgSW > -1.5){ mktScore += 2; r.warnings.push('KOSPI '+kospiChgSW.toFixed(1)+'% — 포지션 50% 제한'); }
+    if(kospiChgSW > 0.8)       { mktScore += 12; }
+    else if(kospiChgSW > 0.3)  { mktScore += 10; }
+    else if(kospiChgSW > -0.3) { mktScore += 7;  }
+    else if(kospiChgSW > -0.8) { mktScore += 3;  r.warnings.push('KOSPI '+kospiChgSW.toFixed(1)+'% — 시장 약세'); }
+    else                        { /* -0.8 ~ -1.5%: G4 아래에서 경고, 여기선 0점 */ r.warnings.push('KOSPI '+kospiChgSW.toFixed(1)+'% — 포지션 50% 제한'); }
+  } else { mktScore += 7; } // 데이터 없으면 중립 (보합 수준)
 
   // ════════════════════════════════════════
   // Layer B — 구조 점수 (30점)
@@ -4176,11 +4073,15 @@ function swingEngine(ydata, swingData){
     else if(depthPct < -9 && depthPct >= -12)  { pbScore += 5;  }
     else if(depthPct > 0)                      { r.warnings.push('신고가 근처 — 눌림목 미형성'); }
   }
-  // C2. MA20 ±4% 이내 눌림목 (+8)
-  if(swingData.ma20_gap_pct !== null && Math.abs(swingData.ma20_gap_pct) <= 4){
-    pbScore += 8; r.signals.push('MA20 ±'+Math.abs(swingData.ma20_gap_pct).toFixed(1)+'% 눌림');
-  } else if(swingData.ma20_gap_pct !== null && Math.abs(swingData.ma20_gap_pct) <= 7){
-    pbScore += 4;
+  // C2. MA20 대비 위치 — 비대칭 방향성 설계 (+8/+5/+3/+1)
+  // MA20 위가 이상적, 아래는 허용 범위 축소 (눌림목은 MA20 지지가 전제)
+  var gap20 = swingData.ma20_gap_pct;
+  if(gap20 !== null){
+    if(gap20 >= 0 && gap20 <= 4)          { pbScore += 8; r.signals.push('MA20 위 +'+gap20.toFixed(1)+'% — 최적 눌림'); }
+    else if(gap20 > 4 && gap20 <= 7)      { pbScore += 5; r.signals.push('MA20 위 +'+gap20.toFixed(1)+'%'); }
+    else if(gap20 >= -2 && gap20 < 0)     { pbScore += 3; r.warnings.push('MA20 -'+Math.abs(gap20).toFixed(1)+'% 아래 — 일시 이탈'); }
+    else if(gap20 >= -4 && gap20 < -2)    { pbScore += 1; r.warnings.push('MA20 -'+Math.abs(gap20).toFixed(1)+'% — MA20 이탈 경계'); }
+    // gap20 > 7: B4 경고로 처리됨, gap20 < -4: B4에서 차단
   }
   // C3. 최근 5일 거래량 감소 (조용한 눌림목) (+5)
   if(swingData.pullback_vol_quiet) { pbScore += 5; r.signals.push('조용한 눌림목 (거래량 감소)'); }
@@ -4195,24 +4096,27 @@ function swingEngine(ydata, swingData){
   }
 
   // ════════════════════════════════════════
-  // Layer D — 트리거 (20점) — KIS 미연결 시 15점 캡
+  // Layer D — 트리거 (최대 15pt) — KIS 미연결 시 동일 15pt 캡
+  // D1/D3 통합으로 최대 15pt (D1/D3 step 5pt + D2 5pt + D4 5pt)
   // ════════════════════════════════════════
   var trigScore = 0;
   var kisConnected = !!(swingData._kisUpdated);
-  var trigCap = kisConnected ? 20 : 15; // KIS 없으면 정확한 트리거 보장 안 됨
-  // D1. 양봉 종가 (+5)
-  if(swingData.bullish_candle) { trigScore += 5; }
+  var trigCap = 15; // D max = 15 (D1/D3 통합 후), KIS여부와 무관
+  // D1/D3 통합: 계단형 점수 — 양봉 단독과 거래량 동반 양봉을 분리
+  // 양봉 하나 이벤트에 10pt 중복 가산 방지
+  if(swingData.bullish_candle && swingData.vol_ratio && swingData.vol_ratio >= 1.3){
+    trigScore += 5; r.signals.push('거래량 동반 양봉 ('+swingData.vol_ratio+'x)');
+  } else if(swingData.bullish_candle){
+    trigScore += 2; // 거래량 미동반 양봉 — 약한 트리거
+  }
   // D2. 최근 3일 고가 돌파 (+5)
   if(swingData.broke_prev3d_high) { trigScore += 5; r.signals.push('최근 3일 고가 돌파'); }
-  // D3. 반등 거래량 1.3배+ (+5)
-  if(swingData.vol_ratio && swingData.vol_ratio >= 1.3 && swingData.bullish_candle){
-    trigScore += 5; r.signals.push('반등 거래량 '+swingData.vol_ratio+'x');
-  }
+  // D3 → D1/D3 통합으로 위에서 처리됨
   // D4. 종가 캔들 상단 40% 이내 (+5)
   if(swingData.close_upper_40pct) { trigScore += 5; r.signals.push('종가 캔들 상단 마감'); }
   trigScore = Math.min(trigScore, trigCap);
-  if(!kisConnected && trigScore >= 14){
-    r.warnings.push('KIS 미연결 — 트리거 점수 15pt 캡 (실시간 캔들 미보정)');
+  if(!kisConnected && trigScore >= 10){
+    r.warnings.push('KIS 미연결 — 트리거 판단 야후 일봉 기준 (장중 미완성 캔들 주의)');
   }
 
   // ════════════════════════════════════════
@@ -6411,7 +6315,6 @@ updateKeyStatus();
 function loadAllMarket(){
   loadMarketData();
   loadFearGreed();
-  loadMovers();
   checkMarketRegime();
 }
 
@@ -6509,11 +6412,7 @@ setInterval(checkMarketRegime, 3*60*1000);
 // ── DART 초기화 ──
 (function initDart(){
   var k = localStorage.getItem('dartApiKey')||'';
-  if(k){
-    G.dartApiKey = k;
-    var el = document.getElementById('dartApiKeyInput');
-    if(el) el.value = k;
-  }
+  if(k){ G.dartApiKey=k; var el=document.getElementById('dartApiKeyInput'); if(el) el.value=k; }
   updateDartStatus();
 })();
 
