@@ -3555,13 +3555,13 @@ function getWhaleStage(r){
   }
 
   // ── BREAKOUT: 시세 분출 ★ 핵심 진입 ──
-  // 거래대금 5배+ + 팩트공시 + 갭 3~20% (20% 초과는 이미 고점 추격) + 이격 20% 이내
-  var isBreakout = tv >= 5 && news === 'factual' && gap >= 3 && gap <= 20 && isoK <= 20;
+  // 거래대금 5배+ + 팩트공시 + 갭 3~20% (20% 초과는 이미 고점 추격) + 이격 30% 이내 (DART 연동 후 완화)
+  var isBreakout = tv >= 5 && news === 'factual' && gap >= 3 && gap <= 20 && isoK <= 30;
   if(isBreakout)
     return { stage:'BREAKOUT', action:'ENTER',
       label:'🚀 세력 시세분출 — 올라타기 구간',
       warnings:[
-        isoK > 15 ? 'MA20 이격 +'+isoK+'% — 분출 중반 이후, 진입각 좁음' : null,
+        isoK > 22 ? 'MA20 이격 +'+isoK+'% — 분출 중반 이후, 진입각 좁음' : null,
         turn > 20  ? '회전율 '+turn.toFixed(1)+'% — 단타 세력 가능성, 당일 청산 원칙' : null,
         gap > 12   ? '갭 '+gap.toFixed(1)+'% — 추격 진입, 손절선 넓게 잡을 것' : null,
       ].filter(Boolean),
@@ -3573,9 +3573,9 @@ function getWhaleStage(r){
       ].filter(Boolean) };
 
   // ── EARLY_MOVE: 세력 초기 움직임 ──
-  // 필수: tv>=3 + gap>=3 + isoK<=12 (DART 전까지 유지)
+  // 필수: tv>=3 + gap>=3 + isoK<=18 (DART 연동 후 완화 — 공시 품질로 보완)
   // 강화: price>vwap(필수) + rvol>=2(필수) + vwap_pct<15 or wick<0.5 (1개 필수)
-  var emBase = tv >= 3 && gap >= 3 && isoK <= 12 && (news !== 'none' || turn < 15);
+  var emBase = tv >= 3 && gap >= 3 && isoK <= 18 && (news !== 'none' || turn < 15);
   if(emBase){
     // VWAP 필수 — 없으면 탈락
     var hasVwap   = typeof r.vwap === 'number' && r.vwap > 0;
