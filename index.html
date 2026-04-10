@@ -4029,6 +4029,10 @@ function swingEngine(ydata, swingData){
   var swingMinTV = parseFloat((document.getElementById('swingMinTV')||{textContent:'50'}).textContent)||50;
   var tv_m = ydata.trading_value_m || 0;
 
+  // ── 실시간 가격 없음 (장 마감 후) → 일봉 기반 구조 분석만 ──
+  // price가 없으면 MA 기반 레이어는 계산 불가 → 구조 점수만 표시
+  var hasRealtimePrice = price && price > 0 && G.marketPhase !== 'CLOSED';
+
   // ════════════════════════════════════════
   // 진입각 계산 (게이트 전에 필요)
   // ════════════════════════════════════════
@@ -4063,8 +4067,8 @@ function swingEngine(ydata, swingData){
   // ════════════════════════════════════════
   // GATE — 하나라도 실패하면 즉시 BLOCK
   // ════════════════════════════════════════
-  // G1. MA60 위 (기관 수급선 위)
-  if(ma60 && price && price < ma60){
+  // G1. MA60 위 (기관 수급선 위) — 실시간 가격 있을 때만
+  if(hasRealtimePrice && ma60 && price < ma60){
     r.blockers.push('[G1] MA60(₩'+Math.round(ma60).toLocaleString()+') 아래 — 수급선 이탈');
     r.action='BLOCK'; return r;
   }
@@ -4129,8 +4133,10 @@ function swingEngine(ydata, swingData){
 
   // ════════════════════════════════════════
   // Layer C — 눌림목 품질 (30점)
+  // 실시간 가격 필요 — CLOSED 시간대에는 0점
   // ════════════════════════════════════════
   var pbScore = 0;
+  if(hasRealtimePrice){
   // C1. 고점 대비 조정폭 -4%~-9% 이상적 (+10)
   var depthPct = swingData.pullback_depth_pct;
   if(depthPct !== null){
@@ -4160,29 +4166,35 @@ function swingEngine(ydata, swingData){
     else if(swingData.rsi14 < 45)  { r.warnings.push('RSI '+swingData.rsi14+' — 과매도 구간'); }
     else if(swingData.rsi14 > 65)  { r.warnings.push('RSI '+swingData.rsi14+' — 과매수 주의'); }
   }
+  } // end hasRealtimePrice (Layer C)
 
   // ════════════════════════════════════════
-  // Layer D — 트리거 (최대 15pt) — KIS 미연결 시 동일 15pt 캡
-  // D1/D3 통합으로 최대 15pt (D1/D3 step 5pt + D2 5pt + D4 5pt)
+  // Layer D — 트리거 (최대 15pt)
+  // 실시간 가격 필요 — CLOSED 시간대에는 0점
   // ════════════════════════════════════════
   var trigScore = 0;
   var kisConnected = !!(swingData._kisUpdated);
-  var trigCap = 15; // D max = 15 (D1/D3 통합 후), KIS여부와 무관
-  // D1/D3 통합: 계단형 점수 — 양봉 단독과 거래량 동반 양봉을 분리
-  // 양봉 하나 이벤트에 10pt 중복 가산 방지
+  var trigCap = 15;
+  if(hasRealtimePrice){
+  // D1/D3 통합: 계단형 점수
   if(swingData.bullish_candle && swingData.vol_ratio && swingData.vol_ratio >= 1.3){
     trigScore += 5; r.signals.push('거래량 동반 양봉 ('+swingData.vol_ratio+'x)');
   } else if(swingData.bullish_candle){
-    trigScore += 2; // 거래량 미동반 양봉 — 약한 트리거
+    trigScore += 2;
   }
   // D2. 최근 3일 고가 돌파 (+5)
   if(swingData.broke_prev3d_high) { trigScore += 5; r.signals.push('최근 3일 고가 돌파'); }
-  // D3 → D1/D3 통합으로 위에서 처리됨
   // D4. 종가 캔들 상단 40% 이내 (+5)
   if(swingData.close_upper_40pct) { trigScore += 5; r.signals.push('종가 캔들 상단 마감'); }
   trigScore = Math.min(trigScore, trigCap);
   if(!kisConnected && trigScore >= 10){
     r.warnings.push('KIS 미연결 — 트리거 판단 야후 일봉 기준 (장중 미완성 캔들 주의)');
+  }
+  } // end hasRealtimePrice (Layer D)
+
+  // CLOSED 시간대 안내
+  if(!hasRealtimePrice){
+    r.warnings.push('[장 마감] 실시간 가격 없음 — 일봉 구조 분석 기준');
   }
 
   // ════════════════════════════════════════
@@ -4358,27 +4370,35 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
   var minGap     = parseInt((document.getElementById('minGap')||{textContent:'5'}).textContent)||5;
   var minTvRatio = parseFloat((document.getElementById('maxFloat')||{textContent:'3'}).textContent)||3;
 
-  // ── MOMO: 장 마감 시간대 차단 (데이터 없어서 쓰레기 결과 방지) ──
-  // SWING/CORE는 일봉 기반이라 장 마감 후에도 의미 있음
-  if(mode === 'momo' && G.marketPhase === 'CLOSED'){
-    var openTrade = G_journal.find(function(t){
-      return t.ticker === ticker && (t.status === 'open' || t.status === 'partial') && (!t.mode || t.mode === mode);
+  // ── 장 마감 시간대 모드별 처리 ──
+  if(G.marketPhase === 'CLOSED'){
+    var _hasPosCheck = G_journal.find(function(t){
+      return t.ticker===ticker && (t.status==='open'||t.status==='partial') && (!t.mode||t.mode===mode);
     });
-    if(!openTrade){
-      analyzeEl.innerHTML = '';
-      resultEl.innerHTML =
-        '<div style="margin:4px 0 10px;padding:16px;background:var(--bg1);border:1px solid var(--b);border-radius:16px;text-align:center">'+
-          '<div style="font-size:24px;margin-bottom:10px">🌙</div>'+
-          '<div style="font-family:var(--mono);font-size:13px;color:var(--t);margin-bottom:6px">장 마감 상태</div>'+
-          '<div style="font-size:12px;color:var(--t2);line-height:1.7">'+
-            'MOMO는 실시간 데이터가 필요합니다<br>'+
-            '동시호가(8:30~) 이후 분석 가능<br>'+
-            '<span style="font-family:var(--mono);font-size:11px;color:var(--t3)">SWING/CORE는 지금도 분석 가능</span>'+
-          '</div>'+
-        '</div>';
-      return;
+    if(!_hasPosCheck){
+      if(mode === 'momo'){
+        // MOMO: 실시간 데이터 없음 → 완전 차단
+        analyzeEl.innerHTML = '';
+        resultEl.innerHTML =
+          '<div style="margin:4px 0 10px;padding:20px 16px;background:var(--bg1);border:1px solid var(--b);border-radius:16px;text-align:center">'+
+            '<div style="font-size:28px;margin-bottom:10px">🌙</div>'+
+            '<div style="font-family:var(--mono);font-size:14px;color:var(--t);margin-bottom:8px">장 마감 상태</div>'+
+            '<div style="font-size:12px;color:var(--t2);line-height:1.8">'+
+              'MOMO는 실시간 데이터가 필요합니다<br>'+
+              '동시호가 시작(08:30 KST) 이후 분석 가능<br>'+
+              '<span style="font-family:var(--mono);font-size:11px;color:var(--t3)">SWING / CORE는 일봉 기반으로 지금도 분석 가능</span>'+
+            '</div>'+
+          '</div>';
+        return;
+      }
+      if(mode === 'swing' || mode === 'core'){
+        // SWING/CORE: 일봉 기반이라 허용하되 안내 배너 prepend
+        resultEl.innerHTML =
+          '<div style="margin:0 0 8px;padding:9px 13px;background:rgba(255,106,0,.07);border:1px solid rgba(255,106,0,.20);border-radius:10px;font-family:var(--mono);font-size:11px;color:var(--gold)">'+
+            '🌙 장 마감 후 분석 — 일봉 기준 (실시간 가격 미반영)'+
+          '</div>';
+      }
     }
-    // 보유 포지션 있으면 CLOSED여도 분석 허용 (매도 판단용)
   }
 
   // ── 보유 포지션 감지 ──
@@ -4600,6 +4620,8 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
       result.summary         = '['+result.action+'] '+
         (result.trade_note||result.whale_label||'규칙 엔진 판단')+
         (result.risk_note?' · ⚠ '+result.risk_note:'');
+      // NaN 방어 — summary에 숫자 NaN이 텍스트로 포함되면 제거
+      if(result.summary) result.summary = result.summary.replace(/\bNaN\b/g,'--');
       result.whale_strategy  = result.whale_strategy || (explain.trade_note||'');
       // 모드별 전용 필드
       if(mode==='swing' && swingData){
@@ -4668,7 +4690,10 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
     G.lastAnalyzed[mode] = { ticker: ticker, phase: G.marketPhase, ts: Date.now() };
     hideStaleBanner(mode);
     analyzeEl.innerHTML = '';
-    resultEl.innerHTML = openTrade ? holdCardHTML(result, mode, openTrade) : cardHTML(result, mode);
+    var cardContent = openTrade ? holdCardHTML(result, mode, openTrade) : cardHTML(result, mode);
+    // SWING/CORE 장 마감 배너가 있으면 앞에 유지
+    var banner = resultEl.innerHTML && resultEl.innerHTML.includes('장 마감 후 분석') ? resultEl.innerHTML : '';
+    resultEl.innerHTML = banner + cardContent;
 
   }catch(e){
     analyzeEl.innerHTML='';
@@ -5540,7 +5565,7 @@ function holdCardHTML(r, mode, trade){
         '<span style="font-size:13px">📌</span>'+
         '<div>'+
           '<div style="font-family:var(--mono);font-size:11px;color:var(--t2)">보유 중 · 진입 <span style="color:var(--t)">₩'+Math.round(trade.entry).toLocaleString()+'</span></div>'+
-          (trade.shares?'<div style="font-family:var(--mono);font-size:10px;color:var(--t3)">'+trade.shares+'주'+(pnlAmt!==null?' · $'+(pnlAmt>=0?'+':'')+pnlAmt.toFixed(2):'')+'</div>':'')+
+          (trade.shares?'<div style="font-family:var(--mono);font-size:10px;color:var(--t3)">'+trade.shares+'주'+(pnlAmt!==null&&!isNaN(pnlAmt)?' · ₩'+(pnlAmt>=0?'+':'')+Math.round(pnlAmt).toLocaleString()+'원':'')+'</div>':'')+
         '</div>'+
       '</div>'+
       '<div style="text-align:right">'+
