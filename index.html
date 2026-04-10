@@ -4425,6 +4425,23 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
   // ── [2] Yahoo (1분봉 차트 + 뉴스) ──
   var ydata = await fetchYahooData(ticker);
 
+  // ── [2-b] 종목 유효성 검증 ──
+  // prevClose나 KIS 데이터 없으면 존재하지 않는 종목
+  var isValidTicker = !!(ydata.prevClose || ydata.price || kisPrice);
+  if(!isValidTicker){
+    analyzeEl.innerHTML = '';
+    resultEl.innerHTML =
+      '<div style="margin:4px 0 10px;padding:20px 16px;background:var(--bg1);border:1px solid var(--b);border-radius:16px;text-align:center">'+
+        '<div style="font-size:28px;margin-bottom:10px">🔍</div>'+
+        '<div style="font-family:var(--mono);font-size:14px;color:var(--t);margin-bottom:8px">종목을 찾을 수 없음</div>'+
+        '<div style="font-size:12px;color:var(--t2);line-height:1.8">'+
+          '<span style="font-family:var(--mono);color:var(--a)">'+ticker+'</span> 는 유효한 종목코드가 아닙니다<br>'+
+          '예: <span style="font-family:var(--mono);color:var(--t3)">005930.KS · 035720.KQ · 삼성전자</span>'+
+        '</div>'+
+      '</div>';
+    return;
+  }
+
   // ── [3] KIS 데이터로 Yahoo 기본값 덮어쓰기 (더 정확한 값 사용) ──
   if(kisPrice){
     ydata.price          = kisPrice.price        || ydata.price;
