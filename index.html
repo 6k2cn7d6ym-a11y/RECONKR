@@ -257,7 +257,14 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
 .ntfy-input::placeholder{color:var(--t3)}
 .test-btn{background:var(--bl);color:#000;border:none;border-radius:10px;padding:10px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap}
 
-/* ─── 빈 상태 ─── */
+/* ─── 국면 변경 stale 배너 ─── */
+.stale-banner{margin:0 16px 8px;padding:10px 14px;border-radius:10px;display:flex;align-items:center;justify-content:space-between;gap:10px;animation:slideIn .25s ease}
+.stale-banner.orb-to-early{background:rgba(0,240,122,.08);border:1px solid rgba(0,240,122,.25)}
+.stale-banner.pre-to-orb{background:rgba(255,106,0,.08);border:1px solid rgba(255,106,0,.25)}
+.stale-banner.phase-change{background:rgba(255,58,140,.07);border:1px solid rgba(255,58,140,.20)}
+.stale-msg{font-family:var(--mono);font-size:11px;flex:1;line-height:1.5}
+.stale-rescan{font-family:var(--mono);font-size:11px;font-weight:700;padding:6px 12px;border-radius:8px;border:none;cursor:pointer;flex-shrink:0}
+
 .empty-state{text-align:center;padding:50px 20px;color:var(--t3);font-size:13px;line-height:2}
 .es-icon{font-size:32px;margin-bottom:12px;opacity:.4}
 
@@ -438,11 +445,12 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
     <div class="search-box momo-focus">
       <span class="s-prefix" style="color:var(--a)">₩</span>
       <input class="s-input" id="momoInput" placeholder="종목코드 또는 종목명 검색" maxlength="60" autocomplete="off" autocorrect="off" spellcheck="false"
-        oninput="onTickerInput(this,'momo')" onblur="hideSearchDrop('momoInput')" onfocus="onTickerInput(this,'momo')">
+        oninput="onTickerInput(this,'momo')" onblur="hideSearchDrop('momoInput')">
       <button class="scan-btn momo-btn" id="momoScanBtn" onclick="runModeScan('momo')">분석</button>
     </div>
   </div>
   <div id="momoAnalyzeArea"></div>
+  <div id="momoStaleBanner" style="display:none"></div>
   <div class="cards-area"><div id="momoOpenArea"></div></div>
   <div class="cards-area"><div id="momoResultArea"></div></div>
 </div>
@@ -588,11 +596,12 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
     <div class="search-box swing-focus">
       <span class="s-prefix" style="color:var(--bl)">₩</span>
       <input class="s-input" id="swingInput" placeholder="종목코드 또는 종목명 검색" maxlength="60" autocomplete="off" autocorrect="off" spellcheck="false"
-        oninput="onTickerInput(this,'swing')" onblur="hideSearchDrop('swingInput')" onfocus="onTickerInput(this,'swing')">
+        oninput="onTickerInput(this,'swing')" onblur="hideSearchDrop('swingInput')">
       <button class="scan-btn swing-btn" id="swingScanBtn" onclick="runModeScan('swing')">분석</button>
     </div>
   </div>
   <div id="swingAnalyzeArea"></div>
+  <div id="swingStaleBanner" style="display:none"></div>
   <div class="cards-area"><div id="swingOpenArea"></div></div>
   <div class="cards-area"><div id="swingResultArea"></div></div>
 </div>
@@ -645,11 +654,12 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
     <div class="search-box core-focus">
       <span class="s-prefix" style="color:var(--pu)">₩</span>
       <input class="s-input" id="coreInput" placeholder="종목코드 또는 종목명 검색" maxlength="60" autocomplete="off" autocorrect="off" spellcheck="false"
-        oninput="onTickerInput(this,'core')" onblur="hideSearchDrop('coreInput')" onfocus="onTickerInput(this,'core')">
+        oninput="onTickerInput(this,'core')" onblur="hideSearchDrop('coreInput')">
       <button class="scan-btn core-btn" id="coreScanBtn" onclick="runModeScan('core')">분석</button>
     </div>
   </div>
   <div id="coreAnalyzeArea"></div>
+  <div id="coreStaleBanner" style="display:none"></div>
   <div class="cards-area"><div id="coreOpenArea"></div></div>
   <div class="cards-area"><div id="coreResultArea"></div></div>
 </div>
@@ -715,6 +725,7 @@ var G = {
   momoHistory: JSON.parse(localStorage.getItem('momoHistory')||'[]'),
   swingHistory: JSON.parse(localStorage.getItem('swingHistory')||'[]'),
   coreHistory:  JSON.parse(localStorage.getItem('coreHistory')||'[]'),
+  lastAnalyzed: { momo:null, swing:null, core:null },
 };
 
 var G_journal = JSON.parse(localStorage.getItem('reconJournal')||'[]');
@@ -915,11 +926,16 @@ function updateClock(){
   // ── marketPhase (MOMO 시간대) 실시간 동기화 — 한국 기준 ──
   var newMomoPhase;
   if(day===0||day===6||hm<830||hm>=1530){ newMomoPhase='CLOSED'; }
-  else if(hm>=830  && hm<900)            { newMomoPhase='PRE'; }     // 동시호가 준비
-  else if(hm>=900  && hm<905)            { newMomoPhase='ORB'; }     // 개장 직후 ORB
-  else if(hm>=905  && hm<1030)           { newMomoPhase='EARLY'; }   // 골든윈도우
-  else if(hm>=1030 && hm<1300)           { newMomoPhase='PRIME'; }   // 2차 모멘텀
-  else                                    { newMomoPhase='LATE'; }    // 오후 페이드
+  else if(hm>=830  && hm<900)            { newMomoPhase='PRE'; }
+  else if(hm>=900  && hm<905)            { newMomoPhase='ORB'; }
+  else if(hm>=905  && hm<1030)           { newMomoPhase='EARLY'; }
+  else if(hm>=1030 && hm<1300)           { newMomoPhase='PRIME'; }
+  else                                    { newMomoPhase='LATE'; }
+
+  // ── 국면 변경 감지 → stale 배너 표시 ──
+  if(G.marketPhase && G.marketPhase !== newMomoPhase){
+    checkStaleBanners(G.marketPhase, newMomoPhase);
+  }
   G.marketPhase = newMomoPhase;
 
   // ── KOSPI 방향 주기적 갱신 (장 중 5분마다) ──
@@ -2039,18 +2055,18 @@ async function fetchYahooData(ticker){
       if(result.volume && result.avgVolume && result.avgVolume > 0)
         result.rvol = result.volume / result.avgVolume;
 
-      // ── RVol 시간대 보정 (장중에만) ── 한국 시장 기준
-      // 9:00~9:30(20%) / 9:30~11:00(20%) / 11:00~13:00(20%) / 13:00~14:30(20%) / 14:30~15:30(20%)
+      // ── RVol 시간대 보정 (장중에만) ── 한국 시장 기준 실측 분포
+      // 9:00~9:30(35%) / 9:30~11:00(25%) / 11:00~13:00(20%) / 13:00~14:30(12%) / 14:30~15:30(8%)
       if(IS_OPEN && result.volume && result.avgVolume > 0){
         var kstNowR = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Seoul'}));
         var hmR = kstNowR.getHours()*100 + kstNowR.getMinutes();
         var elapsedFrac;
         if     (hmR >= 1530) elapsedFrac = 1.00;
-        else if(hmR >= 1430) elapsedFrac = 0.80 + (hmR-1430)/60 * 0.20;
-        else if(hmR >= 1300) elapsedFrac = 0.60 + (hmR-1300)/90 * 0.20;
-        else if(hmR >= 1100) elapsedFrac = 0.40 + (hmR-1100)/120* 0.20;
-        else if(hmR >= 930)  elapsedFrac = 0.20 + (hmR-930) /90 * 0.20;
-        else if(hmR >= 900)  elapsedFrac = 0.00 + (hmR-900) /30 * 0.20;
+        else if(hmR >= 1430) elapsedFrac = 0.92 + (hmR-1430)/60 * 0.08;
+        else if(hmR >= 1300) elapsedFrac = 0.80 + (hmR-1300)/90 * 0.12;
+        else if(hmR >= 1100) elapsedFrac = 0.60 + (hmR-1100)/120* 0.20;
+        else if(hmR >= 930)  elapsedFrac = 0.35 + (hmR-930) /90 * 0.25;
+        else if(hmR >= 900)  elapsedFrac = 0.00 + (hmR-900) /30 * 0.35;
         else                  elapsedFrac = 0.01;
 
         if(elapsedFrac > 0.05){
@@ -3618,16 +3634,20 @@ function getWhaleStage(r){
   }
 
   // ── NO_NEWS_SURGE: 공시없는 거래대금 폭발 ──
-  // 공시없음 + 거래대금 3배+ → 세력 초입 or 배포 판단 불가 → WATCH만 허용
-  if(tv >= 3 && news === 'none' && isoK <= 10)
+  // DART 공시 or 신뢰 뉴스가 있으면 EARLY_MOVE로 격상 가능 → 여기서 걸리지 않음
+  var hasDartOrNews = (r.dartDisclosures && r.dartDisclosures.length > 0)
+                   || r.dartQuality === 'factual'
+                   || (r.newsText && r.newsText.length > 10 && !r.newsText.includes('DART공시 없음'));
+  if(tv >= 3 && news === 'none' && isoK <= 10 && !hasDartOrNews)
     return { stage:'NO_NEWS_SURGE', action:'WATCH',
       label:'🔍 공시없는 거래 폭발 — 확인 전 관망',
       warnings:[
-        '공시 미확인 — 진입 금지, 공시 확인 후 재스캔',
+        'DART/뉴스 미확인 — 진입 금지, 공시 확인 후 재스캔',
         '전체 포지션 진입 불가 (WATCH 전용)',
         '회전율 '+turn.toFixed(1)+'% — '+(turn>15?'배포 의심':'매집 가능성'),
       ],
       cautions:[
+        'DART API 연결 시 자동 공시 확인 가능 (설정에서 입력)',
         '공시 발표 즉시 재스캔 → BREAKOUT or BLOCK 판단',
         '거래량 소멸 시 관심 제거',
       ] };
@@ -3895,8 +3915,8 @@ function momoEngine(ydata){
     var triggerOk = true;
     var triggerFail = [];
 
-    // T1. VWAP 위 (데이터 있을 때만)
-    if(ydata.vwap && ydata.price && ydata.price < ydata.vwap * 0.98){
+    // T1. VWAP 위 — PRE 시간대 제외 (동시호가 VWAP은 의미 없음)
+    if(ph !== 'PRE' && ydata.vwap && ydata.price && ydata.price < ydata.vwap * 0.98){
       triggerOk = false; triggerFail.push('VWAP 아래');
     }
     // T2. ORB 형성 완료 (ORB 시간대 진입 금지)
@@ -3933,6 +3953,15 @@ function momoEngine(ydata){
     else                                          r.position_size='quarter(25%)';
     // KOSPI 약세 시 추가 캡
     if(_kospiHalfCap && r.position_size==='half(50%)') r.position_size='quarter(25%)';
+
+    // ── 슬리피지 HIGH → WATCH 다운그레이드 ──
+    // 슬리피지 3%+ = 목표 R:R 구조 무너짐 → 진입 보류
+    if(ydata.slippage_risk === 'high'){
+      r.action       = 'WATCH';
+      r.position_size= 'none';
+      r.warnings.push('[슬리피지] '+ydata.slippage_pct+'% — R:R 손상, 지정가 확인 후 진입');
+      return r; // 손절/RR 계산 생략
+    }
 
     // ── 6. 구조적 손절 계산 (ENTER 확정 후에만) ──
     var structStop = calcMomoStop(r.entry, ydata, ph);
@@ -4582,6 +4611,9 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
     }
 
     saveToHistory(mode, result);
+    // 국면 변경 감지용 스냅샷
+    G.lastAnalyzed[mode] = { ticker: ticker, phase: G.marketPhase, ts: Date.now() };
+    hideStaleBanner(mode);
     analyzeEl.innerHTML = '';
     resultEl.innerHTML = openTrade ? holdCardHTML(result, mode, openTrade) : cardHTML(result, mode);
 
@@ -6276,6 +6308,78 @@ function showToast(msg){
 }
 
 // ═══════════════════════════════════════
+// 국면 변경 Stale 배너
+// ═══════════════════════════════════════
+var PHASE_LABELS = {
+  'PRE':   '동시호가',
+  'ORB':   'ORB 형성',
+  'EARLY': '골든윈도우',
+  'PRIME': '2차 모멘텀',
+  'LATE':  '오후 페이드',
+  'CLOSED':'장 마감'
+};
+
+function checkStaleBanners(oldPhase, newPhase){
+  ['momo','swing','core'].forEach(function(mode){
+    var snap = G.lastAnalyzed[mode];
+    if(!snap) return;
+    // 분석 후 5분 이상 지났고 국면이 바뀐 경우에만 표시
+    var elapsed = (Date.now() - snap.ts) / 1000;
+    if(elapsed < 30) return; // 방금 분석한 건 무시
+    showStaleBanner(mode, oldPhase, newPhase, snap.ticker);
+  });
+}
+
+function showStaleBanner(mode, oldPhase, newPhase, ticker){
+  var el = document.getElementById(mode+'StaleBanner');
+  if(!el) return;
+
+  // 국면별 중요도 결정
+  var isCritical = (oldPhase==='ORB' && newPhase==='EARLY') ||
+                   (oldPhase==='PRE' && newPhase==='ORB')   ||
+                   (oldPhase==='EARLY' && newPhase==='PRIME');
+
+  var cssClass = oldPhase==='ORB'&&newPhase==='EARLY' ? 'orb-to-early'
+               : oldPhase==='PRE'&&newPhase==='ORB'   ? 'pre-to-orb'
+               : 'phase-change';
+
+  var msgColor = cssClass==='orb-to-early' ? 'var(--g)'
+               : cssClass==='pre-to-orb'   ? 'var(--gold)'
+               : 'var(--a)';
+
+  var btnBg = cssClass==='orb-to-early' ? 'rgba(0,240,122,.15);color:var(--g)'
+            : cssClass==='pre-to-orb'   ? 'rgba(255,106,0,.15);color:var(--gold)'
+            : 'rgba(255,58,140,.12);color:var(--a)';
+
+  var msg = cssClass==='orb-to-early'
+    ? '🟢 골든윈도우 진입 — '+ticker+' 재분석 권장'
+    : cssClass==='pre-to-orb'
+    ? '⚡ ORB 형성 중 — '+ticker+' 캔들 확정 후 재분석'
+    : '📍 국면 변경 '+PHASE_LABELS[oldPhase]+'→'+PHASE_LABELS[newPhase]+' — '+ticker+' 재분석';
+
+  el.className = 'stale-banner '+cssClass;
+  el.innerHTML =
+    '<span class="stale-msg" style="color:'+msgColor+'">'+msg+'</span>'+
+    '<button class="stale-rescan" style="background:'+btnBg+'" '+
+      'onclick="rescanStale(\''+mode+'\',\''+ticker+'\')">↻ 재분석</button>'+
+    '<button onclick="hideStaleBanner(\''+mode+'\')" '+
+      'style="background:none;border:none;color:var(--t3);font-size:16px;cursor:pointer;padding:0 2px;flex-shrink:0">×</button>';
+  el.style.display = '';
+}
+
+function hideStaleBanner(mode){
+  var el = document.getElementById(mode+'StaleBanner');
+  if(el) el.style.display = 'none';
+}
+
+function rescanStale(mode, ticker){
+  hideStaleBanner(mode);
+  var input = document.getElementById(mode+'Input');
+  if(input) input.value = ticker;
+  runModeScan(mode);
+}
+
+// ═══════════════════════════════════════
 // 종목 검색 자동완성
 // ═══════════════════════════════════════
 var _searchDebounce = null;
@@ -6285,25 +6389,41 @@ function onTickerInput(el, mode){
   var q = el.value.trim();
   // 한글 포함 아닌 경우 대문자 변환
   if(!/[ㄱ-ㅎㅏ-ㅣ가-힣]/.test(q)) el.value = q.toUpperCase(), q = el.value.trim();
-  if(!q){ hideSearchDrop(el.id); return; }
+  if(q.length < 2){ hideSearchDrop(el.id); return; } // 2글자 미만 무시
   clearTimeout(_searchDebounce);
-  _searchDebounce = setTimeout(function(){ doTickerSearch(el.id, q, mode); }, 220);
+  _searchDebounce = setTimeout(function(){ doTickerSearch(el.id, q, mode); }, 250);
 }
 
 async function doTickerSearch(inputId, q, mode){
-  // 캐시 히트
   if(_searchCache[q]){ renderSearchDrop(inputId, mode, _searchCache[q]); return; }
   try{
+    // lang=en-US → typeDisp/exchDisp 영문으로 일관되게 수신
     var url = 'https://query1.finance.yahoo.com/v1/finance/search?q='+encodeURIComponent(q)+
-              '&newsCount=0&quotesCount=8&region=KR&lang=ko-KR';
+              '&newsCount=0&quotesCount=10&region=KR&lang=en-US';
     var data = await fetchWithProxy(url);
     var quotes = (data?.quotes||[]).filter(function(r){
-      if(r.typeDisp !== 'Equity') return false;
-      var ex = (r.exchDisp||'').toUpperCase();
+      var qt = (r.quoteType||'').toUpperCase();
+      if(qt !== 'EQUITY') return false;
       var sym = r.symbol||'';
-      return ex==='KOSPI'||ex==='KOSDAQ'||ex==='KSC'||ex==='KOE'||ex==='KSQ'||ex==='KOQ'||
-             sym.endsWith('.KS')||sym.endsWith('.KQ');
+      return sym.endsWith('.KS') || sym.endsWith('.KQ');
     }).slice(0,6);
+
+    // ── KIS 연결 시 실시간 가격 병렬 수집 ──
+    if(quotes.length && KIS.appKey && KIS.appSecret){
+      var priceResults = await Promise.allSettled(
+        quotes.map(function(r){
+          var code = r.symbol.replace(/\.(KS|KQ)$/i,'');
+          return fetchKisPrice(code);
+        })
+      );
+      priceResults.forEach(function(res, i){
+        if(res.status === 'fulfilled' && res.value){
+          quotes[i]._kisPrice  = res.value.price;
+          quotes[i]._kisChg    = res.value.chgPct;
+        }
+      });
+    }
+
     _searchCache[q] = quotes;
     renderSearchDrop(inputId, mode, quotes);
   }catch(e){}
@@ -6318,7 +6438,6 @@ function renderSearchDrop(inputId, mode, quotes){
     drop = document.createElement('div');
     drop.id = dropId;
     drop.className = 'search-drop';
-    // search-area div 안에 삽입
     var area = input.closest('.search-area');
     if(area) area.appendChild(drop);
     else     input.parentElement.after(drop);
@@ -6326,12 +6445,21 @@ function renderSearchDrop(inputId, mode, quotes){
   if(!quotes||!quotes.length){ drop.style.display='none'; return; }
   var modeColor = mode==='momo'?'var(--a)':mode==='swing'?'var(--bl)':'var(--pu)';
   drop.innerHTML = quotes.map(function(r){
-    var name = (r.longname||r.shortname||r.symbol).substring(0,22);
-    var exch = r.exchDisp||'';
+    var name  = (r.longname||r.shortname||r.symbol).substring(0,18);
+    var exch  = r.symbol.endsWith('.KQ') ? '코스닥' : '코스피';
+    var priceHtml = '';
+    if(r._kisPrice){
+      var chg    = r._kisChg || 0;
+      var chgCol = chg > 0 ? 'var(--g)' : chg < 0 ? 'var(--r)' : 'var(--t2)';
+      var chgStr = (chg >= 0 ? '+' : '') + chg.toFixed(1) + '%';
+      priceHtml  = '<span style="font-family:var(--mono);font-size:11px;color:var(--t);margin-left:auto;flex-shrink:0">'
+                 + '₩'+Math.round(r._kisPrice).toLocaleString()
+                 + ' <span style="color:'+chgCol+'">'+chgStr+'</span></span>';
+    }
     return '<div class="search-drop-item" onmousedown="selectTicker(\''+inputId+'\',\''+r.symbol+'\',\''+mode+'\')">'+
       '<span class="sd-ticker" style="color:'+modeColor+'">'+r.symbol+'</span>'+
       '<span class="sd-name">'+name+'</span>'+
-      '<span class="sd-exch">'+exch+'</span>'+
+      (priceHtml || '<span class="sd-exch">'+exch+'</span>')+
     '</div>';
   }).join('');
   drop.style.display='block';
