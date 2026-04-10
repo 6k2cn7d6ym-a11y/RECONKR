@@ -102,8 +102,17 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
 .mover-chg{font-family:var(--mono);font-size:11px;margin-top:1px}
 
 /* ─── 검색 영역 (각 모드) ─── */
-.search-area{padding:14px 16px 8px}
+.search-area{padding:14px 16px 8px;position:relative}
 .search-box{display:flex;gap:8px;align-items:center;background:var(--bg2);border:1.5px solid var(--b);border-radius:14px;padding:0 14px;height:50px;transition:border-color .2s}
+
+/* ─── 종목 검색 드롭다운 ─── */
+.search-drop{position:absolute;left:16px;right:16px;top:calc(100% - 6px);background:var(--bg1);border:1px solid var(--b2);border-radius:12px;overflow:hidden;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,.5);animation:slideIn .15s ease}
+.search-drop-item{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--b);transition:background .1s}
+.search-drop-item:last-child{border-bottom:none}
+.search-drop-item:active,.search-drop-item:hover{background:var(--bg2)}
+.sd-ticker{font-family:var(--mono);font-size:13px;color:var(--t);letter-spacing:.06em;min-width:90px;flex-shrink:0}
+.sd-name{flex:1;font-size:11px;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sd-exch{font-family:var(--mono);font-size:9px;color:var(--t3);flex-shrink:0;padding:2px 6px;border:1px solid var(--b);border-radius:4px}
 .search-box:focus-within{border-color:rgba(34,201,122,.4)}
 .search-box.momo-focus:focus-within{border-color:rgba(255,58,140,.5)}
 .search-box.swing-focus:focus-within{border-color:rgba(43,159,255,.5)}
@@ -389,16 +398,17 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="3 9 21 9"/><polyline points="9 21 9 9"/></svg>네이버 시세
     </a>
   </div>
-  <div style="height:16px"></div>
-</div>
 
-<!-- DART 공시 피드 (대시보드) -->
-<div id="dartFeedSection" style="display:none;margin:-8px 16px 10px">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-    <div style="font-family:var(--mono);font-size:9px;color:var(--t2);letter-spacing:.1em">▸ DART 최신 공시 (주요사항)</div>
-    <button onclick="document.getElementById('dartFeedSection').style.display='none'" style="font-family:var(--mono);font-size:10px;color:var(--t3);background:none;border:none;cursor:pointer">닫기</button>
+  <!-- DART 공시 피드 (대시보드 — page-recon 안에서만 표시) -->
+  <div id="dartFeedSection" style="display:none;margin:-8px 16px 10px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <div style="font-family:var(--mono);font-size:9px;color:var(--t2);letter-spacing:.1em">▸ DART 최신 공시 (주요사항)</div>
+      <button onclick="document.getElementById('dartFeedSection').style.display='none'" style="font-family:var(--mono);font-size:10px;color:var(--t3);background:none;border:none;cursor:pointer">닫기</button>
+    </div>
+    <div id="dartFeedList"></div>
   </div>
-  <div id="dartFeedList"></div>
+
+  <div style="height:16px"></div>
 </div>
 
 <!-- ══════════════════════════════════════ -->
@@ -423,15 +433,12 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
     </div>
     <div class="sc-progress"><div class="sc-progress-bar" id="scProgressBarMomo" style="background:linear-gradient(90deg,var(--a),rgba(255,58,140,.5))"></div></div>
     <div id="scResultAreaMomo"><div class="sc-status">스캔하면 MOMO 후보 종목을 찾아드립니다</div></div>
-    <div style="display:flex;align-items:center;gap:8px;padding:6px 0 2px;border-top:1px solid var(--b);margin-top:6px">
-      <span style="font-family:var(--mono);font-size:9px;color:var(--t3)">공시필터</span>
-      <button id="dartFilterMomo" onclick="toggleDartFilter('momo')" style="font-family:var(--mono);font-size:9px;padding:2px 8px;border-radius:5px;border:1px solid var(--b);background:none;color:var(--t3);cursor:pointer">전체</button>
-    </div>
   </div>
   <div class="search-area">
     <div class="search-box momo-focus">
       <span class="s-prefix" style="color:var(--a)">₩</span>
-      <input class="s-input" id="momoInput" placeholder="종목코드 입력 (005930, 035720.KQ...)" maxlength="60" autocomplete="off" autocorrect="off" spellcheck="false">
+      <input class="s-input" id="momoInput" placeholder="종목코드 또는 종목명 검색" maxlength="60" autocomplete="off" autocorrect="off" spellcheck="false"
+        oninput="onTickerInput(this,'momo')" onblur="hideSearchDrop('momoInput')" onfocus="onTickerInput(this,'momo')">
       <button class="scan-btn momo-btn" id="momoScanBtn" onclick="runModeScan('momo')">분석</button>
     </div>
   </div>
@@ -545,7 +552,7 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
   <div class="sg-row"><div><div class="sg-label">BLOCK 알림</div></div><button class="toggle on" id="tgBlock" onclick="this.classList.toggle('on')"></button></div>
 
   <div class="sg-title">앱</div>
-  <div class="sg-row"><div class="sg-label">RECON KR v2.3</div><div style="font-family:var(--mono);font-size:11px;color:var(--t2)">SWING 엔진 v2 · 4레이어 · ENTER A/B</div></div>
+  <div class="sg-row"><div class="sg-label">RECON KR v3.2</div><div style="font-family:var(--mono);font-size:11px;color:var(--t2)">SWING 엔진 v2 · 4레이어 · ENTER A/B</div></div>
   <div class="sg-row" style="flex-direction:column;align-items:flex-start;gap:6px">
     <div class="sg-label">API 사용량</div>
     <div id="usageBar" style="font-family:var(--mono);font-size:12px;color:var(--bl)">-</div>
@@ -576,15 +583,12 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
     </div>
     <div class="sc-progress"><div class="sc-progress-bar" id="scProgressBarSwing" style="background:linear-gradient(90deg,var(--bl),rgba(0,240,122,.6))"></div></div>
     <div id="scResultAreaSwing"><div class="sc-status">스캔하면 SWING 후보 종목을 찾아드립니다</div></div>
-    <div style="display:flex;align-items:center;gap:8px;padding:6px 0 2px;border-top:1px solid var(--b);margin-top:6px">
-      <span style="font-family:var(--mono);font-size:9px;color:var(--t3)">공시필터</span>
-      <button id="dartFilterSwing" onclick="toggleDartFilter('swing')" style="font-family:var(--mono);font-size:9px;padding:2px 8px;border-radius:5px;border:1px solid var(--b);background:none;color:var(--t3);cursor:pointer">전체</button>
-    </div>
   </div>
   <div class="search-area">
     <div class="search-box swing-focus">
       <span class="s-prefix" style="color:var(--bl)">₩</span>
-      <input class="s-input" id="swingInput" placeholder="종목코드 입력" maxlength="60" autocomplete="off" autocorrect="off" spellcheck="false">
+      <input class="s-input" id="swingInput" placeholder="종목코드 또는 종목명 검색" maxlength="60" autocomplete="off" autocorrect="off" spellcheck="false"
+        oninput="onTickerInput(this,'swing')" onblur="hideSearchDrop('swingInput')" onfocus="onTickerInput(this,'swing')">
       <button class="scan-btn swing-btn" id="swingScanBtn" onclick="runModeScan('swing')">분석</button>
     </div>
   </div>
@@ -640,7 +644,8 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
   <div class="search-area">
     <div class="search-box core-focus">
       <span class="s-prefix" style="color:var(--pu)">₩</span>
-      <input class="s-input" id="coreInput" placeholder="종목코드 입력" maxlength="60" autocomplete="off" autocorrect="off" spellcheck="false">
+      <input class="s-input" id="coreInput" placeholder="종목코드 또는 종목명 검색" maxlength="60" autocomplete="off" autocorrect="off" spellcheck="false"
+        oninput="onTickerInput(this,'core')" onblur="hideSearchDrop('coreInput')" onfocus="onTickerInput(this,'core')">
       <button class="scan-btn core-btn" id="coreScanBtn" onclick="runModeScan('core')">분석</button>
     </div>
   </div>
@@ -714,7 +719,6 @@ var G = {
 
 var G_journal = JSON.parse(localStorage.getItem('reconJournal')||'[]');
 var G_jFilters = { momo:'today', swing:'today', core:'today' };
-var G_cardSnapshots = {}; // ticker별 최신 분석 스냅샷 (거래 기록 시 첨부용)
 
 // 초기값 로드
 if(G.apiKey){ document.getElementById('apiKeyInput').value = G.apiKey; }
@@ -884,7 +888,6 @@ function updateKeyStatus(){
 // 시계 + 장 구분
 // ═══════════════════════════════════════
 var _lastSpyRefresh = 0;
-var _lastPhaseForRefresh = null;
 
 function updateClock(){
   // KST = UTC+9
@@ -950,6 +953,22 @@ async function fetchWithProxy(url){
 // 실전투자: openapi.koreainvestment.com:9443
 // Worker 경유: WORKER_URL/kis/...
 // ═══════════════════════════════════════════════════════════════
+
+// ── KIS 상태 ──
+var KIS = {
+  appKey:    localStorage.getItem('kisAppKey')    || '',
+  appSecret: localStorage.getItem('kisAppSecret') || '',
+  token:     null,
+  tokenExp:  0,
+  connected: false,
+};
+
+// ── 스크리너 상태 ──
+G.screenerMode    = 'momo';
+G.screenerRunning = false;
+G.autoScanTimer   = null;
+G.screenerResults = { momo:[], swing:[], core:[] };
+G.screenerLastRun = { momo:null, swing:null, core:null };
 
 // ── KIS API 호출 헬퍼 ──
 async function kisGet(path, params, headers){
@@ -1258,20 +1277,6 @@ async function loadFearGreed(){
 // ═══════════════════════════════════════════════════════════════
 // ███  KIS / SCREENER ENGINE  ███
 // ═══════════════════════════════════════════════════════════════
-
-// ── KIS 상태 ──
-var KIS = {
-  appKey:    localStorage.getItem('kisAppKey')    || '',
-  appSecret: localStorage.getItem('kisAppSecret') || '',
-  token:     null,
-  tokenExp:  0,
-  connected: false,
-};
-G.screenerMode    = 'momo';
-G.screenerRunning = false;
-G.autoScanTimer   = null;
-G.screenerResults = { momo:[], swing:[], core:[] };
-G.screenerLastRun = { momo:null, swing:null, core:null };
 
 // ── KIS 저장 ──
 function saveKis(){
@@ -4577,28 +4582,6 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
     }
 
     saveToHistory(mode, result);
-    // 거래 기록용 스냅샷 저장 (진입 시 카드 상황 보존)
-    G_cardSnapshots[mode+'_'+ticker] = {
-      score:      result.score       || null,
-      action:     result.action      || null,
-      entry:      result.entry       || null,
-      stop:       result.stop        || null,
-      target1:    result.target1     || null,
-      target2:    result.target2     || null,
-      rr:         result.rr          || null,
-      summary:    result.summary     || result.action_reason || null,
-      news:       (result.news||'').substring(0,120) || null,
-      news_quality: result.news_quality || null,
-      signals:    (result.signals||[]).slice(0,3),
-      warnings:   (result.warnings||[]).slice(0,3),
-      marketPhase: result._marketPhase || G.marketPhase || null,
-      spyChg:     result._spyChg     ?? (G.spyIntraday?.change_pct ?? null),
-      conditions_met: result.conditions_met ?? null,
-      slippage_pct:   result.slippage_pct   || null,
-      float_turns:    result.float_turns    || null,
-      breakout_wick_strength: result.breakout_wick_strength || null,
-      _ts: Date.now()
-    };
     analyzeEl.innerHTML = '';
     resultEl.innerHTML = openTrade ? holdCardHTML(result, mode, openTrade) : cardHTML(result, mode);
 
@@ -5148,7 +5131,7 @@ function cardHTML(r, mode){
           '<div style="background:rgba(255,45,78,.06);border:1px solid rgba(255,45,78,.2);border-radius:8px;padding:8px 10px">'+
             '<div style="font-size:9px;color:var(--r);margin-bottom:4px">🔴 이탈 시</div>'+
             '<div style="font-family:var(--mono);font-size:13px;color:var(--r)">→ '+dnNext+'</div>'+
-            '<div style="font-size:10px;color:var(--t2);margin-top:2px">$'+sLow+' 이탈→손절</div>'+
+            '<div style="font-size:10px;color:var(--t2);margin-top:2px">₩'+Math.round(parseFloat(sLow)).toLocaleString()+' 이탈→손절</div>'+
           '</div>'+
         '</div>'+
         '</div>';
@@ -5173,7 +5156,7 @@ function cardHTML(r, mode){
         return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--b)">'+
           '<span style="font-size:13px">'+(done?'✅':'⬜')+'</span>'+
           '<span style="font-family:var(--mono);font-size:10px;color:'+(done?'var(--g)':lv.color)+'">'+lv.label+'</span>'+
-          '<span style="font-family:var(--mono);font-size:11px;color:'+(done?'var(--g)':lv.color)+';margin-left:auto">$'+lv.price.toFixed(2)+'</span>'+
+          '<span style="font-family:var(--mono);font-size:11px;color:'+(done?'var(--g)':lv.color)+';margin-left:auto">₩'+Math.round(lv.price).toLocaleString()+'</span>'+
           '<span style="font-size:9px;color:'+(done?'var(--g)':'var(--t3)')+';">'+(done?'✓':'대기')+'</span>'+
         '</div>';
       }).join('');
@@ -5201,10 +5184,10 @@ function cardHTML(r, mode){
       '<div style="background:rgba(255,106,0,.08);border:1px solid rgba(255,106,0,.25);border-radius:10px;padding:10px 12px;margin-bottom:10px">'+
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'+
           '<span style="font-family:var(--mono);font-size:10px;color:var(--a);font-weight:700">📌 보유 중</span>'+
-          '<span style="font-family:var(--mono);font-size:13px;color:'+pnlColor+'">'+(parseFloat(pnlP)>=0?'+':'')+pnlP+'%'+(pnlD?' ($'+(parseFloat(pnlD)>=0?'+':'')+pnlD+')':'')+'</span>'+
+          '<span style="font-family:var(--mono);font-size:13px;color:'+pnlColor+'">'+(parseFloat(pnlP)>=0?'+':'')+pnlP+'%'+(pnlD?' (₩'+(parseFloat(pnlD)>=0?'+':'')+Math.round(parseFloat(pnlD)).toLocaleString()+')':'')+'</span>'+
         '</div>'+
         '<div style="display:flex;gap:16px;font-family:var(--mono);font-size:11px;color:var(--t2)">'+
-          '<span>진입 <span style="color:var(--t)">$'+ot.entry+'</span></span>'+
+          '<span>진입 <span style="color:var(--t)">₩'+Math.round(ot.entry).toLocaleString()+'</span></span>'+
           (ot.shares?'<span>'+ot.shares+'주</span>':'')+
           '<span>'+ot.date+'</span>'+
         '</div>'+
@@ -5544,7 +5527,7 @@ function holdCardHTML(r, mode, trade){
 
     // 버튼
     '<div style="display:flex;gap:6px">'+
-      '<button onclick="markTradeClosed('+trade.id+','+curP.toFixed(2)+')" '+
+      '<button onclick="markTradeClosed('+trade.id+')" '+
         'style="flex:2;background:rgba(255,45,78,.1);border:1px solid rgba(255,45,78,.3);border-radius:8px;padding:9px;font-family:var(--mono);font-size:11px;color:var(--r);cursor:pointer">+ 분할 매도</button>'+
       '<button onclick="rerunCard(\''+r.ticker+'\',\''+mode+'\')" '+
         'style="flex:1;background:none;border:1px solid var(--b);border-radius:8px;padding:9px;font-family:var(--mono);font-size:11px;color:var(--t2);cursor:pointer">↻ 재분석</button>'+
@@ -5716,7 +5699,7 @@ function confirmPartialSell(tradeId){
   renderOpenPositions(G.currentMode);
 }
 
-function markTradeClosed(tradeId, curPrice){ openPartialSell(tradeId); }
+function markTradeClosed(tradeId){ openPartialSell(tradeId); }
 
 // 분할 매수 모달
 function openPartialBuy(tradeId){
@@ -6293,13 +6276,92 @@ function showToast(msg){
 }
 
 // ═══════════════════════════════════════
+// 종목 검색 자동완성
+// ═══════════════════════════════════════
+var _searchDebounce = null;
+var _searchCache    = {};
+
+function onTickerInput(el, mode){
+  var q = el.value.trim();
+  // 한글 포함 아닌 경우 대문자 변환
+  if(!/[ㄱ-ㅎㅏ-ㅣ가-힣]/.test(q)) el.value = q.toUpperCase(), q = el.value.trim();
+  if(!q){ hideSearchDrop(el.id); return; }
+  clearTimeout(_searchDebounce);
+  _searchDebounce = setTimeout(function(){ doTickerSearch(el.id, q, mode); }, 220);
+}
+
+async function doTickerSearch(inputId, q, mode){
+  // 캐시 히트
+  if(_searchCache[q]){ renderSearchDrop(inputId, mode, _searchCache[q]); return; }
+  try{
+    var url = 'https://query1.finance.yahoo.com/v1/finance/search?q='+encodeURIComponent(q)+
+              '&newsCount=0&quotesCount=8&region=KR&lang=ko-KR';
+    var data = await fetchWithProxy(url);
+    var quotes = (data?.quotes||[]).filter(function(r){
+      if(r.typeDisp !== 'Equity') return false;
+      var ex = (r.exchDisp||'').toUpperCase();
+      var sym = r.symbol||'';
+      return ex==='KOSPI'||ex==='KOSDAQ'||ex==='KSC'||ex==='KOE'||ex==='KSQ'||ex==='KOQ'||
+             sym.endsWith('.KS')||sym.endsWith('.KQ');
+    }).slice(0,6);
+    _searchCache[q] = quotes;
+    renderSearchDrop(inputId, mode, quotes);
+  }catch(e){}
+}
+
+function renderSearchDrop(inputId, mode, quotes){
+  var input = document.getElementById(inputId);
+  if(!input) return;
+  var dropId = inputId+'_drop';
+  var drop = document.getElementById(dropId);
+  if(!drop){
+    drop = document.createElement('div');
+    drop.id = dropId;
+    drop.className = 'search-drop';
+    // search-area div 안에 삽입
+    var area = input.closest('.search-area');
+    if(area) area.appendChild(drop);
+    else     input.parentElement.after(drop);
+  }
+  if(!quotes||!quotes.length){ drop.style.display='none'; return; }
+  var modeColor = mode==='momo'?'var(--a)':mode==='swing'?'var(--bl)':'var(--pu)';
+  drop.innerHTML = quotes.map(function(r){
+    var name = (r.longname||r.shortname||r.symbol).substring(0,22);
+    var exch = r.exchDisp||'';
+    return '<div class="search-drop-item" onmousedown="selectTicker(\''+inputId+'\',\''+r.symbol+'\',\''+mode+'\')">'+
+      '<span class="sd-ticker" style="color:'+modeColor+'">'+r.symbol+'</span>'+
+      '<span class="sd-name">'+name+'</span>'+
+      '<span class="sd-exch">'+exch+'</span>'+
+    '</div>';
+  }).join('');
+  drop.style.display='block';
+}
+
+function selectTicker(inputId, symbol, mode){
+  var input = document.getElementById(inputId);
+  if(input) input.value = symbol;
+  hideSearchDrop(inputId);
+  runModeScan(mode);
+}
+
+function hideSearchDrop(inputId){
+  // 클릭 이벤트 처리 후 숨기기 (mousedown이 blur보다 먼저 발생)
+  setTimeout(function(){
+    var drop = document.getElementById(inputId+'_drop');
+    if(drop) drop.style.display='none';
+  }, 150);
+}
+
+// ═══════════════════════════════════════
 // 엔터키 바인딩
 // ═══════════════════════════════════════
 ['momo','swing','core'].forEach(function(mode){
   var el=document.getElementById(mode+'Input');
   if(!el) return;
-  el.addEventListener('keydown',function(e){ if(e.key==='Enter') runModeScan(mode); });
-  el.addEventListener('input',function(){ this.value=this.value.toUpperCase(); });
+  el.addEventListener('keydown',function(e){
+    if(e.key==='Enter'){ hideSearchDrop(el.id); runModeScan(mode); }
+    if(e.key==='Escape'){ hideSearchDrop(el.id); }
+  });
 });
 
 // ═══════════════════════════════════════
