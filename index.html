@@ -6544,7 +6544,6 @@ function onTickerInput(el, mode){
 async function doTickerSearch(inputId, q, mode){
   if(_searchCache[q]){ renderSearchDrop(inputId, mode, _searchCache[q]); return; }
   try{
-    // lang=en-US → typeDisp/exchDisp 영문으로 일관되게 수신
     var url = 'https://query1.finance.yahoo.com/v1/finance/search?q='+encodeURIComponent(q)+
               '&newsCount=0&quotesCount=10&region=KR&lang=en-US';
     var data = await fetchWithProxy(url);
@@ -6555,24 +6554,36 @@ async function doTickerSearch(inputId, q, mode){
       return sym.endsWith('.KS') || sym.endsWith('.KQ');
     }).slice(0,6);
 
-    // ── KIS 연결 시 실시간 가격 병렬 수집 ──
+    // ── Yahoo 결과 즉시 표시 ──
+    _searchCache[q] = quotes;
+    renderSearchDrop(inputId, mode, quotes);
+
+    // ── KIS 연결 시 가격을 백그라운드에서 수집 후 업데이트 ──
     if(quotes.length && KIS.appKey && KIS.appSecret){
-      var priceResults = await Promise.allSettled(
+      Promise.allSettled(
         quotes.map(function(r){
           var code = r.symbol.replace(/\.(KS|KQ)$/i,'');
           return fetchKisPrice(code);
         })
-      );
-      priceResults.forEach(function(res, i){
-        if(res.status === 'fulfilled' && res.value){
-          quotes[i]._kisPrice  = res.value.price;
-          quotes[i]._kisChg    = res.value.chgPct;
+      ).then(function(results){
+        var updated = false;
+        results.forEach(function(res, i){
+          if(res.status === 'fulfilled' && res.value && res.value.price){
+            quotes[i]._kisPrice = res.value.price;
+            quotes[i]._kisChg   = res.value.chgPct;
+            updated = true;
+          }
+        });
+        if(updated){
+          _searchCache[q] = quotes;
+          // 드롭다운이 아직 열려 있을 때만 업데이트
+          var drop = document.getElementById(inputId+'_drop');
+          if(drop && drop.style.display !== 'none'){
+            renderSearchDrop(inputId, mode, quotes);
+          }
         }
       });
     }
-
-    _searchCache[q] = quotes;
-    renderSearchDrop(inputId, mode, quotes);
   }catch(e){}
 }
 
