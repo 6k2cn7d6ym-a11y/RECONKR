@@ -4359,11 +4359,61 @@ async function runModeScan(mode){
   inputEl.value = '';
   scanBtn.disabled = true;
 
+  // ── 한글 종목명 자동 변환 (드롭다운 미선택 시 대비) ──
+  window._scanMode = mode; // resolveKoreanName에서 resultEl 찾기 위해
+  for(var i=0;i<tickers.length;i++){
+    if(/[ㄱ-ㅎㅏ-ㅣ가-힣]/.test(tickers[i])){
+      var resolved = await resolveKoreanName(tickers[i], analyzeEl);
+      if(resolved) tickers[i] = resolved;
+      else { scanBtn.disabled=false; return; } // 못 찾으면 중단
+    }
+  }
+
   for(var i=0;i<tickers.length;i++){
     await runSingleScan(mode, tickers[i], analyzeEl, resultEl);
   }
 
   scanBtn.disabled = false;
+}
+
+// ── 한글 종목명 → 종목코드 변환 ──
+async function resolveKoreanName(name, analyzeEl){
+  if(analyzeEl) analyzeEl.innerHTML =
+    '<div class="analyzing-card"><div class="analyzing-spinner"></div>'+
+    '<div><div class="analyzing-ticker">'+name+'</div>'+
+    '<div class="analyzing-text">종목 검색 중...</div></div></div>';
+  try{
+    var url = 'https://query1.finance.yahoo.com/v1/finance/search?q='+encodeURIComponent(name)+
+              '&newsCount=0&quotesCount=6&region=KR&lang=en-US';
+    var data = await fetchWithProxy(url);
+    var quotes = (data?.quotes||[]).filter(function(r){
+      var qt = (r.quoteType||'').toUpperCase();
+      var sym = r.symbol||'';
+      return qt==='EQUITY' && (sym.endsWith('.KS')||sym.endsWith('.KQ'));
+    });
+    if(quotes.length > 0){
+      var sym = quotes[0].symbol;
+      var nm  = quotes[0].longname||quotes[0].shortname||sym;
+      if(analyzeEl) analyzeEl.innerHTML =
+        '<div class="analyzing-card"><div class="analyzing-spinner"></div>'+
+        '<div><div class="analyzing-ticker">'+sym+'</div>'+
+        '<div class="analyzing-text">'+nm+' 분석 시작...</div></div></div>';
+      return sym;
+    }
+  }catch(e){}
+  // 못 찾은 경우
+  if(analyzeEl) analyzeEl.innerHTML = '';
+  var resultEl = document.getElementById((window._scanMode||'momo')+'ResultArea');
+  if(resultEl) resultEl.innerHTML =
+    '<div style="margin:4px 0 10px;padding:20px 16px;background:var(--bg1);border:1px solid var(--b);border-radius:16px;text-align:center">'+
+      '<div style="font-size:28px;margin-bottom:10px">🔍</div>'+
+      '<div style="font-family:var(--mono);font-size:14px;color:var(--t);margin-bottom:8px">종목을 찾을 수 없음</div>'+
+      '<div style="font-size:12px;color:var(--t2);line-height:1.8">'+
+        '"<span style="font-family:var(--mono);color:var(--a)">'+name+'</span>"에 해당하는 KOSPI/KOSDAQ 종목 없음<br>'+
+        '검색창 드롭다운에서 선택하거나 종목코드를 입력하세요'+
+      '</div>'+
+    '</div>';
+  return null;
 }
 
 async function runSingleScan(mode, ticker, analyzeEl, resultEl){
