@@ -6544,84 +6544,91 @@ function onTickerInput(el, mode){
 async function doTickerSearch(inputId, q, mode){
   if(_searchCache[q]){ renderSearchDrop(inputId, mode, _searchCache[q]); return; }
 
-  // 로딩 표시
-  var drop = document.getElementById(inputId+'_drop');
   var input = document.getElementById(inputId);
-  if(!drop && input){
+  if(!input) return;
+  var drop = document.getElementById(inputId+'_drop');
+  if(!drop){
     drop = document.createElement('div');
     drop.id = inputId+'_drop';
     drop.className = 'search-drop';
     var area = input.closest('.search-area');
-    if(area) area.appendChild(drop);
+    if(area) area.appendChild(drop); else input.parentElement.appendChild(drop);
   }
-  if(drop){
-    drop.style.display='block';
-    drop.innerHTML='<div style="padding:12px 14px;font-family:var(--mono);font-size:11px;color:var(--t3)">검색 중...</div>';
+  drop.style.display='block';
+  drop.innerHTML='<div style="padding:12px 14px;font-family:var(--mono);font-size:11px;color:var(--t3)">검색 중...</div>';
+
+  var quotes = [];
+
+  // ── 전략 1: 숫자 입력 → KIS로 .KS/.KQ 직접 확인 (가장 빠름) ──
+  if(/^\d{4,6}$/.test(q)){
+    var padded = q.padStart(6,'0');
+    var candidates = [padded+'.KS', padded+'.KQ'];
+    var results = await Promise.allSettled(candidates.map(function(sym){
+      return fetchWithProxy(
+        'https://query1.finance.yahoo.com/v8/finance/quote?symbols='+sym+
+        '&fields=regularMarketPrice,regularMarketPreviousClose,shortName,longName,exchangeName'
+      );
+    }));
+    results.forEach(function(res, i){
+      if(res.status==='fulfilled'){
+        var qt = res.value&&res.value.quoteResponse&&res.value.quoteResponse.result&&res.value.quoteResponse.result[0];
+        if(qt && qt.regularMarketPreviousClose){
+          quotes.push({
+            symbol: candidates[i],
+            longname: qt.longName||qt.shortName||candidates[i],
+            shortname: qt.shortName||candidates[i],
+            quoteType:'EQUITY', _kisPrice:null, _kisChg:null
+          });
+        }
+      }
+    });
   }
 
-  var searchUrl = 'https://query1.finance.yahoo.com/v1/finance/search?q='+encodeURIComponent(q)+
-                  '&newsCount=0&quotesCount=10&region=KR&lang=en-US';
-  var data = null;
-
-  // 1차: Proxy 통해 시도
-  try{
-    data = await fetchWithProxy(searchUrl);
-  }catch(e1){
-    // 2차: 직접 fetch (CORS 허용 여부에 따라)
-    try{
-      var resp = await fetch(searchUrl, {cache:'no-store'});
-      if(resp.ok) data = await resp.json();
-    }catch(e2){}
-  }
-
-  if(!data){
-    if(drop) drop.innerHTML='<div style="padding:12px 14px;font-family:var(--mono);font-size:11px;color:var(--r)">검색 실패 — 네트워크 확인</div>';
-    return;
-  }
-
-  var quotes = (data?.quotes||[]).filter(function(r){
-    var qt = (r.quoteType||'').toUpperCase();
-    if(qt !== 'EQUITY') return false;
-    var sym = r.symbol||'';
-    return sym.endsWith('.KS') || sym.endsWith('.KQ');
-  }).slice(0,6);
-
-  // 디버그: 필터 결과 없으면 raw 데이터 표시 (임시)
-  if(!quotes.length && data?.quotes?.length){
-    if(drop){
-      drop.style.display='block';
-      drop.innerHTML='<div style="padding:8px 12px;font-size:10px;color:var(--t3);font-family:var(--mono)">'+
-        'raw: '+(data.quotes.slice(0,3).map(function(r){
-          return r.symbol+'('+r.quoteType+')';
-        }).join(', '))+
-      '</div>';
+  // ── 전략 2: 한글/영문 → Yahoo search (query2 먼저, query1 fallback) ──
+  if(!quotes.length){
+    var searchUrls = [
+      'https://query2.finance.yahoo.com/v1/finance/search?q='+encodeURIComponent(q)+'&quotesCount=8&newsCount=0',
+      'https://query1.finance.yahoo.com/v1/finance/search?q='+encodeURIComponent(q)+'&quotesCount=8&newsCount=0&region=KR',
+    ];
+    for(var si=0; si<searchUrls.length && !quotes.length; si++){
+      try{
+        var data = await fetchWithProxy(searchUrls[si]);
+        var raw = (data&&data.quotes)||[];
+        quotes = raw.filter(function(r){
+          var qt = (r.quoteType||'').toUpperCase();
+          if(qt !== 'EQUITY') return false;
+          var sym = r.symbol||'';
+          var exch = ((r.exchange||r.exchDisp||'')).toUpperCase();
+          return sym.endsWith('.KS') || sym.endsWith('.KQ') ||
+                 ['KSC','KOE','KSQ','KOQ','KOSPI','KOSDAQ'].some(function(e){ return exch.includes(e); });
+        }).slice(0,6);
+      }catch(e){}
     }
+  }
+
+  if(!quotes.length){
+    drop.innerHTML='<div style="padding:12px 14px;font-family:var(--mono);font-size:11px;color:var(--t3)">검색 결과 없음</div>';
     return;
   }
 
-  // Yahoo 결과 즉시 표시
   _searchCache[q] = quotes;
   renderSearchDrop(inputId, mode, quotes);
 
   // KIS 가격 백그라운드 업데이트
   if(quotes.length && KIS.appKey && KIS.appSecret){
     Promise.allSettled(
-      quotes.map(function(r){
-        return fetchKisPrice(r.symbol.replace(/\.(KS|KQ)$/i,''));
-      })
+      quotes.map(function(r){ return fetchKisPrice(r.symbol.replace(/\.(KS|KQ)$/i,'')); })
     ).then(function(results){
       var updated = false;
-      results.forEach(function(res, i){
-        if(res.status==='fulfilled' && res.value && res.value.price){
-          quotes[i]._kisPrice = res.value.price;
-          quotes[i]._kisChg   = res.value.chgPct;
-          updated = true;
+      results.forEach(function(res,i){
+        if(res.status==='fulfilled'&&res.value&&res.value.price){
+          quotes[i]._kisPrice=res.value.price; quotes[i]._kisChg=res.value.chgPct; updated=true;
         }
       });
       if(updated){
-        _searchCache[q] = quotes;
-        var d = document.getElementById(inputId+'_drop');
-        if(d && d.style.display !== 'none') renderSearchDrop(inputId, mode, quotes);
+        _searchCache[q]=quotes;
+        var d=document.getElementById(inputId+'_drop');
+        if(d&&d.style.display!=='none') renderSearchDrop(inputId,mode,quotes);
       }
     });
   }
