@@ -4537,8 +4537,9 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
   var ydata = await fetchYahooData(ticker);
 
   // ── [2-b] 종목 유효성 검증 ──
-  // prevClose나 KIS 데이터 없으면 존재하지 않는 종목
-  var isValidTicker = !!(ydata.prevClose || ydata.price || kisPrice);
+  // 6자리.KS/.KQ 형식이면 내장 목록 검증된 종목 → 바로 통과
+  var knownFormat = /^\d{6}\.(KS|KQ)$/i.test(ticker);
+  var isValidTicker = knownFormat || !!(ydata.prevClose || ydata.price || kisPrice);
   if(!isValidTicker){
     analyzeEl.innerHTML = '';
     resultEl.innerHTML =
