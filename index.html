@@ -964,6 +964,17 @@ async function fetchWithProxy(url){
   return Promise.race([fetchP, timeoutP]);
 }
 
+// ── 네이버/JSONP 응답도 처리하는 fetch ──
+async function fetchTextWithProxy(url){
+  var bust = '&_t='+Date.now();
+  var fetchP = fetch(WORKER_URL + '?url=' + encodeURIComponent(url) + bust, {cache:'no-store'})
+    .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); });
+  var timeoutP = new Promise(function(_,reject){
+    setTimeout(function(){ reject(new Error('timeout')); }, 8000);
+  });
+  return Promise.race([fetchP, timeoutP]);
+}
+
 // ═══════════════════════════════════════════════════════════════
 // ███  KIS API 클라이언트  ███
 // 실전투자: openapi.koreainvestment.com:9443
@@ -6686,7 +6697,13 @@ async function doTickerSearch(inputId, q, mode){
   if(!quotes.length){
     try{
       var naverUrl = 'https://ac.finance.naver.com/ac?q='+encodeURIComponent(q)+'&q_enc=UTF-8&t_koreng=1&r_lt=8';
-      var naverData = await fetchWithProxy(naverUrl);
+      var naverText = await fetchTextWithProxy(naverUrl);
+      // JSONP 래퍼 제거 (있을 경우): window.xxx({...}) → {...}
+      var naverJson = naverText.trim();
+      if(naverJson.charAt(0) !== '{' && naverJson.charAt(0) !== '['){
+        naverJson = naverJson.replace(/^[^(]+\(/, '').replace(/\)\s*;?\s*$/, '');
+      }
+      var naverData = JSON.parse(naverJson);
       var items = (naverData&&naverData.items)||[];
       // 응답 형식: [["삼성전자","005930","코스피","삼성전자"], ...]
       items.forEach(function(it){
@@ -6700,7 +6717,15 @@ async function doTickerSearch(inputId, q, mode){
           quoteType:'EQUITY', _kisPrice:null, _kisChg:null
         });
       });
-    }catch(e){}
+      // 디버그: 응답은 왔는데 파싱 결과 없으면 raw 표시
+      if(!quotes.length && drop){
+        drop.innerHTML='<div style="padding:8px 12px;font-family:var(--mono);font-size:10px;color:var(--t3)">naver: '+naverText.substring(0,80)+'</div>';
+        return;
+      }
+    }catch(e){
+      if(drop) drop.innerHTML='<div style="padding:8px 12px;font-family:var(--mono);font-size:10px;color:var(--r)">naver err: '+e.message+'</div>';
+      return;
+    }
   }
 
   // ── 전략 3: KIS 캐시 보완 (네이버 미스 시) ──
