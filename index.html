@@ -4428,21 +4428,22 @@ async function runModeScan(mode){
   inputEl.value = '';
   scanBtn.disabled = true;
 
-  // ── 한글 종목명 자동 변환 (드롭다운 미선택 시 대비) ──
-  window._scanMode = mode; // resolveKoreanName에서 resultEl 찾기 위해
-  for(var i=0;i<tickers.length;i++){
-    if(/[ㄱ-ㅎㅏ-ㅣ가-힣]/.test(tickers[i])){
-      var resolved = await resolveKoreanName(tickers[i], analyzeEl);
-      if(resolved) tickers[i] = resolved;
-      else { scanBtn.disabled=false; return; } // 못 찾으면 중단
+  try{
+    // ── 한글 종목명 자동 변환 (드롭다운 미선택 시 대비) ──
+    window._scanMode = mode;
+    for(var i=0;i<tickers.length;i++){
+      if(/[ㄱ-ㅎㅏ-ㅣ가-힣]/.test(tickers[i])){
+        var resolved = await resolveKoreanName(tickers[i], analyzeEl);
+        if(resolved) tickers[i] = resolved;
+        else return; // 못 찾으면 중단 (finally에서 버튼 복구)
+      }
     }
+    for(var i=0;i<tickers.length;i++){
+      await runSingleScan(mode, tickers[i], analyzeEl, resultEl);
+    }
+  }finally{
+    scanBtn.disabled = false; // 어떤 경로로 끝나도 항상 복구
   }
-
-  for(var i=0;i<tickers.length;i++){
-    await runSingleScan(mode, tickers[i], analyzeEl, resultEl);
-  }
-
-  scanBtn.disabled = false;
 }
 
 // ── 한글 종목명 → 종목코드 변환 ──
