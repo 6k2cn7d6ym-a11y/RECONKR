@@ -6669,6 +6669,8 @@ var KR_STOCKS = [
 ["000225","유유제약1우","KS"],
 ["000227","유유제약2우B","KS"],
 ["000240","한국앤컴퍼니","KS"],
+["000250","삼천당제약","KS"],
+["000260","장원테크","KS"],
 ["000270","기아","KS"],
 ["000280","흥아해운","KS"],
 ["000300","대유에이텍","KS"],
@@ -8650,6 +8652,22 @@ async function doTickerSearch(inputId, q, mode){
       quotes.push({ symbol:e.code+'.'+e.market, longname:e.name, shortname:e.name,
         quoteType:'EQUITY', _kisPrice:e.price||null, _kisChg:e.chgPct||null });
     });
+  }
+
+  // ── 전략 4: DART fallback (내장 목록에 없는 종목) ──
+  if(!quotes.length && /[ㄱ-ㅎㅏ-ㅣ가-힣]/.test(q) && G.dartApiKey){
+    try{
+      var dartData = await fetchDart('/api/company.json', { corp_name: q });
+      if(dartData && dartData.status==='000' && dartData.stock_code){
+        var sc  = dartData.stock_code.padStart(6,'0');
+        var mkt = dartData.corp_cls==='K'?'KQ':'KS';
+        quotes.push({
+          symbol: sc+'.'+mkt, longname: dartData.corp_name||sc,
+          shortname: dartData.corp_name||sc, quoteType:'EQUITY',
+          _kisPrice:null, _kisChg:null
+        });
+      }
+    }catch(e){}
   }
 
   if(!quotes.length){
