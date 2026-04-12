@@ -6586,8 +6586,16 @@ async function doTickerSearch(inputId, q, mode){
     return sym.endsWith('.KS') || sym.endsWith('.KQ');
   }).slice(0,6);
 
-  if(!quotes.length){
-    if(drop) drop.innerHTML='<div style="padding:12px 14px;font-family:var(--mono);font-size:11px;color:var(--t3)">검색 결과 없음</div>';
+  // 디버그: 필터 결과 없으면 raw 데이터 표시 (임시)
+  if(!quotes.length && data?.quotes?.length){
+    if(drop){
+      drop.style.display='block';
+      drop.innerHTML='<div style="padding:8px 12px;font-size:10px;color:var(--t3);font-family:var(--mono)">'+
+        'raw: '+(data.quotes.slice(0,3).map(function(r){
+          return r.symbol+'('+r.quoteType+')';
+        }).join(', '))+
+      '</div>';
+    }
     return;
   }
 
