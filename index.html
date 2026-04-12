@@ -4267,11 +4267,48 @@ function swingEngine(ydata, swingData){
   }
 
   // ════════════════════════════════════════
+  // Layer E — 세력 감지 (SWING 버전)
+  // 실시간 데이터 있을 때만 점수 반영
+  // ════════════════════════════════════════
+  var whaleBonus = 0;
+  var whaleR = { stage:'NORMAL', action:'WATCH', label:'📊 데이터 없음', warnings:[], cautions:[] };
+  if(hasRealtimePrice && ydata){
+    whaleR = getWhaleStage(ydata);
+    r._whaleStage    = whaleR.stage;
+    r._whaleLabel    = whaleR.label;
+    r._whaleWarnings = whaleR.warnings;
+    r._whaleCautions = whaleR.cautions;
+
+    // 세력 단계별 구조 레이어 보정
+    if(whaleR.stage === 'BREAKOUT'){
+      whaleBonus = 5; r.signals.push('🐋 세력 브레이크아웃 감지');
+    } else if(whaleR.stage === 'EARLY_MOVE'){
+      whaleBonus = 3; r.signals.push('🐋 세력 초기 이동');
+    } else if(whaleR.stage === 'ACCUMULATING'){
+      whaleBonus = 3; r.signals.push('🐋 세력 매집 신호');
+    } else if(whaleR.stage === 'SHAKEOUT'){
+      whaleBonus = 2; r.signals.push('🐋 세력 흔들기 (스윙 저점 기회)');
+    } else if(whaleR.stage === 'NO_NEWS_SURGE'){
+      whaleBonus = -3; r.warnings.push('[세력] 뉴스 없는 급등 — 펌핑 주의');
+    }
+  }
+
+  // ════════════════════════════════════════
   // 총점 합산
   // ════════════════════════════════════════
-  var totalScore = mktScore + strScore + pbScore + trigScore;
+  var totalScore = mktScore + strScore + pbScore + trigScore + whaleBonus;
   r.score = Math.min(100, Math.max(0, totalScore));
-  r.swing_score_layers = { market:mktScore, structure:strScore, pullback:pbScore, trigger:trigScore };
+  r.swing_score_layers = { market:mktScore, structure:strScore, pullback:pbScore, trigger:trigScore, whale:whaleBonus };
+
+  // ════════════════════════════════════════
+  // 세력 BLOCK (점수 관계없이 강제)
+  // TOXIC/DISTRIBUTING: 분배 구간 진입 절대 금지
+  // ════════════════════════════════════════
+  if(hasRealtimePrice && (whaleR.stage==='TOXIC'||whaleR.stage==='DISTRIBUTING')){
+    r.action = 'BLOCK';
+    r.blockers.push('[세력] '+whaleR.label+' — 분배 구간, 스윙 진입 금지');
+    return r;
+  }
 
   // ════════════════════════════════════════
   // 액션 결정
@@ -4766,6 +4803,10 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
 
       result = Object.assign({}, decision);
       result.ticker      = ticker;
+      // ── 한글 종목명 표시 (KR_STOCKS 내장 목록 또는 Yahoo shortName) ──
+      var _tCode = ticker.replace(/\.(KS|KQ)$/i,'');
+      var _tInfo = KR_STOCKS.find(function(s){ return s[0]===_tCode; });
+      result.displayName = (_tInfo && _tInfo[1]) || ydata.shortName || ticker;
       result.price       = ydata.price      || null;
       result.gap_pct     = ydata.gap_pct    !== null ? ydata.gap_pct : null;
       result.rvol        = ydata.rvol       !== null ? ydata.rvol : null;
@@ -5547,12 +5588,14 @@ function cardHTML(r, mode){
     '<div class="card-row1">'+
       '<div style="flex:1">'+
         '<div style="display:flex;align-items:center;gap:6px">'+
-          '<div class="card-ticker">'+r.ticker+'</div>'+
+          '<div class="card-ticker">'+(r.displayName||r.ticker)+'</div>'+
+          '<div style="font-family:var(--mono);font-size:9px;color:var(--t3);letter-spacing:.04em">'+r.ticker+'</div>'+
           modeBadge+tsStr+
         '</div>'+
         '<div class="card-sub">'+(r.float_m?r.float_m.toFixed(1)+'M float · ':'')+
           (r._mode==='swing'&&r.swing_score_layers?
-            '시장'+r.swing_score_layers.market+'+구조'+r.swing_score_layers.structure+'+눌림'+r.swing_score_layers.pullback+'+트리거'+r.swing_score_layers.trigger+' · ':
+            '시장'+r.swing_score_layers.market+'+구조'+r.swing_score_layers.structure+'+눌림'+r.swing_score_layers.pullback+'+트리거'+r.swing_score_layers.trigger+
+            (r.swing_score_layers.whale?'+세력'+(r.swing_score_layers.whale>0?'+':'')+r.swing_score_layers.whale:'') +' · ':
             r._mode==='swing'&&r.conditions_met!==undefined?'조건 '+r.conditions_met+'/8 · ':'')+
           (r._mode==='core'&&r.underground_score!==undefined?'물밑 '+r.underground_score+'/8 · ':'')+
           (r._mode==='core'&&r.core_stage?r.core_stage+' · ':'')+(r.news_quality||'--')+
