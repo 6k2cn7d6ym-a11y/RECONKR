@@ -344,10 +344,17 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
 <!-- ══════════════════════════════════════ -->
 <div class="scroll" id="page-recon">
 
-  <!-- 시장 지수 -->
+  <!-- ═══════════════════════════════════════
+       시장 개요 (Market Overview)
+  ════════════════════════════════════════ -->
   <div class="mkt-section" style="margin-top:4px">
-    <div class="mkt-label">시장 지수</div>
-    <div class="index-grid" id="indexGrid">
+    <div class="mkt-label" style="justify-content:space-between">
+      <span>시장 개요</span>
+      <button onclick="loadAllMarket()" style="font-family:var(--mono);font-size:9px;color:var(--g);background:none;border:none;cursor:pointer;letter-spacing:.06em">↺ 새로고침</button>
+    </div>
+
+    <!-- 국내 지수 -->
+    <div class="index-grid" id="indexGrid" style="margin-bottom:6px">
       <div class="idx-card loading" id="idx-SPY">
         <div class="idx-name">KOSPI</div>
         <div class="idx-price">----</div>
@@ -364,49 +371,97 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
         <div class="idx-chg idx-flat">--</div>
       </div>
     </div>
+
+    <!-- 매크로 지표 (환율/유가/미국지수) -->
+    <div class="index-grid" id="macroGrid" style="margin-bottom:6px">
+      <div class="idx-card loading" id="idx-USDKRW">
+        <div class="idx-name">달러/원</div>
+        <div class="idx-price">----</div>
+        <div class="idx-chg idx-flat">--%</div>
+      </div>
+      <div class="idx-card loading" id="idx-WTI">
+        <div class="idx-name">WTI유가</div>
+        <div class="idx-price">----</div>
+        <div class="idx-chg idx-flat">--%</div>
+      </div>
+      <div class="idx-card loading" id="idx-SP500">
+        <div class="idx-name">S&amp;P500</div>
+        <div class="idx-price">----</div>
+        <div class="idx-chg idx-flat">--%</div>
+      </div>
+    </div>
+    <div class="index-grid" id="macroGrid2">
+      <div class="idx-card loading" id="idx-NASDAQ">
+        <div class="idx-name">NASDAQ</div>
+        <div class="idx-price">----</div>
+        <div class="idx-chg idx-flat">--%</div>
+      </div>
+      <div class="idx-card loading" id="idx-GOLD">
+        <div class="idx-name">금(Gold)</div>
+        <div class="idx-price">----</div>
+        <div class="idx-chg idx-flat">--%</div>
+      </div>
+      <div class="idx-card loading" id="idx-US10Y">
+        <div class="idx-name">미국채10Y</div>
+        <div class="idx-price">----</div>
+        <div class="idx-chg idx-flat">--</div>
+      </div>
+    </div>
   </div>
 
-  <!-- Fear & Greed -->
+  <!-- 공포·탐욕 + 시장 국면 -->
   <div class="mkt-section">
-    <div class="mkt-label">공포·탐욕 지수</div>
-    <div class="fg-card" id="fgCard">
-      <div class="fg-row">
-        <div>
-          <div class="fg-label-text">FEAR &amp; GREED (VKOSPI 기반)</div>
-          <div id="fgClassify" style="font-size:11px;color:var(--t2);margin-top:2px">로딩 중...</div>
+    <div class="mkt-label">심리 &amp; 국면</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div class="fg-card" id="fgCard" style="margin:0">
+        <div class="fg-row">
+          <div>
+            <div class="fg-label-text">공포·탐욕</div>
+            <div id="fgClassify" style="font-size:11px;color:var(--t2);margin-top:2px">로딩 중...</div>
+          </div>
+          <div class="fg-value-text" id="fgValue" style="color:var(--t2)">--</div>
         </div>
-        <div class="fg-value-text" id="fgValue" style="color:var(--t2)">--</div>
+        <div class="fg-track">
+          <div class="fg-fill" id="fgFill" style="width:50%;background:var(--t2)"></div>
+        </div>
       </div>
-      <div class="fg-track">
-        <div class="fg-fill" id="fgFill" style="width:50%;background:var(--t2)"></div>
-      </div>
-      <div class="fg-zones">
-        <span>극도 공포</span><span>공포</span><span>중립</span><span>탐욕</span><span>극도 탐욕</span>
+      <div style="padding:10px 12px;background:var(--bg1);border:1px solid var(--b);border-radius:12px">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--t3);letter-spacing:.08em;margin-bottom:4px">시장 국면</div>
+        <div id="marketRegimeEl" style="font-family:var(--mono);font-size:11px;color:var(--t2);line-height:1.5">분석 중...</div>
       </div>
     </div>
   </div>
 
-  <!-- 시장 국면 + 유용 링크 -->
-  <div class="mkt-section">
-    <div class="mkt-label" style="justify-content:space-between">
-      <span>시장 국면</span>
-      <button onclick="loadAllMarket()" id="moversRefreshBtn" style="font-family:var(--mono);font-size:9px;color:var(--g);background:none;border:none;cursor:pointer;letter-spacing:.06em">↺ 새로고침</button>
-    </div>
+  <!-- KIS 업종 동향 -->
+  <div class="mkt-section" id="sectorSection" style="display:none">
+    <div class="mkt-label">업종 동향 (KIS)</div>
+    <div id="sectorHot" style="margin-bottom:6px"></div>
+    <div id="sectorCold"></div>
   </div>
-  <div id="marketRegimeEl" style="margin:0 16px 8px;font-family:var(--mono);font-size:11px;color:var(--t2)">시장 국면 분석 중...</div>
-  <div class="screener-btns">
+
+  <!-- 외국인/기관 수급 -->
+  <div class="mkt-section" id="flowSection" style="display:none">
+    <div class="mkt-label">수급 방향 (외국인·기관)</div>
+    <div id="flowContent"></div>
+  </div>
+
+  <!-- 빠른 링크 -->
+  <div class="screener-btns" style="margin-top:4px">
     <button onclick="loadDartFeed()" class="s-btn" id="dartFeedBtn">
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg>DART 공시피드
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg>DART 공시
     </button>
     <a href="https://finance.naver.com/sise/sise_rise.naver" target="_blank" class="s-btn">
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>네이버 상승률
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>상승률
     </a>
     <a href="https://finance.naver.com/sise/sise_quant.naver" target="_blank" class="s-btn">
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="3 9 21 9"/><polyline points="9 21 9 9"/></svg>네이버 시세
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="3 9 21 9"/><polyline points="9 21 9 9"/></svg>거래량
+    </a>
+    <a href="https://finance.naver.com/sise/theme.naver" target="_blank" class="s-btn">
+      🔥테마
     </a>
   </div>
 
-  <!-- DART 공시 피드 (대시보드 — page-recon 안에서만 표시) -->
+  <!-- DART 공시 피드 -->
   <div id="dartFeedSection" style="display:none;margin:-8px 16px 10px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
       <div style="font-family:var(--mono);font-size:9px;color:var(--t2);letter-spacing:.1em">▸ DART 최신 공시 (주요사항)</div>
@@ -8446,14 +8501,23 @@ var KR_STOCKS = [
 ];
 
 function searchKrStocks(q){
-  var r=[], ql=q.toLowerCase();
-  for(var i=0;i<KR_STOCKS.length&&r.length<8;i++){
+  if(!q||q.length<1) return [];
+  var exact=[], startsWith=[], contains=[];
+  var ql=q.toLowerCase();
+  var codePrefix = /^\d+$/.test(q) ? q.padStart(6,'0').slice(0,q.length) : null;
+  for(var i=0;i<KR_STOCKS.length;i++){
     var s=KR_STOCKS[i];
-    if(s[1].includes(q)||s[0].startsWith(q.padStart(6,'0').slice(0,q.length))||s[1].toLowerCase().includes(ql)){
-      r.push({symbol:s[0]+'.'+s[2],longname:s[1],shortname:s[1],quoteType:'EQUITY',_kisPrice:null,_kisChg:null});
+    var name=s[1], code=s[0];
+    if(name===q || code===q.padStart(6,'0')){
+      exact.push({symbol:code+'.'+s[2],longname:name,shortname:name,quoteType:'EQUITY',_kisPrice:null,_kisChg:null});
+    } else if(name.startsWith(q)||(codePrefix&&code.startsWith(codePrefix))){
+      startsWith.push({symbol:code+'.'+s[2],longname:name,shortname:name,quoteType:'EQUITY',_kisPrice:null,_kisChg:null});
+    } else if(name.includes(q)||name.toLowerCase().includes(ql)){
+      contains.push({symbol:code+'.'+s[2],longname:name,shortname:name,quoteType:'EQUITY',_kisPrice:null,_kisChg:null});
     }
+    if(exact.length+startsWith.length+contains.length>=20) break;
   }
-  return r;
+  return exact.concat(startsWith).concat(contains).slice(0,8);
 }
 
 // ── KIS 종목명 캐시 ──
@@ -8774,6 +8838,192 @@ async function checkMarketRegime(){
 loadAllMarket();
 // KOSPI 방향 3분마다 자동 갱신 (MOMO 필터 최신화)
 setInterval(checkMarketRegime, 3*60*1000);
+
+// ── 매크로 지표 (환율/유가/미국지수) ──
+async function loadMacroData(){
+  try{
+    var symbols = ['USDKRW=X','CL=F','%5EGSPC','%5EIXIC','GC=F','%5ETNX'].join(',');
+    var d = await fetchWithProxy(
+      'https://query1.finance.yahoo.com/v8/finance/quote?symbols='+symbols+
+      '&fields=regularMarketPrice,regularMarketPreviousClose,regularMarketChangePercent'
+    );
+    var res = d?.quoteResponse?.result||[];
+    var map = {};
+    res.forEach(function(r){ map[r.symbol] = r; });
+
+    function updCard(id, data, prefix, decimals, suffix){
+      var el = document.getElementById(id);
+      if(!el||!data) return;
+      var p  = data.regularMarketPrice;
+      var pc = data.regularMarketChangePercent;
+      if(!p) return;
+      var pStr = (prefix||'') + (decimals!==undefined ? p.toFixed(decimals) : Math.round(p).toLocaleString()) + (suffix||'');
+      var cStr = (pc>=0?'+':'')+pc.toFixed(2)+'%';
+      var cCls = pc>0?'idx-up':pc<0?'idx-dn':'idx-flat';
+      el.classList.remove('loading');
+      el.querySelector('.idx-price').textContent = pStr;
+      var chgEl = el.querySelector('.idx-chg');
+      chgEl.textContent = cStr;
+      chgEl.className = 'idx-chg '+cCls;
+    }
+
+    updCard('idx-USDKRW', map['USDKRW=X'], '', 1, '원');
+    updCard('idx-WTI',    map['CL=F'],      '$', 2);
+    updCard('idx-SP500',  map['^GSPC'],     '', undefined);
+    updCard('idx-NASDAQ', map['^IXIC'],     '', undefined);
+    updCard('idx-GOLD',   map['GC=F'],      '$', 0);
+    // 미국채 10Y: 가격 아닌 금리 표시
+    var t = map['^TNX'];
+    if(t){
+      var el2 = document.getElementById('idx-US10Y');
+      if(el2){
+        el2.classList.remove('loading');
+        el2.querySelector('.idx-price').textContent = t.regularMarketPrice.toFixed(2)+'%';
+        var pc2 = t.regularMarketChangePercent;
+        var chgEl2 = el2.querySelector('.idx-chg');
+        chgEl2.textContent = (pc2>=0?'+':'')+pc2.toFixed(2)+'%';
+        chgEl2.className = 'idx-chg '+(pc2>0?'idx-dn':pc2<0?'idx-up':'idx-flat'); // 채권: 금리↑=위험
+      }
+    }
+  }catch(e){ console.warn('[macro]',e.message); }
+}
+loadMacroData();
+setInterval(loadMacroData, 10*60*1000); // 10분마다 갱신
+
+// ── KIS 업종 동향 ──
+async function loadKisSectors(){
+  if(!KIS.appKey||!KIS.appSecret) return;
+  try{
+    var headers = await getKisAuthHeaders();
+    // 코스피 업종 등락 상위/하위 (FHPST01730000 업종버전)
+    var [kospiSec, kosdaqSec] = await Promise.allSettled([
+      kisGet('/uapi/domestic-stock/v1/ranking/fluctuation', {
+        fid_cond_mrkt_div_code:'U', fid_cond_scr_div_code:'208',
+        fid_input_iscd:'0001', fid_div_cls_code:'0',
+        fid_blng_cls_code:'0', fid_trgt_cls_code:'0',
+        fid_trgt_exls_cls_code:'0', fid_input_price_1:'',
+        fid_input_price_2:'', fid_vol_cnt:'',
+        fid_input_date_1:''
+      }, Object.assign({}, headers, {'tr_id':'FHPST02300000'})),
+      kisGet('/uapi/domestic-stock/v1/ranking/fluctuation', {
+        fid_cond_mrkt_div_code:'U', fid_cond_scr_div_code:'208',
+        fid_input_iscd:'1001', fid_div_cls_code:'0',
+        fid_blng_cls_code:'0', fid_trgt_cls_code:'0',
+        fid_trgt_exls_cls_code:'0', fid_input_price_1:'',
+        fid_input_price_2:'', fid_vol_cnt:'',
+        fid_input_date_1:''
+      }, Object.assign({}, headers, {'tr_id':'FHPST02300000'})),
+    ]);
+
+    var sectors = [];
+    [kospiSec, kosdaqSec].forEach(function(res, mi){
+      if(res.status!=='fulfilled') return;
+      var mkt = mi===0?'코스피':'코스닥';
+      var out = res.value?.output||[];
+      out.forEach(function(s){
+        var name = s.hts_kor_isnm||s.iscd_stat_cls_code||'';
+        var chg  = parseFloat(s.prdy_ctrt||0);
+        if(name) sectors.push({name:name, chg:chg, mkt:mkt});
+      });
+    });
+
+    if(!sectors.length){
+      document.getElementById('sectorSection').style.display='none';
+      return;
+    }
+
+    sectors.sort(function(a,b){ return b.chg-a.chg; });
+    var hot  = sectors.slice(0,4);
+    var cold = sectors.slice(-4).reverse();
+
+    function sectorTag(s){
+      var col = s.chg>0?'var(--g)':s.chg<0?'var(--r)':'var(--t2)';
+      var sign = s.chg>=0?'+':'';
+      return '<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 8px;margin:3px 3px 0 0;'+
+        'background:var(--bg2);border:1px solid var(--b);border-radius:8px;'+
+        'font-family:var(--mono);font-size:10px">'+
+        '<span style="color:var(--t2)">'+s.name+'</span>'+
+        '<span style="color:'+col+'">'+sign+s.chg.toFixed(1)+'%</span>'+
+      '</span>';
+    }
+
+    document.getElementById('sectorSection').style.display='';
+    document.getElementById('sectorHot').innerHTML =
+      '<div style="font-size:10px;color:var(--g);margin-bottom:2px;font-family:var(--mono)">🔥 강세 업종</div>'+
+      hot.map(sectorTag).join('');
+    document.getElementById('sectorCold').innerHTML =
+      '<div style="font-size:10px;color:var(--r);margin-bottom:2px;font-family:var(--mono)">❄️ 약세 업종</div>'+
+      cold.map(sectorTag).join('');
+
+  }catch(e){ console.warn('[sectors]',e.message); }
+}
+
+// ── 외국인/기관 수급 ──
+async function loadKisFlow(){
+  if(!KIS.appKey||!KIS.appSecret) return;
+  try{
+    var headers = await getKisAuthHeaders();
+    // 외국인 순매수 상위
+    var [forBuy, instBuy] = await Promise.allSettled([
+      kisGet('/uapi/domestic-stock/v1/ranking/fluctuation', {
+        fid_cond_mrkt_div_code:'J', fid_cond_scr_div_code:'20172',
+        fid_input_iscd:'0001', fid_div_cls_code:'0',
+        fid_blng_cls_code:'0', fid_trgt_cls_code:'0',
+        fid_trgt_exls_cls_code:'0', fid_input_price_1:'',
+        fid_input_price_2:'', fid_vol_cnt:'5',
+        fid_input_date_1:''
+      }, Object.assign({}, headers, {'tr_id':'FHPST01720000'})), // 외국인 순매수
+      kisGet('/uapi/domestic-stock/v1/ranking/fluctuation', {
+        fid_cond_mrkt_div_code:'J', fid_cond_scr_div_code:'20172',
+        fid_input_iscd:'0001', fid_div_cls_code:'1',
+        fid_blng_cls_code:'0', fid_trgt_cls_code:'0',
+        fid_trgt_exls_cls_code:'0', fid_input_price_1:'',
+        fid_input_price_2:'', fid_vol_cnt:'5',
+        fid_input_date_1:''
+      }, Object.assign({}, headers, {'tr_id':'FHPST01720000'})), // 기관 순매수
+    ]);
+
+    var rows = [];
+    if(forBuy.status==='fulfilled'){
+      var out = forBuy.value?.output||[];
+      if(out.length){
+        rows.push({label:'🌍 외국인 순매수', items: out.slice(0,3).map(function(s){
+          var amt = Math.round(parseFloat(s.seln_vol||s.total_askp_rsqn||0)/1e8);
+          return (s.hts_kor_isnm||s.stck_shrn_iscd)+(amt?' +'+amt+'억':'');
+        })});
+      }
+    }
+    if(instBuy.status==='fulfilled'){
+      var out2 = instBuy.value?.output||[];
+      if(out2.length){
+        rows.push({label:'🏛️ 기관 순매수', items: out2.slice(0,3).map(function(s){
+          var amt2 = Math.round(parseFloat(s.seln_vol||s.total_askp_rsqn||0)/1e8);
+          return (s.hts_kor_isnm||s.stck_shrn_iscd)+(amt2?' +'+amt2+'억':'');
+        })});
+      }
+    }
+
+    if(!rows.length){ document.getElementById('flowSection').style.display='none'; return; }
+    document.getElementById('flowSection').style.display='';
+    document.getElementById('flowContent').innerHTML = rows.map(function(r){
+      return '<div style="margin-bottom:8px">'+
+        '<div style="font-family:var(--mono);font-size:10px;color:var(--t2);margin-bottom:4px">'+r.label+'</div>'+
+        '<div style="display:flex;flex-wrap:wrap;gap:4px">'+
+        r.items.map(function(item){
+          return '<span style="padding:3px 8px;background:var(--bg2);border:1px solid var(--b);border-radius:6px;font-family:var(--mono);font-size:10px;color:var(--t)">'+item+'</span>';
+        }).join('')+
+        '</div></div>';
+    }).join('');
+  }catch(e){ console.warn('[flow]',e.message); }
+}
+
+// KIS 업종/수급은 KIS 연결 후 로드
+setTimeout(function(){
+  if(KIS.appKey&&KIS.appSecret){
+    loadKisSectors();
+    loadKisFlow();
+  }
+}, 3000);
 
 // ── KIS 초기화 ──
 (function initKis(){
