@@ -6543,48 +6543,80 @@ function onTickerInput(el, mode){
 
 async function doTickerSearch(inputId, q, mode){
   if(_searchCache[q]){ renderSearchDrop(inputId, mode, _searchCache[q]); return; }
+
+  // 로딩 표시
+  var drop = document.getElementById(inputId+'_drop');
+  var input = document.getElementById(inputId);
+  if(!drop && input){
+    drop = document.createElement('div');
+    drop.id = inputId+'_drop';
+    drop.className = 'search-drop';
+    var area = input.closest('.search-area');
+    if(area) area.appendChild(drop);
+  }
+  if(drop){
+    drop.style.display='block';
+    drop.innerHTML='<div style="padding:12px 14px;font-family:var(--mono);font-size:11px;color:var(--t3)">검색 중...</div>';
+  }
+
+  var searchUrl = 'https://query1.finance.yahoo.com/v1/finance/search?q='+encodeURIComponent(q)+
+                  '&newsCount=0&quotesCount=10&region=KR&lang=en-US';
+  var data = null;
+
+  // 1차: Proxy 통해 시도
   try{
-    var url = 'https://query1.finance.yahoo.com/v1/finance/search?q='+encodeURIComponent(q)+
-              '&newsCount=0&quotesCount=10&region=KR&lang=en-US';
-    var data = await fetchWithProxy(url);
-    var quotes = (data?.quotes||[]).filter(function(r){
-      var qt = (r.quoteType||'').toUpperCase();
-      if(qt !== 'EQUITY') return false;
-      var sym = r.symbol||'';
-      return sym.endsWith('.KS') || sym.endsWith('.KQ');
-    }).slice(0,6);
+    data = await fetchWithProxy(searchUrl);
+  }catch(e1){
+    // 2차: 직접 fetch (CORS 허용 여부에 따라)
+    try{
+      var resp = await fetch(searchUrl, {cache:'no-store'});
+      if(resp.ok) data = await resp.json();
+    }catch(e2){}
+  }
 
-    // ── Yahoo 결과 즉시 표시 ──
-    _searchCache[q] = quotes;
-    renderSearchDrop(inputId, mode, quotes);
+  if(!data){
+    if(drop) drop.innerHTML='<div style="padding:12px 14px;font-family:var(--mono);font-size:11px;color:var(--r)">검색 실패 — 네트워크 확인</div>';
+    return;
+  }
 
-    // ── KIS 연결 시 가격을 백그라운드에서 수집 후 업데이트 ──
-    if(quotes.length && KIS.appKey && KIS.appSecret){
-      Promise.allSettled(
-        quotes.map(function(r){
-          var code = r.symbol.replace(/\.(KS|KQ)$/i,'');
-          return fetchKisPrice(code);
-        })
-      ).then(function(results){
-        var updated = false;
-        results.forEach(function(res, i){
-          if(res.status === 'fulfilled' && res.value && res.value.price){
-            quotes[i]._kisPrice = res.value.price;
-            quotes[i]._kisChg   = res.value.chgPct;
-            updated = true;
-          }
-        });
-        if(updated){
-          _searchCache[q] = quotes;
-          // 드롭다운이 아직 열려 있을 때만 업데이트
-          var drop = document.getElementById(inputId+'_drop');
-          if(drop && drop.style.display !== 'none'){
-            renderSearchDrop(inputId, mode, quotes);
-          }
+  var quotes = (data?.quotes||[]).filter(function(r){
+    var qt = (r.quoteType||'').toUpperCase();
+    if(qt !== 'EQUITY') return false;
+    var sym = r.symbol||'';
+    return sym.endsWith('.KS') || sym.endsWith('.KQ');
+  }).slice(0,6);
+
+  if(!quotes.length){
+    if(drop) drop.innerHTML='<div style="padding:12px 14px;font-family:var(--mono);font-size:11px;color:var(--t3)">검색 결과 없음</div>';
+    return;
+  }
+
+  // Yahoo 결과 즉시 표시
+  _searchCache[q] = quotes;
+  renderSearchDrop(inputId, mode, quotes);
+
+  // KIS 가격 백그라운드 업데이트
+  if(quotes.length && KIS.appKey && KIS.appSecret){
+    Promise.allSettled(
+      quotes.map(function(r){
+        return fetchKisPrice(r.symbol.replace(/\.(KS|KQ)$/i,''));
+      })
+    ).then(function(results){
+      var updated = false;
+      results.forEach(function(res, i){
+        if(res.status==='fulfilled' && res.value && res.value.price){
+          quotes[i]._kisPrice = res.value.price;
+          quotes[i]._kisChg   = res.value.chgPct;
+          updated = true;
         }
       });
-    }
-  }catch(e){}
+      if(updated){
+        _searchCache[q] = quotes;
+        var d = document.getElementById(inputId+'_drop');
+        if(d && d.style.display !== 'none') renderSearchDrop(inputId, mode, quotes);
+      }
+    });
+  }
 }
 
 function renderSearchDrop(inputId, mode, quotes){
@@ -6598,7 +6630,7 @@ function renderSearchDrop(inputId, mode, quotes){
     drop.className = 'search-drop';
     var area = input.closest('.search-area');
     if(area) area.appendChild(drop);
-    else     input.parentElement.after(drop);
+    else input.parentElement.appendChild(drop);
   }
   if(!quotes||!quotes.length){ drop.style.display='none'; return; }
   var modeColor = mode==='momo'?'var(--a)':mode==='swing'?'var(--bl)':'var(--pu)';
