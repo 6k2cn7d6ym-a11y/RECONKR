@@ -1319,6 +1319,9 @@ async function testKisConnection(){
     if(el) el.textContent = '✓ 연결 성공 (토큰 발급 완료)';
     if(st) { st.textContent='연결됨 ✓'; st.style.color='var(--gold)'; }
     showToast('KIS 연결 성공 ✓');
+    // 연결 성공 시 종목명 캐시 빌드
+    _kisNameCacheBuilt = false;
+    buildKisNameCache();
   }catch(e){
     if(el) el.textContent = '✗ 실패: '+e.message;
     if(st) { st.textContent='연결 실패'; st.style.color='var(--r)'; }
@@ -4383,7 +4386,24 @@ async function resolveKoreanName(name, analyzeEl){
     '<div><div class="analyzing-ticker">'+name+'</div>'+
     '<div class="analyzing-text">종목 검색 중...</div></div></div>';
 
-  // ── DART로 한글 종목명 검색 (DART key 있을 때) ──
+  // ── 네이버 금융 자동완성 (1순위) ──
+  try{
+    var naverUrl = 'https://ac.finance.naver.com/ac?q='+encodeURIComponent(name)+'&q_enc=UTF-8&t_koreng=1&r_lt=3';
+    var naverData = await fetchWithProxy(naverUrl);
+    var items = (naverData&&naverData.items)||[];
+    if(items.length && items[0][1]){
+      var code = String(items[0][1]).padStart(6,'0');
+      var mkt  = (items[0][2]||'').includes('코스닥')?'KQ':'KS';
+      var sym  = code+'.'+mkt;
+      if(analyzeEl) analyzeEl.innerHTML =
+        '<div class="analyzing-card"><div class="analyzing-spinner"></div>'+
+        '<div><div class="analyzing-ticker">'+sym+'</div>'+
+        '<div class="analyzing-text">'+(items[0][0]||name)+' 분석 시작...</div></div></div>';
+      return sym;
+    }
+  }catch(e){}
+
+  // ── DART fallback ──
   if(G.dartApiKey){
     try{
       var dartData = await fetchDart('/api/company.json', { corp_name: name });
@@ -6545,9 +6565,68 @@ function rescanStale(mode, ticker){
   runModeScan(mode);
 }
 
-// ═══════════════════════════════════════
-// 종목 검색 자동완성
-// ═══════════════════════════════════════
+// ── KIS 종목명 캐시 ──
+// { '삼성전자': { code:'005930', market:'KS', name:'삼성전자' }, ... }
+var _kisNameCache = {};
+var _kisNameCacheBuilt = false;
+
+async function buildKisNameCache(){
+  if(_kisNameCacheBuilt) return;
+  if(!KIS.appKey || !KIS.appSecret) return;
+  try{
+    var results = await Promise.allSettled([
+      fetchKisVolumeRanking('0001'),   // 코스피
+      fetchKisVolumeRanking('1001'),   // 코스닥
+      fetchKisFluctuationRanking('0001','0'),
+      fetchKisFluctuationRanking('1001','0'),
+    ]);
+    var kospiCodes = new Set();
+    results[0].status==='fulfilled' && results[0].value.forEach(function(s){ kospiCodes.add(s.symbol); });
+    results[2].status==='fulfilled' && results[2].value.forEach(function(s){ kospiCodes.add(s.symbol); });
+
+    results.forEach(function(res, idx){
+      if(res.status !== 'fulfilled') return;
+      var market = (idx === 1 || idx === 3) ? 'KQ' : 'KS';
+      res.value.forEach(function(s){
+        if(!s.name || !s.symbol) return;
+        var entry = { code: s.symbol.padStart(6,'0'), market: market, name: s.name,
+                      price: s.price, chgPct: s.chgPct };
+        _kisNameCache[s.name] = entry;
+        // 부분 키도 저장 (앞 2~4글자)
+        for(var l=2; l<=Math.min(4,s.name.length); l++){
+          var prefix = s.name.substring(0,l);
+          if(!_kisNameCache['_prefix_'+prefix]) _kisNameCache['_prefix_'+prefix] = [];
+          if(_kisNameCache['_prefix_'+prefix].length < 8) _kisNameCache['_prefix_'+prefix].push(entry);
+        }
+      });
+    });
+    _kisNameCacheBuilt = true;
+  }catch(e){ console.warn('[KIS 캐시]', e.message); }
+}
+
+function searchKisNameCache(q){
+  var results = [];
+  var seen = {};
+  // 정확 매칭
+  if(_kisNameCache[q]) { results.push(_kisNameCache[q]); seen[_kisNameCache[q].code]=1; }
+  // 부분 매칭 (prefix)
+  var prefix = q.substring(0,Math.min(4,q.length));
+  var prefixList = _kisNameCache['_prefix_'+prefix] || [];
+  prefixList.forEach(function(e){
+    if(!seen[e.code] && e.name.includes(q)) { results.push(e); seen[e.code]=1; }
+  });
+  // 전체 탐색 fallback (캐시 작으면 빠름)
+  if(results.length < 3){
+    Object.keys(_kisNameCache).forEach(function(k){
+      if(k.startsWith('_prefix_')) return;
+      var e = _kisNameCache[k];
+      if(!seen[e.code] && e.name && e.name.includes(q)){
+        results.push(e); seen[e.code]=1;
+      }
+    });
+  }
+  return results.slice(0,6);
+}
 var _searchDebounce = null;
 var _searchCache    = {};
 
@@ -6603,41 +6682,33 @@ async function doTickerSearch(inputId, q, mode){
     });
   }
 
-  // ── 전략 2: 한글/영문 → DART company 검색 (한글 특화) ──
-  if(!quotes.length && G.dartApiKey){
+  // ── 전략 2: 네이버 금융 자동완성 — 한국 주식 이름 검색 전용 ──
+  if(!quotes.length){
     try{
-      var dartData = await fetchDart('/api/company.json', { corp_name: q });
-      // DART는 단건 반환 — stock_code 있으면 사용
-      if(dartData && dartData.status === '000' && dartData.stock_code){
-        var sc = dartData.stock_code.padStart(6,'0');
-        var cls = dartData.corp_cls; // Y=코스피, K=코스닥
-        var sym = sc + (cls === 'K' ? '.KQ' : '.KS');
+      var naverUrl = 'https://ac.finance.naver.com/ac?q='+encodeURIComponent(q)+'&q_enc=UTF-8&t_koreng=1&r_lt=8';
+      var naverData = await fetchWithProxy(naverUrl);
+      var items = (naverData&&naverData.items)||[];
+      // 응답 형식: [["삼성전자","005930","코스피","삼성전자"], ...]
+      items.forEach(function(it){
+        if(!it||!it[1]) return;
+        var name = it[0]||it[1];
+        var code = String(it[1]).padStart(6,'0');
+        var mkt  = (it[2]||'').includes('코스닥')?'KQ':'KS';
         quotes.push({
-          symbol: sym,
-          longname: dartData.corp_name || sc,
-          shortname: dartData.corp_name || sc,
+          symbol: code+'.'+mkt,
+          longname: name, shortname: name,
           quoteType:'EQUITY', _kisPrice:null, _kisChg:null
         });
-      }
+      });
     }catch(e){}
   }
 
-  // ── 전략 3: 영문 → Yahoo search fallback ──
-  if(!quotes.length && !/[ㄱ-ㅎㅏ-ㅣ가-힣]/.test(q)){
-    try{
-      var data = await fetchWithProxy(
-        'https://query2.finance.yahoo.com/v1/finance/search?q='+encodeURIComponent(q)+'&quotesCount=8&newsCount=0'
-      );
-      var raw = (data&&data.quotes)||[];
-      quotes = raw.filter(function(r){
-        var qt = (r.quoteType||'').toUpperCase();
-        if(qt !== 'EQUITY') return false;
-        var sym = r.symbol||'';
-        var exch = ((r.exchange||r.exchDisp||'')).toUpperCase();
-        return sym.endsWith('.KS') || sym.endsWith('.KQ') ||
-               ['KSC','KOE','KSQ','KOQ'].some(function(e){ return exch.includes(e); });
-      }).slice(0,6);
-    }catch(e){}
+  // ── 전략 3: KIS 캐시 보완 (네이버 미스 시) ──
+  if(!quotes.length && /[ㄱ-ㅎㅏ-ㅣ가-힣]/.test(q)){
+    searchKisNameCache(q).forEach(function(e){
+      quotes.push({ symbol:e.code+'.'+e.market, longname:e.name, shortname:e.name,
+        quoteType:'EQUITY', _kisPrice:e.price||null, _kisChg:e.chgPct||null });
+    });
   }
 
   if(!quotes.length){
@@ -6835,6 +6906,9 @@ setInterval(checkMarketRegime, 3*60*1000);
   if(k) { KIS.appKey=k; var el=document.getElementById('kisAppKeyInput'); if(el) el.value=k; }
   if(s) { KIS.appSecret=s; var el=document.getElementById('kisAppSecretInput'); if(el) el.value=s; }
   updateKisStatus();
+
+  // KIS 연결돼 있으면 종목명 캐시 빌드
+  if(k && s) setTimeout(buildKisNameCache, 2000);
 
   // 자동스캔 복원
   if(localStorage.getItem('autoScan')==='1'){
