@@ -305,6 +305,69 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
 .sc-chg{font-family:var(--mono);font-size:11px}
 .sc-next-badge{font-family:var(--mono);font-size:9px;color:var(--t3);padding:2px 6px;border:1px solid var(--b);border-radius:4px}
 .sc-last-run{font-family:var(--mono);font-size:9px;color:var(--t3);padding:6px 14px;text-align:right;border-top:1px solid var(--b)}
+
+/* ═══════════════════════════════════════
+   MOMO 카드 v4 리디자인
+   ═══════════════════════════════════════ */
+.mc-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px}
+.mc-id{flex:1;margin-right:10px;min-width:0}
+.mc-ticker{font-family:var(--mono);font-size:22px;color:var(--t);letter-spacing:.06em;line-height:1}
+.mc-name-row{display:flex;align-items:center;gap:6px;margin-top:3px;flex-wrap:wrap}
+.mc-name{font-size:11px;color:var(--t2)}
+.mc-ts{font-family:var(--mono);font-size:9px;color:var(--t3)}
+.mc-verdict{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 12px;border-radius:12px;min-width:60px;flex-shrink:0;text-align:center}
+.mc-verdict-enter{background:rgba(0,240,122,.10);border:1.5px solid rgba(0,240,122,.35)}
+.mc-verdict-watch{background:rgba(255,58,140,.08);border:1.5px solid rgba(255,58,140,.28)}
+.mc-verdict-block{background:rgba(255,45,78,.08);border:1.5px solid rgba(255,45,78,.28)}
+.mc-score{font-family:var(--mono);font-size:22px;line-height:1}
+.mc-verdict-enter .mc-score{color:var(--g)}
+.mc-verdict-watch .mc-score{color:var(--a)}
+.mc-verdict-block .mc-score{color:var(--r)}
+.mc-ac{font-size:8px;font-weight:700;letter-spacing:.12em;margin-top:3px}
+.mc-verdict-enter .mc-ac{color:rgba(0,240,122,.65)}
+.mc-verdict-watch .mc-ac{color:rgba(255,58,140,.65)}
+.mc-verdict-block .mc-ac{color:rgba(255,45,78,.65)}
+.mc-price-row{display:flex;align-items:baseline;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.mc-price{font-family:var(--mono);font-size:26px;color:var(--t)}
+.mc-gap{font-family:var(--mono);font-size:13px;padding:2px 9px;border-radius:6px;font-weight:700}
+.mc-gap-up{background:var(--g);color:#000}
+.mc-gap-dn{background:var(--r);color:#fff}
+.mc-gap-flat{background:var(--bg3);color:var(--t2)}
+.mc-rvol{font-family:var(--mono);font-size:11px;color:var(--t2)}
+.mc-pmzone{font-family:var(--mono);font-size:11px}
+/* 레벨 2×2 그리드 */
+.mc-levels{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin:10px 0}
+.mc-lv{padding:9px 12px;background:var(--bg2);border-radius:10px}
+.mc-lv-entry{border-left:2.5px solid rgba(43,159,255,.5)}
+.mc-lv-stop{border-left:2.5px solid rgba(255,45,78,.5)}
+.mc-lv-t1{border-left:2.5px solid rgba(0,240,122,.5)}
+.mc-lv-rr{border-left:2.5px solid rgba(159,122,255,.5)}
+.mc-lv-label{font-size:8px;color:var(--t3);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px}
+.mc-lv-val{font-family:var(--mono);font-size:15px;line-height:1}
+.mc-lv-entry .mc-lv-val{color:var(--bl)}
+.mc-lv-stop .mc-lv-val{color:var(--r)}
+.mc-lv-t1 .mc-lv-val{color:var(--g)}
+.mc-lv-rr .mc-lv-val{color:var(--pu)}
+/* Watch 레벨 (참고용, 흐리게) */
+.mc-levels-ref{opacity:.45}
+.mc-levels-ref-label{font-size:10px;color:var(--t3);text-align:center;margin-top:3px;letter-spacing:.06em}
+/* 컨텍스트 */
+.mc-context{margin:6px 0}
+.mc-tags-v2{display:flex;gap:5px;flex-wrap:wrap;margin:6px 0 4px}
+.mc-tag{font-size:10px;font-weight:600;padding:3px 9px;border-radius:20px;letter-spacing:.04em;white-space:nowrap}
+/* BLOCK 인라인 이유 */
+.mc-block-reasons{padding:10px 12px;background:rgba(255,45,78,.06);border:1px solid rgba(255,45,78,.15);border-radius:10px;margin-bottom:8px}
+/* 슬리피지 경고 */
+.mc-slip{background:rgba(255,45,78,.06);border:1px solid rgba(255,45,78,.15);border-radius:8px;padding:7px 11px;font-family:var(--mono);font-size:11px;color:var(--r);margin:4px 0}
+/* 확장/접기 버튼 */
+.mc-expand-btn{width:100%;background:none;border:none;border-top:1px solid var(--b);color:var(--t3);font-family:var(--mono);font-size:10px;letter-spacing:.08em;padding:8px 0 0;cursor:pointer;text-align:center;margin-top:10px;transition:color .15s;display:flex;align-items:center;justify-content:center;gap:5px}
+.mc-expand-btn:hover{color:var(--t2)}
+.mc-expand-btn.open{color:var(--t2)}
+.mc-detail-section{padding-top:8px}
+.mc-detail-label{font-family:var(--mono);font-size:9px;color:var(--t3);letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px;margin-top:10px}
+/* 거래 기록 버튼 */
+.mc-trade-btn{width:100%;background:rgba(0,240,122,.05);border:1px solid rgba(0,240,122,.15);border-radius:10px;padding:10px;font-family:var(--mono);font-size:11px;color:var(--g);cursor:pointer;margin-top:10px;letter-spacing:.06em;transition:background .15s}
+.mc-trade-btn:active{background:rgba(0,240,122,.12)}
 </style>
 </head>
 <body>
@@ -5278,10 +5341,319 @@ function getPMZone(r){
   return {label:'저점 근처',color:'var(--t2)',pct:Math.round(pct)};
 }
 
+
+// ═══════════════════════════════════════
+// MOMO 카드 v4 — 태그 우선순위 + 접기 + 새 레이아웃
+// ═══════════════════════════════════════
+
+function toggleCardDetail(id){
+  var el  = document.getElementById(id);
+  var btn = document.getElementById('btn-'+id);
+  if(!el||!btn) return;
+  var open = el.style.display !== 'none';
+  if(open){
+    el.style.display='none';
+    btn.innerHTML='상세 정보 <span style="font-size:10px">▾</span>';
+    btn.classList.remove('open');
+  } else {
+    el.style.display='block';
+    btn.innerHTML='접기 <span style="font-size:10px">▴</span>';
+    btn.classList.add('open');
+  }
+}
+
+// 태그 우선순위 필터 (최대 4개)
+function buildMomoTags(r){
+  var t=[];
+  // P1: 세력 단계 (NORMAL 제외)
+  if(r._whaleStage && r._whaleStage!=='NORMAL'){
+    var sc={'BREAKOUT':'var(--g)','EARLY_MOVE':'var(--a)','NO_NEWS_SURGE':'var(--gold)',
+            'SHAKEOUT':'var(--t2)','ACCUMULATING':'var(--t2)','DISTRIBUTING':'var(--r)','TOXIC':'var(--r)'}[r._whaleStage]||'var(--t2)';
+    var se={'BREAKOUT':'🚀','EARLY_MOVE':'⚡','NO_NEWS_SURGE':'🔍',
+            'SHAKEOUT':'🪤','ACCUMULATING':'🔬','DISTRIBUTING':'📤','TOXIC':'☠'}[r._whaleStage]||'📊';
+    t.push('<span class="mc-tag" style="color:'+sc+';background:'+sc.replace(')',',0.12)').replace('var(--','rgba(0,0,0,')+';border:1px solid '+sc.replace(')',',0.35)').replace('var(--','rgba(0,0,0,')+'">'+se+' '+(r._whaleStage||'').replace('_',' ')+'</span>');
+  }
+  // P2: 체결 지옥
+  if(r.slippage_risk==='high') t.push('<span class="mc-tag" style="color:var(--r);background:rgba(255,45,78,.10);border:1px solid rgba(255,45,78,.30)">⚡ 체결지옥</span>');
+  // P3: 공시 품질
+  if(r.news_quality==='factual') t.push('<span class="mc-tag" style="color:var(--g);background:rgba(0,240,122,.08);border:1px solid rgba(0,240,122,.28)">팩트공시</span>');
+  else if(r.news_quality==='none') t.push('<span class="mc-tag" style="color:var(--r);background:rgba(255,45,78,.08);border:1px solid rgba(255,45,78,.25)">공시없음</span>');
+  // P4: 상한가 임박
+  if(r.ulimit_pct!==null&&r.ulimit_pct!==undefined&&r.ulimit_pct<10)
+    t.push('<span class="mc-tag" style="color:var(--r);background:rgba(255,45,78,.08);border:1px solid rgba(255,45,78,.25)">⚠ 상한가 '+r.ulimit_pct+'%</span>');
+  if(t.length>=4) return t.slice(0,4);
+  // P5: 동시호가응집
+  if(r.pm_consolidation) t.push('<span class="mc-tag" style="color:var(--pu);background:rgba(159,122,255,.08);border:1px solid rgba(159,122,255,.25)">동시호가응집</span>');
+  if(t.length>=4) return t.slice(0,4);
+  // P6: 거래대금 배수 (BREAKOUT 없을 때만)
+  if(r._whaleStage!=='BREAKOUT' && r.trading_value_ratio>=5)
+    t.push('<span class="mc-tag" style="color:var(--g);background:rgba(0,240,122,.08);border:1px solid rgba(0,240,122,.25)">거래 '+r.trading_value_ratio.toFixed(1)+'배</span>');
+  if(t.length>=4) return t.slice(0,4);
+  // P7: 슬리피지 보통
+  if(r.slippage_risk==='medium') t.push('<span class="mc-tag" style="color:var(--a);background:rgba(255,106,0,.08);border:1px solid rgba(255,106,0,.25)">⚠ 슬리피지</span>');
+  if(t.length>=4) return t.slice(0,4);
+  // P8: MA20 이격 경고
+  if(r.ma20_gap_pct&&r.ma20_gap_pct>20) t.push('<span class="mc-tag" style="color:var(--a);background:rgba(255,106,0,.08);border:1px solid rgba(255,106,0,.25)">이격+'+r.ma20_gap_pct+'%</span>');
+  if(t.length>=4) return t.slice(0,4);
+  // P9: 시장 국면 (PRIME 제외 — PRIME은 기본값)
+  if(r._marketPhase&&r._marketPhase!=='PRIME'){
+    var pc={'PRE':'var(--a)','ORB':'var(--r)','EARLY':'var(--g)','LATE':'var(--r)'};
+    var pl={'PRE':'동시호가','ORB':'ORB형성중','EARLY':'골든윈도우','LATE':'오후페이드'};
+    if(pc[r._marketPhase]) t.push('<span class="mc-tag" style="color:'+pc[r._marketPhase]+';background:rgba(0,0,0,.15);border:1px solid '+pc[r._marketPhase].replace(')',',0.35)').replace('var(--','rgba(0,0,0,')+'">'+pl[r._marketPhase]+'</span>');
+  }
+  return t.slice(0,4);
+}
+
+// ── MOMO 전용 카드 HTML (v4) ──
+function momoCardHTML(r){
+  var ac  = r.action||'WATCH';
+  var ea  = calcEntryAction(r);
+  var st  = calcSellTargets(r);
+
+  // 판정 배지
+  var vcC = {ENTER:'mc-verdict-enter',WATCH:'mc-verdict-watch',BLOCK:'mc-verdict-block'}[ac];
+
+  // 가격
+  var price    = r.price?'₩'+Math.round(r.price).toLocaleString():'--';
+  var gapNum   = r.gap_pct!=null?r.gap_pct:0;
+  var gapStr   = r.gap_pct!=null?(gapNum>=0?'+':'')+gapNum.toFixed(0)+'%':'--';
+  var gapClass = gapNum>0?'mc-gap-up':gapNum<0?'mc-gap-dn':'mc-gap-flat';
+  if((r._marketPhase==='CLOSED')&&r.gap_pct===0) gapStr='전일종가';
+  var rvolStr  = r.rvol?'RVol '+r.rvol+'x'+(r.rvol_corrected?'*':''):'';
+
+  // PM 구간
+  var pmz = getPMZone(r);
+  var pmzHtml = pmz?'<span class="mc-pmzone" style="color:'+pmz.color+'">'+pmz.label+' '+pmz.pct+'%</span>':'';
+
+  // 이름/시간
+  var nameStr = (r.displayName&&r.displayName!==r.ticker)?r.displayName:'';
+  var tsStr   = r._ts?(function(){var d=new Date(r._ts);return d.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'});})():'';
+
+  // 태그 (최대 4개)
+  var tagsArr = buildMomoTags(r);
+  var tagsHtml = tagsArr.length?'<div class="mc-tags-v2">'+tagsArr.join('')+'</div>':'';
+
+  // VWAP 바
+  var vwapHtml='';
+  if(r.vwap){
+    var vp=r.vwap_pct!=null?r.vwap_pct:0;
+    var barPct=Math.max(5,Math.min(95,50+vp/10*50));
+    var vpc=vp>=0?'var(--g)':'var(--r)';
+    vwapHtml='<div class="vwap-row"><span style="color:var(--t2)">VWAP</span><span style="font-family:var(--mono);font-size:11px;color:var(--t2)">₩'+Math.round(r.vwap).toLocaleString()+'</span><div class="vwap-bar-wrap"><div class="vwap-bar-fill" style="width:'+barPct+'%;background:'+vpc+';opacity:.7"></div></div><span style="color:'+vpc+';font-size:11px">'+(vp>=0?'+':'')+vp+'%</span></div>';
+  }
+
+  // 레벨 (ENTER: 강조 / WATCH: 참고용 흐리게)
+  var levelsHtml='';
+  if(ac==='ENTER'&&(r.entry||r.stop||r.target1)){
+    var eV=r.entry?'₩'+Math.round(r.entry).toLocaleString():'--';
+    var sV=r.stop?'₩'+Math.round(r.stop).toLocaleString():'--';
+    var t1V=st?'₩'+Math.round(st.t1).toLocaleString():(r.target1?'₩'+Math.round(r.target1).toLocaleString():'--');
+    var rrV=r.rr?r.rr+'R':'--';
+    var slipNote=r.slippage_risk==='high'?'<div class="mc-slip">⚡ 슬리피지 '+(r.slippage_pct||'')+'% — 지정가 전용</div>':
+                 r.slippage_risk==='medium'?'<div style="font-size:10px;color:var(--a);margin-top:4px;padding-left:4px">△ 슬리피지 있음 — 지정가 권장</div>':'';
+    levelsHtml=
+      '<div class="mc-levels">'+
+        '<div class="mc-lv mc-lv-entry"><div class="mc-lv-label">진입</div><div class="mc-lv-val">'+eV+'</div></div>'+
+        '<div class="mc-lv mc-lv-stop"><div class="mc-lv-label">손절</div><div class="mc-lv-val">'+sV+'</div></div>'+
+        '<div class="mc-lv mc-lv-t1"><div class="mc-lv-label">T1 목표</div><div class="mc-lv-val">'+t1V+'</div></div>'+
+        '<div class="mc-lv mc-lv-rr"><div class="mc-lv-label">손익비</div><div class="mc-lv-val">'+rrV+'</div></div>'+
+      '</div>'+slipNote;
+  } else if(ac==='WATCH'&&(r.entry||r.stop)){
+    var eV2=r.entry?'₩'+Math.round(r.entry).toLocaleString():'--';
+    var sV2=r.stop?'₩'+Math.round(r.stop).toLocaleString():'--';
+    var t1V2=r.target1?'₩'+Math.round(r.target1).toLocaleString():'--';
+    var rrV2=r.rr?r.rr+'R':'--';
+    levelsHtml=
+      '<div class="mc-levels mc-levels-ref">'+
+        '<div class="mc-lv mc-lv-entry"><div class="mc-lv-label">진입 예상</div><div class="mc-lv-val">'+eV2+'</div></div>'+
+        '<div class="mc-lv mc-lv-stop"><div class="mc-lv-label">손절 예상</div><div class="mc-lv-val">'+sV2+'</div></div>'+
+        '<div class="mc-lv mc-lv-t1"><div class="mc-lv-label">T1 예상</div><div class="mc-lv-val">'+t1V2+'</div></div>'+
+        '<div class="mc-lv mc-lv-rr"><div class="mc-lv-label">손익비</div><div class="mc-lv-val">'+rrV2+'</div></div>'+
+      '</div>'+
+      '<div class="mc-levels-ref-label">트리거 미충족 — 진입 전 재확인 필수</div>';
+  }
+
+  // BLOCK 이유 인라인
+  var blockHtml='';
+  if(ac==='BLOCK'){
+    var bList=(r.blockers||[]).concat(r.warnings||[]).slice(0,5);
+    blockHtml=bList.length?
+      '<div class="mc-block-reasons">'+
+        bList.map(function(b){return '<div style="font-family:var(--mono);font-size:11px;color:var(--r);padding:2px 0">✗ '+b+'</div>';}).join('')+
+      '</div>':'';
+  }
+
+  // 액션 시그널
+  var signalHtml=ac!=='BLOCK'?
+    '<div class="action-signal '+ea.css+'">'+
+      '<div class="as-icon">'+ea.icon+'</div>'+
+      '<div class="as-body">'+
+        '<div class="as-label '+ea.css+'">'+ea.label+'</div>'+
+        '<div class="as-reason">'+ea.reason+'</div>'+
+        (ea.trigger?'<div class="as-trigger">'+ea.trigger+'</div>':'')+
+        (r.entry_reason?'<div style="font-size:10px;color:var(--t3);margin-top:4px">Claude: '+r.entry_reason+'</div>':'')+
+      '</div>'+
+    '</div>':'';
+
+  // 뉴스
+  var newsHtml=r.news?'<div class="news-line">'+r.news+'</div>':'';
+
+  // ═══ 상세 (접힘) ═══
+  var detailId='mcd-'+r.ticker.replace(/[^a-zA-Z0-9]/g,'')+'_'+(r._ts||0);
+
+  // 시그널/워닝/블로커 전체
+  var allSigs=[];
+  (r.signals||[]).forEach(function(s){allSigs.push('<div class="sig-line"><span class="sig-icon" style="color:var(--g)">✓</span>'+s+'</div>');});
+  (r.warnings||[]).forEach(function(w){allSigs.push('<div class="sig-line"><span class="sig-icon" style="color:var(--a)">⚠</span>'+w+'</div>');});
+  if(ac!=='BLOCK')(r.blockers||[]).forEach(function(b){allSigs.push('<div class="sig-line"><span class="sig-icon" style="color:var(--r)">✗</span>'+b+'</div>');});
+  var sigsHtml=allSigs.length?'<div class="card-signals" style="margin-bottom:8px">'+allSigs.join('')+'</div>':'';
+
+  // 돌파 체크리스트
+  var ckHtml='';
+  if(r.price){
+    var ck=[];
+    if(r.pm_low)             ck.push({label:'PM 저점',price:r.pm_low,color:'var(--t2)'});
+    if(r.vwap)               ck.push({label:'VWAP',price:r.vwap,color:'var(--bl)'});
+    if(r.nearest_support)    ck.push({label:'지지선',price:r.nearest_support,color:'var(--t2)'});
+    if(r.orb_high)           ck.push({label:'ORB',price:r.orb_high,color:'var(--bl)'});
+    if(r.pm_high)            ck.push({label:'PM 고점',price:r.pm_high,color:'var(--a)'});
+    if(r.nearest_resistance) ck.push({label:'1차 저항',price:r.nearest_resistance,color:'var(--a)'});
+    if(r.second_resistance)  ck.push({label:'2차 저항',price:r.second_resistance,color:'var(--r)'});
+    ck.sort(function(a,b){return a.price-b.price;});
+    if(ck.length>=2){
+      ckHtml='<div style="padding:10px 12px;background:var(--bg2);border:1px solid var(--b);border-radius:10px;margin-bottom:8px">'+
+        '<div class="mc-detail-label">🎯 가격 레벨</div>'+
+        ck.map(function(lv){
+          var done=r.price>=lv.price;
+          return '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
+            '<span style="font-size:12px">'+(done?'✅':'⬜')+'</span>'+
+            '<span style="font-family:var(--mono);font-size:10px;color:'+(done?'var(--g)':lv.color)+'">'+lv.label+'</span>'+
+            '<span style="font-family:var(--mono);font-size:11px;margin-left:auto;color:'+(done?'var(--g)':lv.color)+'">₩'+Math.round(lv.price).toLocaleString()+'</span>'+
+          '</div>';
+        }).join('')+
+      '</div>';
+    }
+  }
+
+  // 매도 전략
+  var sellHtml='';
+  if(st&&ac!=='BLOCK'){
+    var pWarn=st.parabolic?'<div class="parabolic-warn">⚡ 파라볼릭 과확장 — T1 전량</div>':
+              st.overextended?'<div class="parabolic-warn">⚠ 과확장 +15%↑ — T1 절반+</div>':'';
+    sellHtml='<div style="margin-bottom:8px">'+
+      '<div class="mc-detail-label">📤 매도 전략</div>'+
+      '<div class="sell-targets">'+
+        '<div class="sell-target st-t1"><div class="st-label">T1 · 50% 매도</div><div class="st-price">₩'+Math.round(st.t1).toLocaleString()+'</div><div class="st-sub">+1R · 잔량 손절 이동</div></div>'+
+        '<div class="sell-target st-t2"><div class="st-label">T2 · 전량</div><div class="st-price">₩'+Math.round(st.t2).toLocaleString()+'</div><div class="st-sub">+2R</div></div>'+
+      '</div>'+pWarn+
+    '</div>';
+  }
+
+  // 눌림목 진입각 (메인과 다를 때만)
+  var pbHtml='';
+  if(r.pullback_entry&&r.pullback_entry!==r.entry&&ac!=='BLOCK'){
+    pbHtml=
+      '<div style="padding:10px 12px;background:rgba(0,240,122,.05);border:1px solid rgba(0,240,122,.15);border-radius:10px;margin-bottom:8px">'+
+      '<div style="font-size:9px;color:var(--g);letter-spacing:.1em;margin-bottom:6px">✦ 눌림목 진입각</div>'+
+      '<div class="levels">'+
+        '<div class="lv lv-entry"><div class="lv-label">진입</div><div class="lv-val">₩'+Math.round(r.pullback_entry).toLocaleString()+'</div></div>'+
+        '<div class="lv lv-stop"><div class="lv-label">손절</div><div class="lv-val">'+(r.pullback_stop?'₩'+Math.round(r.pullback_stop).toLocaleString():'--')+'</div></div>'+
+        '<div class="lv lv-t1"><div class="lv-label">목표</div><div class="lv-val">'+(r.pullback_target?'₩'+Math.round(r.pullback_target).toLocaleString():'--')+'</div></div>'+
+        '<div class="lv lv-rr"><div class="lv-label">R:R</div><div class="lv-val">'+(r.pullback_rr?r.pullback_rr+'R':'--')+'</div></div>'+
+      '</div></div>';
+  }
+
+  // 박스권 시나리오
+  var boxHtml='';
+  if(ac!=='BLOCK'){
+    var bLow=r.intraday_consolidation?r.intraday_range_low:null;
+    var bHigh=r.intraday_consolidation?r.intraday_range_high:null;
+    var sLow=bLow||(r.nearest_support||null);
+    var sHigh=bHigh||(r.pm_high||(r.nearest_resistance||null));
+    if(sLow&&sHigh&&parseFloat(sHigh)>parseFloat(sLow)){
+      var upN=r.nearest_resistance&&r.nearest_resistance>parseFloat(sHigh)?'₩'+Math.round(r.nearest_resistance).toLocaleString():
+              (r.pm_high&&r.pm_high>parseFloat(sHigh)?'₩'+Math.round(r.pm_high).toLocaleString():'₩'+Math.round(parseFloat(sHigh)*1.10).toLocaleString());
+      var dnN=r.nearest_support&&r.nearest_support<parseFloat(sLow)?'₩'+Math.round(r.nearest_support).toLocaleString():'₩'+Math.round(parseFloat(sLow)*0.95).toLocaleString();
+      boxHtml=
+        '<div style="margin-bottom:6px">'+
+        '<div class="mc-detail-label">📦 박스권 시나리오</div>'+
+        '<div style="text-align:center;font-family:var(--mono);font-size:11px;color:var(--a);margin-bottom:8px">₩'+Math.round(parseFloat(sLow)).toLocaleString()+' ─── ₩'+Math.round(parseFloat(sHigh)).toLocaleString()+'</div>'+
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">'+
+          '<div style="background:rgba(0,240,122,.06);border:1px solid rgba(0,240,122,.18);border-radius:8px;padding:8px 10px">'+
+            '<div style="font-size:9px;color:var(--g);margin-bottom:4px">🟢 돌파 시</div>'+
+            '<div style="font-family:var(--mono);font-size:13px;color:var(--g)">→ '+upN+'</div>'+
+          '</div>'+
+          '<div style="background:rgba(255,45,78,.06);border:1px solid rgba(255,45,78,.18);border-radius:8px;padding:8px 10px">'+
+            '<div style="font-size:9px;color:var(--r);margin-bottom:4px">🔴 이탈 시</div>'+
+            '<div style="font-family:var(--mono);font-size:13px;color:var(--r)">→ '+dnN+'</div>'+
+          '</div>'+
+        '</div></div>';
+    }
+  }
+
+  var hasDetail = sigsHtml||ckHtml||sellHtml||boxHtml||pbHtml;
+  var detailHtml=hasDetail?
+    '<button class="mc-expand-btn" id="btn-'+detailId+'" onclick="toggleCardDetail(\''+detailId+'\')">'+
+      '상세 정보 <span style="font-size:10px">▾</span>'+
+    '</button>'+
+    '<div id="'+detailId+'" style="display:none">'+
+      '<div class="mc-detail-section">'+
+        sigsHtml+pbHtml+ckHtml+sellHtml+boxHtml+
+      '</div>'+
+    '</div>':'';
+
+  // 카드 CSS
+  var cardC={ENTER:'enter',WATCH:'watch',BLOCK:'block'}[ac];
+
+  return '<div class="stock-card '+cardC+'" style="padding:14px 14px 12px">'+
+    // 헤더: 티커 + 판정
+    '<div class="mc-header">'+
+      '<div class="mc-id">'+
+        '<div class="mc-ticker">'+r.ticker+'</div>'+
+        '<div class="mc-name-row">'+
+          (nameStr?'<span class="mc-name">'+nameStr+'</span>':'')+
+          (tsStr?'<span class="mc-ts">'+tsStr+'</span>':'')+
+        '</div>'+
+      '</div>'+
+      '<div class="mc-verdict '+vcC+'">'+
+        '<div class="mc-score">'+r.score+'</div>'+
+        '<div class="mc-ac">'+ac+'</div>'+
+      '</div>'+
+    '</div>'+
+    // 가격 행
+    '<div class="mc-price-row">'+
+      '<span class="mc-price">'+price+'</span>'+
+      '<span class="mc-gap '+gapClass+'">'+gapStr+'</span>'+
+      (rvolStr?'<span class="mc-rvol">'+rvolStr+'</span>':'')+
+      pmzHtml+
+    '</div>'+
+    // 액션 시그널 박스
+    signalHtml+
+    // BLOCK 이유
+    blockHtml+
+    // 레벨 그리드
+    levelsHtml+
+    // 컨텍스트: VWAP + 태그 + 뉴스
+    '<div class="mc-context">'+
+      vwapHtml+
+      tagsHtml+
+      newsHtml+
+    '</div>'+
+    // 상세 접기
+    detailHtml+
+    // 거래 기록 버튼
+    '<button class="mc-trade-btn" onclick="openTradeLog(\''+r.ticker+'\','+(r.price||0)+')">✓ 거래 기록</button>'+
+  '</div>';
+}
+
 // ═══════════════════════════════════════
 // 카드 HTML
 // ═══════════════════════════════════════
 function cardHTML(r, mode){
+  // MOMO: 전용 카드 (v4 리디자인)
+  if((r._mode==='momo'||mode==='momo') && r.mode!=='hold'){
+    return momoCardHTML(r);
+  }
   var ac  = r.action||'WATCH';
   var abC = {'ENTER':'ab-enter','WATCH':'ab-watch','BLOCK':'ab-block'}[ac];
   var cardC = {'ENTER':'enter','WATCH':'watch','BLOCK':'block'}[ac];
