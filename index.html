@@ -975,17 +975,37 @@ function updateClock(){
   else                          { phase='CLOSED'; }
 
   var badge = document.getElementById('phaseBadge');
-  badge.textContent = phase;
-  badge.className = 'phase-badge phase-'+phase;
+  // NXT_AFTER는 별도 표시
+  var badgePhase = (newMomoPhase==='NXT_AFTER') ? 'NXT' : phase;
+  badge.textContent = badgePhase;
+  badge.className = 'phase-badge phase-'+(newMomoPhase==='NXT_AFTER'?'LATE':phase);
 
   // ── marketPhase (MOMO 시간대) 실시간 동기화 — 한국 기준 ──
+  // NXT(넥스트레이드): 08:00~20:00 / KRX 정규: 08:30~15:30
   var newMomoPhase;
-  if(day===0||day===6||hm<830||hm>=1530){ newMomoPhase='CLOSED'; }
-  else if(hm>=830  && hm<900)            { newMomoPhase='PRE'; }
-  else if(hm>=900  && hm<905)            { newMomoPhase='ORB'; }
-  else if(hm>=905  && hm<1030)           { newMomoPhase='EARLY'; }
-  else if(hm>=1030 && hm<1300)           { newMomoPhase='PRIME'; }
-  else                                    { newMomoPhase='LATE'; }
+  if(day===0||day===6){
+    newMomoPhase='CLOSED';
+  } else if(hm>=800 && hm<830){
+    // NXT 전용 시간대 (08:00~08:30) — KRX는 아직 PRE 전
+    newMomoPhase='PRE';
+  } else if(hm>=830 && hm<900){
+    newMomoPhase='PRE';
+  } else if(hm>=900 && hm<905){
+    newMomoPhase='ORB';
+  } else if(hm>=905 && hm<1030){
+    newMomoPhase='EARLY';
+  } else if(hm>=1030 && hm<1300){
+    newMomoPhase='PRIME';
+  } else if(hm>=1300 && hm<1530){
+    newMomoPhase='LATE';
+  } else if(hm>=1530 && hm<2000){
+    // NXT 시간외 (15:30~20:00) — KRX 정규 종료 후 NXT 계속 운영
+    newMomoPhase='NXT_AFTER';
+  } else {
+    newMomoPhase='CLOSED';
+  }
+  // NXT_AFTER는 NXT 종목에서만 의미 있음 — CLOSED 대신 별도 구분
+  G._isNxtHours = (newMomoPhase==='NXT_AFTER' || (hm>=800&&hm<830&&day>0&&day<6));
 
   // ── 국면 변경 감지 → stale 배너 표시 ──
   if(G.marketPhase && G.marketPhase !== newMomoPhase){
@@ -1290,23 +1310,22 @@ async function fetchKisCandidates(mode){
 // ═══════════════════════════════════════
 async function loadMarketData(){
   try{
-    // KOSPI(^KS11), KOSDAQ(^KQ11), VKOSPI(^VKOSPI)
+    // ^ 기호 그대로 사용 — fetchWithProxy가 한 번만 인코딩
     var d = await fetchWithProxy(
-      'https://query1.finance.yahoo.com/v8/finance/quote?symbols=%5EKS11,%5EKQ11,%5EVKOSPI' +
+      'https://query1.finance.yahoo.com/v8/finance/quote?symbols=^KS11,^KQ11,^VKOSPI' +
       '&fields=regularMarketPrice,regularMarketChangePercent,regularMarketPreviousClose'
     );
     var results = d?.quoteResponse?.result || [];
     var symMap = {'^KS11':'KOSPI', '^KQ11':'KOSDAQ', '^VKOSPI':'VKOSPI'};
     results.forEach(function(q){
       var sym = symMap[q.symbol] || q.symbol;
-      // UI에서는 SPY→KOSPI, QQQ→KOSDAQ, VIX→VKOSPI로 매핑
       var uiId = sym==='KOSPI'?'SPY':sym==='KOSDAQ'?'QQQ':sym==='VKOSPI'?'VIX':sym;
       var el = document.getElementById('idx-'+uiId);
       if(!el) return;
       el.classList.remove('loading');
       var chg = q.regularMarketChangePercent || 0;
       var chgStr = (chg>=0?'+':'')+chg.toFixed(2)+'%';
-      var chgCls = chg>0?'idx-pos':chg<0?'idx-neg':'idx-flat';
+      var chgCls = chg>0?'idx-up':chg<0?'idx-dn':'idx-flat';
       var priceStr = sym==='VKOSPI'
         ? (q.regularMarketPrice||0).toFixed(2)
         : Math.round(q.regularMarketPrice||0).toLocaleString();
@@ -1315,7 +1334,7 @@ async function loadMarketData(){
         '<div class="idx-price">'+priceStr+'</div>'+
         '<div class="idx-chg '+chgCls+'">'+chgStr+'</div>';
     });
-  }catch(e){}
+  }catch(e){ console.warn('[market]', e.message); }
 }
 
 async function loadFearGreed(){
@@ -1324,7 +1343,7 @@ async function loadFearGreed(){
   // 역방향으로 0~100 점수로 변환
   try{
     var d = await fetchWithProxy(
-      'https://query1.finance.yahoo.com/v8/finance/quote?symbols=%5EVKOSPI&fields=regularMarketPrice,regularMarketChangePercent'
+      'https://query1.finance.yahoo.com/v8/finance/quote?symbols=^VKOSPI&fields=regularMarketPrice,regularMarketChangePercent'
     );
     var qt = d?.quoteResponse?.result?.[0];
     if(!qt) throw new Error('no data');
@@ -1450,9 +1469,8 @@ async function fetchCandidatePool(mode){
         return kisPool;
       }
     }catch(e){
-      console.warn('[KIS] 후보풀 실패, Yahoo fallback:', e.message);
-      KIS.connected = false;
-      updateKisStatus();
+      console.warn('[KIS] 후보풀 실패:', e.message);
+      // KIS.connected 리셋 안 함 — 토큰 만료/일시 오류일 수 있음
     }
   }
 
@@ -1720,6 +1738,14 @@ async function runScreener(mode){
   try{
     // 1. 후보 풀 수집
     var pool = await fetchCandidatePool(mode);
+    if(!pool.length){
+      if(area) area.innerHTML = '<div class="sc-status" style="color:var(--r)">후보 수집 실패<br><span style="font-size:10px;color:var(--t3)">KIS 연결 상태 확인 / 장 시간 중 재시도</span></div>';
+      if(bar) { bar.classList.remove('indeterminate'); bar.style.width='0%'; }
+      if(dot) dot.classList.remove('scanning');
+      if(btn) { btn.disabled=false; btn.textContent='스캔'; }
+      G.screenerRunning = false;
+      return;
+    }
     if(area) area.innerHTML = '<div class="sc-status">'+pool.length+'개 후보 필터링 중...</div>';
 
     // 2. 1차 하드컷
@@ -1764,14 +1790,13 @@ async function runScreener(mode){
     }
 
   }catch(e){
-    if(area) area.innerHTML = '<div class="sc-status">오류: '+e.message+'</div>';
+    if(area) area.innerHTML = '<div class="sc-status" style="color:var(--r)">오류: '+e.message+'</div>';
     if(bar) { bar.classList.remove('indeterminate'); bar.style.width='0%'; }
+  }finally{
+    if(dot) dot.classList.remove('scanning');
+    if(btn) { btn.disabled=false; btn.textContent='스캔'; }
+    G.screenerRunning = false;
   }
-
-  if(dot) dot.classList.remove('scanning');
-  if(btn) { btn.disabled=false; btn.textContent='스캔'; }
-  G.screenerRunning = false;
-}
 
 // ─────────────────────────────────────────────────────────────
 // 스크리너 결과 렌더링
@@ -2779,7 +2804,7 @@ async function fetchSwingData(ticker, kisPrice){
     // ── [4레이어] RS20: KOSPI 대비 20일 상대강도 (pp) ──
     if(closes.length >= 21){
       try{
-        var kospiRS = await fetchWithProxy('https://query1.finance.yahoo.com/v8/finance/chart/%5EKS11?interval=1d&range=2mo');
+        var kospiRS = await fetchWithProxy('https://query1.finance.yahoo.com/v8/finance/chart/^KS11?interval=1d&range=2mo');
         var kc20 = (kospiRS?.chart?.result?.[0]?.indicators?.quote?.[0]?.close||[]).filter(function(v){return v&&v>0;});
         if(kc20.length >= 21){
           var stRet = (price - closes[closes.length-21]) / closes[closes.length-21] * 100;
@@ -3013,7 +3038,7 @@ async function fetchCoreData(ticker){
 
     // KOSPI 대비 RS 계산 (13주 = 65거래일)
     try{
-      var kospiD=await fetchWithProxy('https://query1.finance.yahoo.com/v8/finance/chart/%5EKS11?interval=1d&range=6mo');
+      var kospiD=await fetchWithProxy('https://query1.finance.yahoo.com/v8/finance/chart/^KS11?interval=1d&range=6mo');
       var kospiC=(kospiD?.chart?.result?.[0]?.indicators?.quote?.[0]?.close||[]).filter(function(v){return v&&v>0;});
       if(kospiC.length>=65&&n>=65){
         var stkR=(cd.price-valid[n-65].c)/valid[n-65].c;
@@ -3030,7 +3055,7 @@ async function fetchCoreData(ticker){
     // RS 하락 감지 (최근 4주 vs 8주)
     if(cd.rs_13w!==null&&n>=95){
       try{
-        var kd2=await fetchWithProxy('https://query1.finance.yahoo.com/v8/finance/chart/%5EKS11?interval=1d&range=4mo');
+        var kd2=await fetchWithProxy('https://query1.finance.yahoo.com/v8/finance/chart/^KS11?interval=1d&range=4mo');
         var kc2=(kd2?.chart?.result?.[0]?.indicators?.quote?.[0]?.close||[]).filter(function(v){return v&&v>0;});
         if(kc2.length>=40&&n>=40){
           var rs4w=(valid[n-1].c-valid[n-20].c)/valid[n-20].c/((kc2[kc2.length-1]-kc2[Math.max(0,kc2.length-20)])/kc2[Math.max(0,kc2.length-20)]+0.001);
@@ -4542,7 +4567,7 @@ async function resolveKoreanName(name, analyzeEl){
     var quotes = (data?.quotes||[]).filter(function(r){
       var qt = (r.quoteType||'').toUpperCase();
       var sym = r.symbol||'';
-      return qt==='EQUITY' && (sym.endsWith('.KS')||sym.endsWith('.KQ'));
+      return qt==='EQUITY' && (sym.endsWith('.KS')||sym.endsWith('.KQ')||sym.endsWith('.KN'));
     });
     if(quotes.length){
       var sym = quotes[0].symbol;
@@ -4575,28 +4600,30 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
   var minTvRatio = parseFloat((document.getElementById('maxFloat')||{textContent:'3'}).textContent)||3;
 
   // ── 장 마감 시간대 모드별 처리 ──
-  if(G.marketPhase === 'CLOSED'){
+  var _isNxtTicker = /\.(KN)$/i.test(ticker);
+  // NXT_AFTER(15:30~20:00)는 NXT 종목이면 계속 분석 가능
+  var _effectiveClosed = (G.marketPhase==='CLOSED') ||
+                         (G.marketPhase==='NXT_AFTER' && !_isNxtTicker);
+
+  if(_effectiveClosed){
     var _hasPosCheck = G_journal.find(function(t){
       return t.ticker===ticker && (t.status==='open'||t.status==='partial') && (!t.mode||t.mode===mode);
     });
     if(!_hasPosCheck){
       if(mode === 'momo'){
-        // MOMO: 실시간 데이터 없음 → 완전 차단
         analyzeEl.innerHTML = '';
+        var _closedMsg = (G.marketPhase==='NXT_AFTER')
+          ? 'KRX 정규장 마감 (15:30)<br>NXT 종목(.KN)은 20:00까지 분석 가능<br><span style="font-family:var(--mono);font-size:11px;color:var(--t3)">SWING / CORE는 지금도 분석 가능</span>'
+          : 'MOMO는 실시간 데이터가 필요합니다<br>동시호가 시작(08:00 NXT / 08:30 KRX) 이후 분석 가능<br><span style="font-family:var(--mono);font-size:11px;color:var(--t3)">SWING / CORE는 일봉 기반으로 지금도 분석 가능</span>';
         resultEl.innerHTML =
           '<div style="margin:4px 0 10px;padding:20px 16px;background:var(--bg1);border:1px solid var(--b);border-radius:16px;text-align:center">'+
             '<div style="font-size:28px;margin-bottom:10px">🌙</div>'+
             '<div style="font-family:var(--mono);font-size:14px;color:var(--t);margin-bottom:8px">장 마감 상태</div>'+
-            '<div style="font-size:12px;color:var(--t2);line-height:1.8">'+
-              'MOMO는 실시간 데이터가 필요합니다<br>'+
-              '동시호가 시작(08:30 KST) 이후 분석 가능<br>'+
-              '<span style="font-family:var(--mono);font-size:11px;color:var(--t3)">SWING / CORE는 일봉 기반으로 지금도 분석 가능</span>'+
-            '</div>'+
+            '<div style="font-size:12px;color:var(--t2);line-height:1.8">'+_closedMsg+'</div>'+
           '</div>';
         return;
       }
       if(mode === 'swing' || mode === 'core'){
-        // SWING/CORE: 일봉 기반이라 허용하되 안내 배너 prepend
         resultEl.innerHTML =
           '<div style="margin:0 0 8px;padding:9px 13px;background:rgba(255,106,0,.07);border:1px solid rgba(255,106,0,.20);border-radius:10px;font-family:var(--mono);font-size:11px;color:var(--gold)">'+
             '🌙 장 마감 후 분석 — 일봉 기준 (실시간 가격 미반영)'+
@@ -4631,7 +4658,7 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
 
   // ── [2-b] 종목 유효성 검증 ──
   // 6자리.KS/.KQ 형식이면 내장 목록 검증된 종목 → 바로 통과
-  var knownFormat = /^\d{6}\.(KS|KQ)$/i.test(ticker);
+  var knownFormat = /^\d{6}\.(KS|KQ|KN)$/i.test(ticker);
   var isValidTicker = knownFormat || !!(ydata.prevClose || ydata.price || kisPrice);
   if(!isValidTicker){
     analyzeEl.innerHTML = '';
@@ -6687,8 +6714,30 @@ function rescanStale(mode, ticker){
   runModeScan(mode);
 }
 
-// ═══════════════════════════════════════
-// 한국 주식 내장 목록 (KOSPI+KOSDAQ 주요종목)
+// NXT (넥스트레이드) 주요 종목
+var KR_NXT_STOCKS = [
+  ["005930","삼성전자","KN"],["000660","SK하이닉스","KN"],["035420","NAVER","KN"],
+  ["035720","카카오","KN"],["051910","LG화학","KN"],["006400","삼성SDI","KN"],
+  ["207940","삼성바이오로직스","KN"],["068270","셀트리온","KN"],["005380","현대차","KN"],
+  ["000270","기아","KN"],["105560","KB금융","KN"],["055550","신한지주","KN"],
+  ["086790","하나금융지주","KN"],["316140","우리금융지주","KN"],("010130","고려아연","KN"),
+  ["247540","에코프로비엠","KN"],["086520","에코프로","KN"],["066970","엘앤에프","KN"],
+  ["096770","SK이노베이션","KN"],["034730","SK","KN"],["017670","SK텔레콤","KN"],
+  ["030200","KT","KN"],["066570","LG전자","KN"],["352820","하이브","KN"],
+  ["251270","넷마블","KN"],["036570","엔씨소프트","KN"],["263750","펄어비스","KN"],
+  ["293490","카카오게임즈","KN"],["323410","카카오뱅크","KN"],["377300","카카오페이","KN"],
+];
+
+function searchKrNxtStocks(q){
+  var r=[], ql=q.toLowerCase();
+  for(var i=0;i<KR_NXT_STOCKS.length&&r.length<4;i++){
+    var s=KR_NXT_STOCKS[i];
+    if(s[1].includes(q)||s[0].startsWith(q)||s[1].toLowerCase().includes(ql)){
+      r.push({symbol:s[0]+'.KN',longname:s[1]+' (NXT)',shortname:s[1],quoteType:'EQUITY',_kisPrice:null,_kisChg:null});
+    }
+  }
+  return r;
+}
 // ═══════════════════════════════════════
 var KR_STOCKS = [
 ["000020","동화약품","KS"],
@@ -7491,7 +7540,6 @@ var KR_STOCKS = [
 ["010780","아이에스동서","KS"],
 ["010790","LF","KS"],
 ["010840","MDS테크","KS"],
-["010850","한화에어로스페이스","KS"],
 ["010870","GS에너지","KS"],
 ["010880","한화손해보험","KS"],
 ["010890","대명소노시즌","KS"],
@@ -8831,7 +8879,7 @@ async function checkMarketRegime(){
   // ── 1. KOSPI MA200 (일봉 1년치) ──
   try{
     var dc = await fetchWithProxy(
-      'https://query1.finance.yahoo.com/v8/finance/chart/%5EKS11?interval=1d&range=1y'
+      'https://query1.finance.yahoo.com/v8/finance/chart/^KS11?interval=1d&range=1y'
     );
     var closes = dc?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || [];
     closes = closes.filter(function(v){return v&&v>0;});
@@ -8849,7 +8897,7 @@ async function checkMarketRegime(){
   if(isMarketOpen){
     try{
       var di = await fetchWithProxy(
-        'https://query1.finance.yahoo.com/v8/finance/chart/%5EKS11?interval=1m&range=1d&includePrePost=false'
+        'https://query1.finance.yahoo.com/v8/finance/chart/^KS11?interval=1m&range=1d&includePrePost=false'
       );
       var iRes = di?.chart?.result?.[0];
       if(iRes){
@@ -8886,7 +8934,7 @@ async function checkMarketRegime(){
   var el = document.getElementById('marketRegimeEl');
   if(el){
     var kospiStr = G.spyIntraday ? ' · KOSPI '+(G.spyIntraday.change_pct>=0?'+':'')+G.spyIntraday.change_pct+'%' : '';
-    var phaseStr = {'PRE':'동시호가','ORB':'ORB형성중','EARLY':'골든윈도우','PRIME':'2차모멘텀','LATE':'오후페이드','CLOSED':'장마감'}[G.marketPhase]||'';
+    var phaseStr = {'PRE':'동시호가','ORB':'ORB형성중','EARLY':'골든윈도우','PRIME':'2차모멘텀','LATE':'오후페이드','CLOSED':'장마감','NXT_AFTER':'NXT시간외'}[G.marketPhase]||'';
     var aboveStr = G.spyAboveMA200===true?'KOSPI MA200 위':G.spyAboveMA200===false?'KOSPI MA200 아래':'';
     el.textContent = (aboveStr?aboveStr+kospiStr:'--')+(phaseStr?' · '+phaseStr:'');
     var trendColor = G.spyIntraday?.trend==='crash'?'var(--r)':
@@ -8956,7 +9004,7 @@ setInterval(loadMacroData, 10*60*1000); // 10분마다 갱신
 async function loadKisSectors(){
   if(!KIS.appKey||!KIS.appSecret) return;
   try{
-    var headers = await getKisAuthHeaders();
+    var headers = await kisAuthHeaders('FHPST02300000');
     // 코스피 업종 등락 상위/하위 (FHPST01730000 업종버전)
     var [kospiSec, kosdaqSec] = await Promise.allSettled([
       kisGet('/uapi/domestic-stock/v1/ranking/fluctuation', {
@@ -9024,7 +9072,7 @@ async function loadKisSectors(){
 async function loadKisFlow(){
   if(!KIS.appKey||!KIS.appSecret) return;
   try{
-    var headers = await getKisAuthHeaders();
+    var headers = await kisAuthHeaders('FHPST01720000');
     // 외국인 순매수 상위
     var [forBuy, instBuy] = await Promise.allSettled([
       kisGet('/uapi/domestic-stock/v1/ranking/fluctuation', {
