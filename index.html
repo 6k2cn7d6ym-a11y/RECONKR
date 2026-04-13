@@ -605,7 +605,7 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
   <div class="sg-title">MOMO 스캔 기준</div>
   <div class="sg-row"><div><div class="sg-label">최소 갭업</div><div class="sg-sub">동시호가 기준 갭 하한</div></div><div class="sg-val" id="minGap" onclick="cycle('minGap',['3%','5%','8%','10%','15%'])">5%</div></div>
   <div class="sg-row"><div><div class="sg-label">최소 시가총액(억)</div><div class="sg-sub">소형 세력주 차단 기준</div></div><div class="sg-val" id="minMcap" onclick="cycle('minMcap',['200','500','1000','2000'])">500</div></div>
-  <div class="sg-row"><div><div class="sg-label">거래대금 최소배수</div><div class="sg-sub">전일比 N배 이상만 진입</div></div><div class="sg-val" id="maxFloat" onclick="cycle('maxFloat',['2x','3x','5x','10x'])">3x</div></div>
+  <div class="sg-row"><div><div class="sg-label">거래대금 최소배수</div><div class="sg-sub">전일比 N배 이상만 진입</div></div><div class="sg-val" id="minTvRatio" onclick="cycle('minTvRatio',['2x','3x','5x','10x'])">3x</div></div>
   <div class="sg-row"><div><div class="sg-label">최소 거래대금(억원)</div><div class="sg-sub">절대 유동성 — 미달 시 BLOCK</div></div><div class="sg-val" id="minTvAbs" onclick="cycle('minTvAbs',['5','10','20','50'])">10</div></div>
   <div class="sg-row"><div><div class="sg-label">최소 RVol (장중)</div><div class="sg-sub">미달 시 WATCH 다운그레이드</div></div><div class="sg-val" id="minRvol" onclick="cycle('minRvol',['1.0','1.5','2.0','3.0'])">1.5</div></div>
   <div class="sg-row"><div><div class="sg-label">최소 점수</div><div class="sg-sub">알림 발송 기준</div></div><div class="sg-val" id="minScore" onclick="cycle('minScore',['60','65','70','75','80'])">70</div></div>
@@ -1751,7 +1751,7 @@ async function runScreener(mode){
     // 2. 1차 하드컷
     var minGap    = parseInt((document.getElementById('minGap')||{textContent:'5'}).textContent)||5;
     var minTvAbs  = parseFloat((document.getElementById('minTvAbs')||{textContent:'10'}).textContent)||10;
-    var minTvRatio= parseFloat((document.getElementById('maxFloat')||{textContent:'3'}).textContent)||3;
+    var minTvRatio= parseFloat((document.getElementById('minTvRatio')||{textContent:'3'}).textContent)||3;
     var minCap    = parseInt((document.getElementById('minMcap')||{textContent:'500'}).textContent)||500;
 
     var passed = [];
@@ -1797,6 +1797,7 @@ async function runScreener(mode){
     if(btn) { btn.disabled=false; btn.textContent='스캔'; }
     G.screenerRunning = false;
   }
+} // end runScreener
 
 // ─────────────────────────────────────────────────────────────
 // 스크리너 결과 렌더링
@@ -4024,6 +4025,29 @@ function momoEngine(ydata){
     r.warnings.push('ORB 저점 이탈 — 덤프 패턴'); score-=15;
   }
 
+  // ── 모멘텀 소진 판별 (PRIME/LATE 구간 신규 진입 위험도 평가) ──
+  // EARLY 구간은 아직 초기 이동 중이므로 체크 제외
+  if((ph==='PRIME'||ph==='LATE') && ydata.orb_high && ydata.price && ydata.orb_high > 0){
+    var _orbRetractPct = (ydata.orb_high - ydata.price) / ydata.orb_high * 100;
+    if(_orbRetractPct > 8){
+      // ORB 고점 대비 8%+ 후퇴 = 주요 이동 이미 완료, 현재 분산 또는 하락
+      score -= 15;
+      r.warnings.push('[소진] ORB 고점 대비 -'+_orbRetractPct.toFixed(1)+'% 후퇴 — 주요 이동 완료 가능성');
+    } else if(_orbRetractPct > 4){
+      // 4~8% 후퇴 = 모멘텀 약화 신호
+      score -= 8;
+      r.warnings.push('[소진] ORB 고점 -'+_orbRetractPct.toFixed(1)+'% — 모멘텀 약화 중');
+    }
+    // 대형 갭(15%+) + PRIME/LATE + ORB 수준 이하 복귀 = 갭 에너지 소진
+    if(gap > 15){
+      var _orbVsPrice = (ydata.price / ydata.orb_high - 1) * 100;
+      if(_orbVsPrice < 1){ // 갭은 컸는데 ORB 고가 근처까지 되돌림
+        score -= 10;
+        r.warnings.push('[소진] 갭 '+gap.toFixed(0)+'%+'+ph+' 시간대 — ORB 수준 복귀, 갭 에너지 소진');
+      }
+    }
+  }
+
   r.score = Math.min(100, Math.max(0, score));
 
   // ── 4. 액션 결정 ──
@@ -4597,7 +4621,7 @@ async function resolveKoreanName(name, analyzeEl){
 
 async function runSingleScan(mode, ticker, analyzeEl, resultEl){
   var minGap     = parseInt((document.getElementById('minGap')||{textContent:'5'}).textContent)||5;
-  var minTvRatio = parseFloat((document.getElementById('maxFloat')||{textContent:'3'}).textContent)||3;
+  var minTvRatio = parseFloat((document.getElementById('minTvRatio')||{textContent:'3'}).textContent)||3;
 
   // ── 장 마감 시간대 모드별 처리 ──
   var _isNxtTicker = /\.(KN)$/i.test(ticker);
@@ -5007,7 +5031,25 @@ function applyHistory(r){
 // ═══════════════════════════════════════
 // 진입 액션 + 매도 타겟 계산
 // ═══════════════════════════════════════
+// ── calcEntryAction: WATCH/BLOCK 카드에서 GO 신호 차단 ──
+// 엔진이 ENTER 자격을 주지 않은 종목에 GO 신호가 나오는 모순 방지
 function calcEntryAction(r){
+  var raw = _calcEntryActionInner(r);
+  // ENTER가 아닌데 GO 신호: 점수나 세력 조건 미충족 상태 → WAIT으로 강등
+  if(r.action !== 'ENTER' && raw.signal === 'GO'){
+    var watchReason = r.action === 'WATCH'
+      ? (r.score >= 70 ? '점수 '+r.score+'pt — 트리거 대기' : '점수 '+r.score+'pt — 기준 미달(70pt)')
+      : '['+r.whale_stage+'] 세력 단계 제한';
+    return {
+      signal:'WAIT', icon:'🟡', label:'기다려',
+      reason: raw.reason,
+      trigger: raw.trigger || watchReason,
+      css:'wait'
+    };
+  }
+  return raw;
+}
+function _calcEntryActionInner(r){
   var price=r.price, vwap=r.vwap, pmHigh=r.pm_high, pmLow=r.pm_low, orbHigh=r.orb_high;
   var aboveVwap=vwap&&price&&price>=vwap;
   var vwapDist=vwap&&price?(price-vwap)/vwap*100:null;
@@ -5172,7 +5214,7 @@ function calcEntryAction(r){
   var defaultTrigger;
   if(vwap&&!aboveVwap){
     // VWAP 아래 → VWAP 탈환 먼저
-    defaultTrigger='VWAP $'+vwap.toFixed(2)+' 탈환 후 → '+(sup1?'₩'+Math.round(sup1).toLocaleString()+' 눌림 반등':pmHigh?'₩'+Math.round(pmHigh).toLocaleString()+' 돌파':'재판단');
+    defaultTrigger='VWAP ₩'+Math.round(vwap).toLocaleString()+' 탈환 후 → '+(sup1?'₩'+Math.round(sup1).toLocaleString()+' 눌림 반등':pmHigh?'₩'+Math.round(pmHigh).toLocaleString()+' 돌파':'재판단');
   } else if(sup1&&pmHigh){
     // VWAP 위 or VWAP 없음 → 지지선 눌림 기다림
     defaultTrigger='진입: $'+sup1.toFixed(2)+' 눌림 반등 확인 / 목표 $'+pmHigh.toFixed(2);
