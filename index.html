@@ -1259,17 +1259,17 @@ async function fetchKisPrice(stockCode){
 async function fetchKisVolumeRanking(market){
   // market: '0001'=코스피, '1001'=코스닥
   var headers = await kisAuthHeaders('FHPST01710000');
-  var data = await kisGet('/uapi/domestic-stock/v1/ranking/volume', {
+  var data = await kisGet('/uapi/domestic-stock/v1/quotations/volume-rank', {
     FID_COND_MRKT_DIV_CODE: 'J',
     FID_COND_SCR_DIV_CODE:  '20171',
     FID_INPUT_ISCD:          market,
-    FID_DIV_CLS_CODE:        '0',    // 전체
+    FID_DIV_CLS_CODE:        '0',
     FID_BLNG_CLS_CODE:       '0',
     FID_TRGT_CLS_CODE:       '111111111',
     FID_TRGT_EXLS_CLS_CODE:  '000000',
-    FID_INPUT_PRICE_1:       '500',  // 최소 주가 500원
+    FID_INPUT_PRICE_1:       '500',
     FID_INPUT_PRICE_2:       '',
-    FID_VOL_CNT:             '30',   // 상위 30개
+    FID_VOL_CNT:             '30',
     FID_INPUT_DATE_1:        '',
   }, headers);
   if(data.rt_cd !== '0') throw new Error('KIS 거래량순위 오류: ' + data.msg1);
@@ -1298,8 +1298,8 @@ async function fetchKisFluctuationRanking(market, sortDiv){
   var data = await kisGet('/uapi/domestic-stock/v1/ranking/fluctuation', {
     FID_COND_MRKT_DIV_CODE: 'J',
     FID_COND_SCR_DIV_CODE:  '20170',
-    FID_INPUT_ISCD:          market,   // '0001' or '1001'
-    FID_RANK_SORT_CLS_CODE:  sortDiv || '0',  // 0=상승률, 1=하락률
+    FID_INPUT_ISCD:          market,
+    FID_RANK_SORT_CLS_CODE:  sortDiv || '0',
     FID_INPUT_CNT_1:         '0',
     FID_PRCG_CLS_CODE:       '0',
     FID_INPUT_PRICE_1:       '500',
@@ -1309,6 +1309,7 @@ async function fetchKisFluctuationRanking(market, sortDiv){
     FID_TRGT_EXLS_CLS_CODE:  '0',
     FID_DIV_CLS_CODE:        '0',
     FID_RST_DIV_CODE:        '1',
+    FID_INPUT_OPTION_1:      '0',   // 당일 기준 (필수 파라미터)
   }, headers);
   if(data.rt_cd !== '0') throw new Error('KIS 등락률순위 오류: ' + data.msg1);
   return (data.output || []).map(function(o){
@@ -1548,61 +1549,40 @@ function switchScreenerTab(mode){
 // KIS 연결 후: fetchKisMomoPool / fetchKisSwingPool / fetchKisCorePool 교체
 // ─────────────────────────────────────────────────────────────
 async function fetchCandidatePool(mode){
-  // ── KIS 연결 시 → KIS API 사용 ──
+  var sc = document.getElementById('scKisStatus');
+  if(sc) sc.textContent = '수집 중...';
+
+  // ── KIS 연결 시 → KIS 순위 API 우선 ──
   if(KIS.connected || (KIS.appKey && KIS.appSecret)){
     try{
       var kisPool = await fetchKisCandidates(mode);
       if(kisPool.length > 0){
-        var sc = document.getElementById('scKisStatus');
         if(sc) sc.textContent = 'KIS · '+kisPool.length+'개 수집';
         return kisPool;
       }
-      // KIS 0개 — Yahoo fallback 시도
-      var sc2 = document.getElementById('scKisStatus');
-      if(sc2) sc2.textContent = 'KIS 0개→Yahoo전환';
+      if(sc) sc.textContent = 'KIS 0개→Yahoo전환';
     }catch(e){
       console.warn('[KIS] 후보풀 실패:', e.message);
-      var sc3 = document.getElementById('scKisStatus');
-      if(sc3) sc3.textContent = 'KIS 오류→Yahoo전환';
+      if(sc) sc.textContent = 'KIS오류→Yahoo전환';
     }
   }
 
-  // ── Yahoo fallback — v8/finance/chart 개별 조회 (복수쿼리 차단 대응) ──
-  var FALLBACK_POOL = {
-    momo: ['005930.KS','000660.KS','035420.KS','051910.KS','006400.KS',
-           '352820.KQ','247540.KQ','086520.KQ','196170.KQ','091990.KQ',
-           '068270.KS','035720.KS','066570.KS','207940.KS','005490.KS'],
-    swing:['005930.KS','000660.KS','035420.KS','051910.KS','006400.KS',
-           '352820.KQ','247540.KQ','086520.KQ','196170.KQ','091990.KQ',
-           '068270.KS','035720.KS','207940.KS','005490.KS','066570.KS'],
-    core: ['005930.KS','000660.KS','035420.KS','051910.KS','005490.KS',
-           '105560.KS','055550.KS','086790.KS','316140.KS','003550.KS',
-           '352820.KQ','086520.KQ','196170.KQ','091990.KQ','066570.KS'],
-  };
-  var symbols = FALLBACK_POOL[mode] || FALLBACK_POOL.momo;
-  var all = [];
-  var seen = {};
-
-  // v8/finance/quote 단일 종목씩 순차 처리 — 동시 요청 시 Yahoo 봇차단 대응
-  for(var si=0; si<symbols.length; si++){
-    try{
-      var sym = symbols[si];
-      var d = await fetchWithProxy(
-        'https://query1.finance.yahoo.com/v8/finance/quote?symbols='+sym+
-        '&fields=regularMarketPrice,regularMarketPreviousClose,regularMarketChangePercent,regularMarketVolume,averageDailyVolume3Month,marketCap,shortName'
-      );
-      var q = (d?.quoteResponse?.result||[])[0];
-      if(q && q.symbol && !seen[q.symbol]){
-        seen[q.symbol] = true;
-        all.push(q);
-      }
-    }catch(e){ /* 개별 실패 무시 */ }
+  // ── Worker /screener/ 엔드포인트 (서버사이드 병렬 fetch) ──
+  try{
+    var d = await fetch(WORKER_URL + '/screener/?mode=' + mode);
+    if(!d.ok) throw new Error('HTTP '+d.status);
+    var json = await d.json();
+    var quotes = json.quotes || [];
+    if(quotes.length > 0){
+      if(sc) sc.textContent = 'Yahoo · '+quotes.length+'개 수집';
+      return quotes;
+    }
+  }catch(e){
+    console.warn('[Screener] Worker /screener/ 실패:', e.message);
+    if(sc) sc.textContent = '수집 실패';
   }
 
-  console.log('[Screener] Yahoo chart fallback pool: '+all.length+'개 수집');
-  var scSt = document.getElementById('scKisStatus');
-  if(scSt) scSt.textContent = all.length>0?'Yahoo · '+all.length+'개 수집':'Yahoo 0개';
-  return all;
+  return [];
 }
 
 // ─────────────────────────────────────────────────────────────
