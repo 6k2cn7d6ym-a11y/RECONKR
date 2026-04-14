@@ -1340,15 +1340,15 @@ async function fetchKisCandidates(mode){
   }
 
   if(mode === 'momo'){
-    // 거래량 상위 + 등락률 상위 (코스피+코스닥)
     var [vKp, vKq, fKp, fKq] = await Promise.allSettled([
-      fetchKisVolumeRanking('0001'),       // 코스피 거래량
-      fetchKisVolumeRanking('1001'),       // 코스닥 거래량
-      fetchKisFluctuationRanking('0001','0'), // 코스피 등락률
-      fetchKisFluctuationRanking('1001','0'), // 코스닥 등락률
+      fetchKisVolumeRanking('0001'),
+      fetchKisVolumeRanking('1001'),
+      fetchKisFluctuationRanking('0001','0'),
+      fetchKisFluctuationRanking('1001','0'),
     ]);
     [vKp, vKq, fKp, fKq].forEach(function(r){
       if(r.status==='fulfilled') merge(r.value);
+      else console.warn('[KIS API]', r.reason?.message || r.reason);
     });
 
   } else if(mode === 'swing'){
@@ -1602,21 +1602,31 @@ async function fetchCandidatePool(mode){
   var all = [];
   var seen = {};
   // 40개씩 나눠서 v8/quote 조회
-  var chunkSize = 40;
+  var chunkSize = 10; // URL 길이 제한 대응
   for(var ci=0; ci<symbols.length; ci+=chunkSize){
     var chunk = symbols.slice(ci, ci+chunkSize);
     try{
       var d = await fetchWithProxy(
         'https://query1.finance.yahoo.com/v8/finance/quote?symbols='+chunk.join(',')+'&fields=regularMarketPrice,regularMarketPreviousClose,regularMarketChangePercent,regularMarketVolume,averageDailyVolume3Month,marketCap,shortName'
       );
-      var quotes = d?.quoteResponse?.result || [];
+      var quotes = (d?.quoteResponse?.result) || [];
+      if(quotes.length === 0 && d?.quoteResponse?.error){
+        console.warn('[Yahoo chunk] API 오류:', d.quoteResponse.error);
+      }
       quotes.forEach(function(q){
         if(q && q.symbol && !seen[q.symbol]){
           seen[q.symbol] = true;
           all.push(q);
         }
       });
-    }catch(e){ console.warn('[Yahoo fallback chunk]', e.message); }
+    }catch(e){
+      console.error('[Yahoo fallback chunk '+ci+']', e.message);
+      // 첫 번째 chunk 실패 시 상태 표시
+      if(ci === 0){
+        var sc4 = document.getElementById('scKisStatus');
+        if(sc4) sc4.textContent = 'Yahoo오류: '+e.message.substring(0,15);
+      }
+    }
   }
   console.log('[Screener] Yahoo fallback pool: '+all.length+'개 수집');
   var scSt = document.getElementById('scKisStatus');
