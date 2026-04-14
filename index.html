@@ -1562,40 +1562,59 @@ async function fetchCandidatePool(mode){
     }
   }
 
-  // ── Yahoo fallback ──
-  var urls = {
-    // MOMO: 당일 거래대금 상위 (급등+활발한 거래)
+  // ── Yahoo fallback — v8/quote 방식 (v1/screener 막힘 대응) ──
+  // KOSPI 대형주 + KOSDAQ 활성 종목 풀을 직접 조회
+  var FALLBACK_POOL = {
     momo: [
-      'https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=day_gainers&count=50&formatted=false&region=KR&lang=ko-KR',
-      'https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=most_actives&count=50&formatted=false&region=KR&lang=ko-KR',
+      // KOSPI 대형주 + 자주 급등하는 중소형
+      '005930.KS','000660.KS','035420.KS','051910.KS','006400.KS','000270.KS',
+      '005380.KS','068270.KS','035720.KS','066570.KS','207940.KS','005490.KS',
+      '105560.KS','055550.KS','086790.KS','316140.KS','017670.KS','030200.KS',
+      '003550.KS','010130.KS','001040.KS','047050.KS',
+      // KOSDAQ 모멘텀 종목
+      '352820.KQ','247540.KQ','086520.KQ','196170.KQ','091990.KQ','145020.KQ',
+      '263750.KQ','041510.KQ','039030.KQ','257720.KQ','048410.KQ','078600.KQ',
+      '036570.KQ','251270.KQ','294870.KQ','041960.KQ','214150.KQ','950130.KQ',
     ],
-    // SWING: most_actives(활발한 거래) + day_losers(눌림목 후보) 조합
-    // 소폭 하락 중인 종목에서 MA20 눌림목 후보가 나오는 경우가 많음
     swing: [
-      'https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=most_actives&count=60&formatted=false&region=KR&lang=ko-KR',
-      'https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=day_losers&count=40&formatted=false&region=KR&lang=ko-KR',
+      '005930.KS','000660.KS','035420.KS','051910.KS','006400.KS','000270.KS',
+      '005380.KS','207940.KS','005490.KS','105560.KS','055550.KS','086790.KS',
+      '316140.KS','017670.KS','030200.KS','003550.KS','034730.KS','018260.KS',
+      '010950.KS','011170.KS','009150.KS','028260.KS','066570.KS','000100.KS',
+      '352820.KQ','247540.KQ','086520.KQ','196170.KQ','091990.KQ','145020.KQ',
+      '036570.KQ','251270.KQ','263750.KQ','041510.KQ','039030.KQ','041960.KQ',
     ],
-    // CORE: 거래량 증가 + 상승 종목 (저점 탈출 후보)
     core: [
-      'https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=most_actives&count=60&formatted=false&region=KR&lang=ko-KR',
-      'https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=day_gainers&count=40&formatted=false&region=KR&lang=ko-KR',
+      '005930.KS','000660.KS','035420.KS','051910.KS','006400.KS','000270.KS',
+      '005380.KS','207940.KS','005490.KS','105560.KS','055550.KS','086790.KS',
+      '316140.KS','003550.KS','034730.KS','018260.KS','010950.KS','011170.KS',
+      '009150.KS','028260.KS','066570.KS','000100.KS','047050.KS','001800.KS',
+      '352820.KQ','247540.KQ','086520.KQ','196170.KQ','091990.KQ','036570.KQ',
+      '251270.KQ','263750.KQ','041510.KQ','039030.KQ','041960.KQ','214150.KQ',
     ],
   };
 
+  var symbols = FALLBACK_POOL[mode] || FALLBACK_POOL.momo;
   var all = [];
   var seen = {};
-  for(var i=0; i<urls[mode].length; i++){
+  // 40개씩 나눠서 v8/quote 조회
+  var chunkSize = 40;
+  for(var ci=0; ci<symbols.length; ci+=chunkSize){
+    var chunk = symbols.slice(ci, ci+chunkSize);
     try{
-      var d = await fetchWithProxy(urls[mode][i]);
-      var quotes = d?.finance?.result?.[0]?.quotes || [];
+      var d = await fetchWithProxy(
+        'https://query1.finance.yahoo.com/v8/finance/quote?symbols='+chunk.join(',')+'&fields=regularMarketPrice,regularMarketPreviousClose,regularMarketChangePercent,regularMarketVolume,averageDailyVolume3Month,marketCap,shortName'
+      );
+      var quotes = d?.quoteResponse?.result || [];
       quotes.forEach(function(q){
-        if(!seen[q.symbol]){
+        if(q && q.symbol && !seen[q.symbol]){
           seen[q.symbol] = true;
           all.push(q);
         }
       });
-    }catch(e){}
+    }catch(e){ console.warn('[Yahoo fallback chunk]', e.message); }
   }
+  console.log('[Screener] Yahoo fallback pool: '+all.length+'개 수집');
   return all;
 }
 
