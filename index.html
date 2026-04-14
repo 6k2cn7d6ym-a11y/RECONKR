@@ -1359,6 +1359,7 @@ async function fetchKisCandidates(mode){
     ]);
     [vKp, vKq].forEach(function(r){
       if(r.status==='fulfilled') merge(r.value);
+      else console.warn('[KIS swing/core]', r.reason?.message||r.reason);
     });
 
   } else if(mode === 'core'){
@@ -1566,71 +1567,41 @@ async function fetchCandidatePool(mode){
     }
   }
 
-  // ── Yahoo fallback — v8/quote 방식 (v1/screener 막힘 대응) ──
-  // KOSPI 대형주 + KOSDAQ 활성 종목 풀을 직접 조회
+  // ── Yahoo fallback — v8/finance/chart 개별 조회 (복수쿼리 차단 대응) ──
   var FALLBACK_POOL = {
-    momo: [
-      // KOSPI 대형주 + 자주 급등하는 중소형
-      '005930.KS','000660.KS','035420.KS','051910.KS','006400.KS','000270.KS',
-      '005380.KS','068270.KS','035720.KS','066570.KS','207940.KS','005490.KS',
-      '105560.KS','055550.KS','086790.KS','316140.KS','017670.KS','030200.KS',
-      '003550.KS','010130.KS','001040.KS','047050.KS',
-      // KOSDAQ 모멘텀 종목
-      '352820.KQ','247540.KQ','086520.KQ','196170.KQ','091990.KQ','145020.KQ',
-      '263750.KQ','041510.KQ','039030.KQ','257720.KQ','048410.KQ','078600.KQ',
-      '036570.KQ','251270.KQ','294870.KQ','041960.KQ','214150.KQ','950130.KQ',
-    ],
-    swing: [
-      '005930.KS','000660.KS','035420.KS','051910.KS','006400.KS','000270.KS',
-      '005380.KS','207940.KS','005490.KS','105560.KS','055550.KS','086790.KS',
-      '316140.KS','017670.KS','030200.KS','003550.KS','034730.KS','018260.KS',
-      '010950.KS','011170.KS','009150.KS','028260.KS','066570.KS','000100.KS',
-      '352820.KQ','247540.KQ','086520.KQ','196170.KQ','091990.KQ','145020.KQ',
-      '036570.KQ','251270.KQ','263750.KQ','041510.KQ','039030.KQ','041960.KQ',
-    ],
-    core: [
-      '005930.KS','000660.KS','035420.KS','051910.KS','006400.KS','000270.KS',
-      '005380.KS','207940.KS','005490.KS','105560.KS','055550.KS','086790.KS',
-      '316140.KS','003550.KS','034730.KS','018260.KS','010950.KS','011170.KS',
-      '009150.KS','028260.KS','066570.KS','000100.KS','047050.KS','001800.KS',
-      '352820.KQ','247540.KQ','086520.KQ','196170.KQ','091990.KQ','036570.KQ',
-      '251270.KQ','263750.KQ','041510.KQ','039030.KQ','041960.KQ','214150.KQ',
-    ],
+    momo: ['005930.KS','000660.KS','035420.KS','051910.KS','006400.KS',
+           '352820.KQ','247540.KQ','086520.KQ','196170.KQ','091990.KQ',
+           '068270.KS','035720.KS','066570.KS','207940.KS','005490.KS'],
+    swing:['005930.KS','000660.KS','035420.KS','051910.KS','006400.KS',
+           '352820.KQ','247540.KQ','086520.KQ','196170.KQ','091990.KQ',
+           '068270.KS','035720.KS','207940.KS','005490.KS','066570.KS'],
+    core: ['005930.KS','000660.KS','035420.KS','051910.KS','005490.KS',
+           '105560.KS','055550.KS','086790.KS','316140.KS','003550.KS',
+           '352820.KQ','086520.KQ','196170.KQ','091990.KQ','066570.KS'],
   };
-
   var symbols = FALLBACK_POOL[mode] || FALLBACK_POOL.momo;
   var all = [];
   var seen = {};
-  // 40개씩 나눠서 v8/quote 조회
-  var chunkSize = 10; // URL 길이 제한 대응
-  for(var ci=0; ci<symbols.length; ci+=chunkSize){
-    var chunk = symbols.slice(ci, ci+chunkSize);
+
+  // v8/finance/quote 단일 종목씩 순차 처리 — 동시 요청 시 Yahoo 봇차단 대응
+  for(var si=0; si<symbols.length; si++){
     try{
+      var sym = symbols[si];
       var d = await fetchWithProxy(
-        'https://query1.finance.yahoo.com/v8/finance/quote?symbols='+chunk.join(',')+'&fields=regularMarketPrice,regularMarketPreviousClose,regularMarketChangePercent,regularMarketVolume,averageDailyVolume3Month,marketCap,shortName'
+        'https://query1.finance.yahoo.com/v8/finance/quote?symbols='+sym+
+        '&fields=regularMarketPrice,regularMarketPreviousClose,regularMarketChangePercent,regularMarketVolume,averageDailyVolume3Month,marketCap,shortName'
       );
-      var quotes = (d?.quoteResponse?.result) || [];
-      if(quotes.length === 0 && d?.quoteResponse?.error){
-        console.warn('[Yahoo chunk] API 오류:', d.quoteResponse.error);
+      var q = (d?.quoteResponse?.result||[])[0];
+      if(q && q.symbol && !seen[q.symbol]){
+        seen[q.symbol] = true;
+        all.push(q);
       }
-      quotes.forEach(function(q){
-        if(q && q.symbol && !seen[q.symbol]){
-          seen[q.symbol] = true;
-          all.push(q);
-        }
-      });
-    }catch(e){
-      console.error('[Yahoo fallback chunk '+ci+']', e.message);
-      // 첫 번째 chunk 실패 시 상태 표시
-      if(ci === 0){
-        var sc4 = document.getElementById('scKisStatus');
-        if(sc4) sc4.textContent = 'Yahoo오류: '+e.message.substring(0,15);
-      }
-    }
+    }catch(e){ /* 개별 실패 무시 */ }
   }
-  console.log('[Screener] Yahoo fallback pool: '+all.length+'개 수집');
+
+  console.log('[Screener] Yahoo chart fallback pool: '+all.length+'개 수집');
   var scSt = document.getElementById('scKisStatus');
-  if(scSt && all.length > 0) scSt.textContent = 'Yahoo · '+all.length+'개 수집';
+  if(scSt) scSt.textContent = all.length>0?'Yahoo · '+all.length+'개 수집':'Yahoo 0개';
   return all;
 }
 
