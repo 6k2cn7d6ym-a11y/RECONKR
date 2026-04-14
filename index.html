@@ -1556,9 +1556,13 @@ async function fetchCandidatePool(mode){
         if(sc) sc.textContent = 'KIS · '+kisPool.length+'개 수집';
         return kisPool;
       }
+      // KIS 0개 — Yahoo fallback 시도
+      var sc2 = document.getElementById('scKisStatus');
+      if(sc2) sc2.textContent = 'KIS 0개→Yahoo전환';
     }catch(e){
       console.warn('[KIS] 후보풀 실패:', e.message);
-      // KIS.connected 리셋 안 함 — 토큰 만료/일시 오류일 수 있음
+      var sc3 = document.getElementById('scKisStatus');
+      if(sc3) sc3.textContent = 'KIS 오류→Yahoo전환';
     }
   }
 
@@ -1615,6 +1619,8 @@ async function fetchCandidatePool(mode){
     }catch(e){ console.warn('[Yahoo fallback chunk]', e.message); }
   }
   console.log('[Screener] Yahoo fallback pool: '+all.length+'개 수집');
+  var scSt = document.getElementById('scKisStatus');
+  if(scSt && all.length > 0) scSt.textContent = 'Yahoo · '+all.length+'개 수집';
   return all;
 }
 
