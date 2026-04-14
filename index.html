@@ -1968,7 +1968,13 @@ function renderScreenerResults(mode){
 
 // 후보 탭 → 해당 모드로 이동 후 AI 분석
 function scCandidateTap(ticker, mode){
-  switchMode(mode);
+  // switchMode 토글 버그 우회 — 같은 모드면 서브탭만 전환
+  if(G.currentMode !== mode){
+    G.currentMode = mode;
+    switchMode(mode);
+  } else {
+    switchSubTab('search');
+  }
   var inputEl = document.getElementById(mode+'Input');
   if(inputEl) inputEl.value = ticker;
   runModeScan(mode);
