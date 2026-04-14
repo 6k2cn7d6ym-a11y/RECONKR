@@ -1873,7 +1873,21 @@ async function runScreener(mode){
       if(s) passed.push(s);
     });
 
-    if(area) area.innerHTML = '<div class="sc-status">'+passed.length+'개 통과 → 점수 계산 중...</div>';
+    if(!passed.length){
+      var kisOk = !!(KIS.appKey && KIS.appSecret);
+      if(area) area.innerHTML =
+        '<div class="sc-status" style="color:var(--a)">수집 '+pool.length+'개 → 하드필터 통과 0개</div>'+
+        '<div class="sc-status" style="color:var(--t3);font-size:10px;margin-top:4px">'+
+          '설정: 최소갭 '+minGap+'% · 거래대금 '+minTvAbs+'억 · 배수 '+minTvRatio+'x'+
+          (kisOk?'':' · KIS 미연결(연결 시 정확도 향상)')+
+        '</div>';
+      if(bar){ bar.classList.remove('indeterminate'); bar.style.width='0%'; }
+      if(dot) dot.classList.remove('scanning');
+      if(btn){ btn.disabled=false; btn.textContent='스캔'; }
+      G.screenerRunning = false;
+      return;
+    }
+    if(area) area.innerHTML = '<div class="sc-status">'+pool.length+'개 수집 → '+passed.length+'개 통과 · 점수 계산 중...</div>';
 
     // 3. 2차 스코어링
     passed.forEach(function(s){
@@ -1923,7 +1937,10 @@ function renderScreenerResults(mode){
   var minScoreForMode = mode==='momo'?60:mode==='swing'?60:65;
 
   if(!results.length){
-    area.innerHTML = '<div class="sc-status">스캔 버튼을 눌러 후보 종목을 찾습니다<br><span style="font-size:10px;color:var(--t3)">KIS 연결 시 더 정확한 후보 제공</span></div>';
+    var noResultMsg = lastRun
+      ? '<div class="sc-status" style="color:var(--a)">조건 통과 종목 없음<br><span style="font-size:10px;color:var(--t3)">설정에서 최소갭·거래대금 조건을 낮추거나 KIS 연결 후 재시도</span></div>'
+      : '<div class="sc-status">스캔 버튼을 눌러 후보 종목을 찾습니다<br><span style="font-size:10px;color:var(--t3)">KIS 연결 시 더 정확한 후보 제공</span></div>';
+    area.innerHTML = noResultMsg;
     return;
   }
 
