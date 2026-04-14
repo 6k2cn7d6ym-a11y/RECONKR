@@ -1111,7 +1111,8 @@ function updateClock(){
 // Worker 프록시
 // ═══════════════════════════════════════
 var WORKER_URL = 'https://recon.miinonnnn.workers.dev';
-var DART_URL   = 'https://dart.minon.kr'; // Oracle DART 프록시
+var DART_URL   = 'https://dart.minon.kr';
+var KIS_URL    = 'https://dart.minon.kr'; // KIS도 Oracle VM 경유 (Cloudflare IP 차단 대응) // Oracle DART 프록시
 
 async function fetchWithProxy(url){
   var bust = '&_t='+Date.now(); // 캐시 버스팅
@@ -1162,7 +1163,7 @@ G.screenerLastRun = { momo:null, swing:null, core:null };
 // ── KIS API 호출 헬퍼 ──
 async function kisGet(path, params, headers){
   var qs = params ? ('?' + new URLSearchParams(params).toString()) : '';
-  var url = WORKER_URL + '/kis' + path + qs;
+  var url = KIS_URL + '/kis' + path + qs;
   var resp = await fetch(url, {
     method: 'GET',
     headers: Object.assign({ 'Content-Type':'application/json' }, headers || {}),
@@ -1172,7 +1173,7 @@ async function kisGet(path, params, headers){
 }
 
 async function kisPost(path, body, headers){
-  var url = WORKER_URL + '/kis' + path;
+  var url = KIS_URL + '/kis' + path;
   var resp = await fetch(url, {
     method: 'POST',
     headers: Object.assign({ 'Content-Type':'application/json' }, headers || {}),
@@ -1399,31 +1400,35 @@ async function fetchKisCandidates(mode){
 // RECON 시장 대시보드 데이터
 // ═══════════════════════════════════════
 async function loadMarketData(){
+  // v8/finance/quote 복수 심볼이 막혀있어 → chart 개별 병렬 호출
+  var targets = [
+    { sym:'^KS11',   label:'KOSPI',  uiId:'SPY',  fmt:'int' },
+    { sym:'^KQ11',   label:'KOSDAQ', uiId:'QQQ',  fmt:'int' },
+    { sym:'^VKOSPI', label:'VKOSPI', uiId:'VIX',  fmt:'dec' },
+  ];
   try{
-    // ^ 기호 그대로 사용 — fetchWithProxy가 한 번만 인코딩
-    var d = await fetchWithProxy(
-      'https://query1.finance.yahoo.com/v8/finance/quote?symbols=^KS11,^KQ11,^VKOSPI' +
-      '&fields=regularMarketPrice,regularMarketChangePercent,regularMarketPreviousClose'
-    );
-    var results = d?.quoteResponse?.result || [];
-    var symMap = {'^KS11':'KOSPI', '^KQ11':'KOSDAQ', '^VKOSPI':'VKOSPI'};
-    results.forEach(function(q){
-      var sym = symMap[q.symbol] || q.symbol;
-      var uiId = sym==='KOSPI'?'SPY':sym==='KOSDAQ'?'QQQ':sym==='VKOSPI'?'VIX':sym;
-      var el = document.getElementById('idx-'+uiId);
-      if(!el) return;
-      el.classList.remove('loading');
-      var chg = q.regularMarketChangePercent || 0;
-      var chgStr = (chg>=0?'+':'')+chg.toFixed(2)+'%';
-      var chgCls = chg>0?'idx-up':chg<0?'idx-dn':'idx-flat';
-      var priceStr = sym==='VKOSPI'
-        ? (q.regularMarketPrice||0).toFixed(2)
-        : Math.round(q.regularMarketPrice||0).toLocaleString();
-      el.innerHTML =
-        '<div class="idx-name">'+sym+'</div>'+
-        '<div class="idx-price">'+priceStr+'</div>'+
-        '<div class="idx-chg '+chgCls+'">'+chgStr+'</div>';
-    });
+    await Promise.allSettled(targets.map(function(t){
+      return fetchWithProxy(
+        'https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(t.sym)+'?interval=1d&range=2d'
+      ).then(function(d){
+        var res  = d?.chart?.result?.[0];
+        if(!res) return;
+        var meta = res.meta || {};
+        var price = meta.regularMarketPrice || 0;
+        var prev  = meta.chartPreviousClose || meta.previousClose || 0;
+        var chg   = prev>0 ? (price-prev)/prev*100 : 0;
+        var el = document.getElementById('idx-'+t.uiId);
+        if(!el||!price) return;
+        el.classList.remove('loading');
+        var priceStr = t.fmt==='dec' ? price.toFixed(2) : Math.round(price).toLocaleString();
+        var chgStr = (chg>=0?'+':'')+chg.toFixed(2)+'%';
+        var chgCls = chg>0?'idx-up':chg<0?'idx-dn':'idx-flat';
+        el.innerHTML =
+          '<div class="idx-name">'+t.label+'</div>'+
+          '<div class="idx-price">'+priceStr+'</div>'+
+          '<div class="idx-chg '+chgCls+'">'+chgStr+'</div>';
+      }).catch(function(){});
+    }));
   }catch(e){ console.warn('[market]', e.message); }
 }
 
@@ -1433,9 +1438,14 @@ async function loadFearGreed(){
   // 역방향으로 0~100 점수로 변환
   try{
     var d = await fetchWithProxy(
-      'https://query1.finance.yahoo.com/v8/finance/quote?symbols=^VKOSPI&fields=regularMarketPrice,regularMarketChangePercent'
+      'https://query1.finance.yahoo.com/v8/finance/chart/%5EVKOSPI?interval=1d&range=2d'
     );
-    var qt = d?.quoteResponse?.result?.[0];
+    var _meta = d?.chart?.result?.[0]?.meta || {};
+    var qt = _meta.regularMarketPrice ? {
+      regularMarketPrice: _meta.regularMarketPrice,
+      regularMarketChangePercent: _meta.chartPreviousClose
+        ? (_meta.regularMarketPrice - _meta.chartPreviousClose) / _meta.chartPreviousClose * 100 : 0
+    } : null;
     if(!qt) throw new Error('no data');
     var vkospi = qt.regularMarketPrice || 20;
 
@@ -9753,50 +9763,40 @@ setInterval(checkMarketRegime, 3*60*1000);
 
 // ── 매크로 지표 (환율/유가/미국지수) ──
 async function loadMacroData(){
+  // v8/finance/quote 복수 심볼 막힘 → chart 개별 병렬 호출
+  var targets = [
+    { sym:'USDKRW=X', id:'idx-USDKRW', fmt:function(p){ return p.toFixed(1)+'원'; },       inv:false },
+    { sym:'CL=F',     id:'idx-WTI',    fmt:function(p){ return '$'+p.toFixed(2); },         inv:false },
+    { sym:'^GSPC',    id:'idx-SP500',  fmt:function(p){ return Math.round(p).toLocaleString(); }, inv:false },
+    { sym:'^IXIC',    id:'idx-NASDAQ', fmt:function(p){ return Math.round(p).toLocaleString(); }, inv:false },
+    { sym:'GC=F',     id:'idx-GOLD',   fmt:function(p){ return '$'+Math.round(p); },         inv:false },
+    { sym:'^TNX',     id:'idx-US10Y',  fmt:function(p){ return p.toFixed(2)+'%'; },          inv:true  },
+  ];
   try{
-    // ^ 기호를 그대로 넣고 fetchWithProxy가 한 번만 인코딩하도록
-    var url = 'https://query1.finance.yahoo.com/v8/finance/quote?symbols=USDKRW=X,CL=F,^GSPC,^IXIC,GC=F,^TNX' +
-              '&fields=regularMarketPrice,regularMarketPreviousClose,regularMarketChangePercent';
-    var d = await fetchWithProxy(url);
-    var res = d?.quoteResponse?.result||[];
-    var map = {};
-    res.forEach(function(r){ map[r.symbol] = r; });
-
-    function updCard(id, sym, prefix, decimals, suffix){
-      var data = map[sym];
-      var el = document.getElementById(id);
-      if(!el||!data) return;
-      var p  = data.regularMarketPrice;
-      var pc = data.regularMarketChangePercent;
-      if(!p) return;
-      var pStr = (prefix||'') + (decimals!==undefined ? p.toFixed(decimals) : Math.round(p).toLocaleString()) + (suffix||'');
-      var cStr = (pc>=0?'+':'')+pc.toFixed(2)+'%';
-      var cCls = pc>0?'idx-up':pc<0?'idx-dn':'idx-flat';
-      el.classList.remove('loading');
-      el.querySelector('.idx-price').textContent = pStr;
-      var chgEl = el.querySelector('.idx-chg');
-      chgEl.textContent = cStr;
-      chgEl.className = 'idx-chg '+cCls;
-    }
-
-    updCard('idx-USDKRW', 'USDKRW=X', '', 1, '원');
-    updCard('idx-WTI',    'CL=F',      '$', 2);
-    updCard('idx-SP500',  '^GSPC',     '', undefined);
-    updCard('idx-NASDAQ', '^IXIC',     '', undefined);
-    updCard('idx-GOLD',   'GC=F',      '$', 0);
-    // 미국채 10Y: 금리↑ = 위험 → 색상 반전
-    var t = map['^TNX'];
-    if(t){
-      var el2 = document.getElementById('idx-US10Y');
-      if(el2){
-        var pc2 = t.regularMarketChangePercent||0;
-        el2.classList.remove('loading');
-        el2.querySelector('.idx-price').textContent = t.regularMarketPrice.toFixed(2)+'%';
-        var chgEl2 = el2.querySelector('.idx-chg');
-        chgEl2.textContent = (pc2>=0?'+':'')+pc2.toFixed(2)+'%';
-        chgEl2.className = 'idx-chg '+(pc2>0?'idx-dn':pc2<0?'idx-up':'idx-flat');
-      }
-    }
+    await Promise.allSettled(targets.map(function(t){
+      return fetchWithProxy(
+        'https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(t.sym)+'?interval=1d&range=2d'
+      ).then(function(d){
+        var res  = d?.chart?.result?.[0];
+        if(!res) return;
+        var meta = res.meta || {};
+        var price = meta.regularMarketPrice || 0;
+        var prev  = meta.chartPreviousClose || meta.previousClose || 0;
+        var chg   = prev>0 ? (price-prev)/prev*100 : 0;
+        var el = document.getElementById(t.id);
+        if(!el||!price) return;
+        el.classList.remove('loading');
+        var pEl  = el.querySelector('.idx-price');
+        var cEl  = el.querySelector('.idx-chg');
+        if(pEl) pEl.textContent = t.fmt(price);
+        if(cEl){
+          cEl.textContent = (chg>=0?'+':'')+chg.toFixed(2)+'%';
+          // 미국채(inv=true): 금리↑ = 위험(빨간색)
+          var up = t.inv ? (chg>0?'idx-dn':'idx-up') : (chg>0?'idx-up':'idx-dn');
+          cEl.className = 'idx-chg '+(chg===0?'idx-flat':up);
+        }
+      }).catch(function(){});
+    }));
   }catch(e){ console.warn('[macro]',e.message); }
 }
 loadMacroData();
