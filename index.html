@@ -578,6 +578,16 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
     </div>
     <div class="sc-progress"><div class="sc-progress-bar" id="scProgressBarMomo" style="background:linear-gradient(90deg,var(--a),rgba(255,58,140,.5))"></div></div>
     <div id="scResultAreaMomo"><div class="sc-status">스캔하면 MOMO 후보 종목을 찾아드립니다</div></div>
+    <div style="border-top:1px solid var(--b)">
+      <div onclick="var a=document.getElementById('momoTrackArea');a.style.display=a.style.display==='none'?'block':'none'"
+           style="display:flex;align-items:center;justify-content:space-between;padding:9px 14px;cursor:pointer">
+        <span style="font-family:var(--mono);font-size:10px;color:var(--a);letter-spacing:.08em">📊 결과 추적 (1일·3일)</span>
+        <button onclick="event.stopPropagation();checkTrackUpdates('momo')" style="font-family:var(--mono);font-size:9px;color:var(--t3);background:none;border:1px solid var(--b);border-radius:4px;padding:2px 6px;cursor:pointer">업데이트</button>
+      </div>
+      <div id="momoTrackArea" style="display:none;max-height:300px;overflow-y:auto">
+        <div class="sc-status" style="font-size:11px">스캔 후 자동 저장됩니다</div>
+      </div>
+    </div>
   </div>
   <div class="search-area">
     <div class="search-box momo-focus">
@@ -729,6 +739,17 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
     </div>
     <div class="sc-progress"><div class="sc-progress-bar" id="scProgressBarSwing" style="background:linear-gradient(90deg,var(--bl),rgba(0,240,122,.6))"></div></div>
     <div id="scResultAreaSwing"><div class="sc-status">스캔하면 SWING 후보 종목을 찾아드립니다</div></div>
+    <!-- SWING 추적 패널 -->
+    <div style="border-top:1px solid var(--b)">
+      <div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'"
+           style="display:flex;align-items:center;justify-content:space-between;padding:9px 14px;cursor:pointer">
+        <span style="font-family:var(--mono);font-size:10px;color:var(--bl);letter-spacing:.08em">📊 결과 추적 (5일·10일)</span>
+        <button onclick="event.stopPropagation();checkTrackUpdates('swing')" style="font-family:var(--mono);font-size:9px;color:var(--t3);background:none;border:1px solid var(--b);border-radius:4px;padding:2px 6px;cursor:pointer">업데이트</button>
+      </div>
+      <div id="swingTrackArea" style="display:none;max-height:320px;overflow-y:auto">
+        <div class="sc-status" style="font-size:11px">스캔 후 자동 저장됩니다</div>
+      </div>
+    </div>
   </div>
   <div class="search-area">
     <div class="search-box swing-focus">
@@ -789,6 +810,16 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
     </div>
     <div class="sc-progress"><div class="sc-progress-bar" id="scProgressBarCore" style="background:linear-gradient(90deg,var(--pu),rgba(0,240,122,.6))"></div></div>
     <div id="scResultAreaCore"><div class="sc-status">스캔하면 CORE 후보 종목을 찾아드립니다</div></div>
+    <div style="border-top:1px solid var(--b)">
+      <div onclick="var a=document.getElementById('coreTrackArea');a.style.display=a.style.display==='none'?'block':'none'"
+           style="display:flex;align-items:center;justify-content:space-between;padding:9px 14px;cursor:pointer">
+        <span style="font-family:var(--mono);font-size:10px;color:var(--pu);letter-spacing:.08em">📊 결과 추적 (20일·60일)</span>
+        <button onclick="event.stopPropagation();checkTrackUpdates('core')" style="font-family:var(--mono);font-size:9px;color:var(--t3);background:none;border:1px solid var(--b);border-radius:4px;padding:2px 6px;cursor:pointer">업데이트</button>
+      </div>
+      <div id="coreTrackArea" style="display:none;max-height:300px;overflow-y:auto">
+        <div class="sc-status" style="font-size:11px">스캔 후 자동 저장됩니다</div>
+      </div>
+    </div>
   </div>
   <div class="search-area">
     <div class="search-box core-focus">
@@ -1491,7 +1522,7 @@ async function fetchKisFluctuationRanking(market, sortDiv){
 async function fetchKisDailyChart(symbol){
   var code = symbol.replace(/\.(KS|KQ)$/i,'');
   var today = new Date();
-  var from  = new Date(today); from.setDate(from.getDate()-50); // 여유있게 50일치 요청
+  var from  = new Date(today); from.setDate(from.getDate()-100); // MA60 계산 위해 100일치 요청
   function fmt(d){ return d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0'); }
   var headers = await kisAuthHeaders('FHKST03010100');
   var data = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice',{
@@ -1525,59 +1556,115 @@ async function fetchKisStockInfo(symbol){
 // 일봉 통계 계산 — MOMO 스코어링/BLOCK용
 // candles: fetchKisDailyChart 결과 (최신 index 0)
 // ─────────────────────────────────────────
-function calcDailyStats(candles){
+function calcDailyStats(candles, currentPrice){
+  // currentPrice: 선택적 — SWING 눌림깊이 계산 시 사용
   if(!candles || candles.length < 5) return null;
-  var n = Math.min(candles.length, 20);
+  var n60 = Math.min(candles.length, 65);  // MA60용
+  var n20 = Math.min(candles.length, 25);  // MA20용
+  var n   = n20;
 
-  var closes = candles.slice(0,n).map(function(c){ return parseFloat(c.stck_clpr)||0; });
-  var opens  = candles.slice(0,n).map(function(c){ return parseFloat(c.stck_oprc)||0; });
-  var highs  = candles.slice(0,n).map(function(c){ return parseFloat(c.stck_hgpr)||0; });
-  var vols   = candles.slice(0,n).map(function(c){ return parseFloat(c.acml_vol)||0; });
-  var tvs    = candles.slice(0,n).map(function(c){ return parseFloat(c.acml_tr_pbmn)||0; });
+  var closes = candles.slice(0,n60).map(function(c){ return parseFloat(c.stck_clpr)||0; });
+  var opens  = candles.slice(0,n20).map(function(c){ return parseFloat(c.stck_oprc)||0; });
+  var highs  = candles.slice(0,n20).map(function(c){ return parseFloat(c.stck_hgpr)||0; });
+  var lows   = candles.slice(0,n20).map(function(c){ return parseFloat(c.stck_lwpr)||0; });
+  var vols   = candles.slice(0,n20).map(function(c){ return parseFloat(c.acml_vol)||0; });
+  var tvs    = candles.slice(0,n20).map(function(c){ return parseFloat(c.acml_tr_pbmn)||0; });
 
-  function avg(arr, len){ var a=arr.slice(0,len); return a.reduce(function(s,v){return s+v;},0)/a.length; }
+  function avg(arr, len){
+    var a = arr.slice(0, Math.min(len, arr.length));
+    return a.length ? a.reduce(function(s,v){return s+v;},0)/a.length : 0;
+  }
 
-  var ma5  = avg(closes, Math.min(5,  n));
-  var ma10 = avg(closes, Math.min(10, n));
-  var ma20 = avg(closes, Math.min(20, n));
+  var ma5  = avg(closes, 5);
+  var ma10 = avg(closes, 10);
+  var ma20 = avg(closes, 20);
+  var ma60 = closes.length >= 60 ? avg(closes, 60) : null;
 
-  var prevClose = closes[0];  // 전일 종가
+  // MA60 기울기 (최근 5일 MA60 변화율)
+  var ma60_slope = null;
+  if(closes.length >= 65){
+    var ma60_5ago = avg(closes.slice(5, 65), 60);
+    ma60_slope = ma60 && ma60_5ago > 0 ? (ma60 - ma60_5ago) / ma60_5ago * 100 : null;
+  }
+
+  var prevClose = closes[0];
   var ma20_gap  = ma20 > 0 ? (prevClose/ma20 - 1)*100 : 0;
+  var ma60_gap  = ma60  > 0 ? (prevClose/ma60 - 1)*100 : null;
 
-  // 최근 20일/10일 최고가 (오늘 제외 = 어제까지의 저항선)
-  var high20     = Math.max.apply(null, highs.slice(0, Math.min(20,n)));
-  var box10_high = Math.max.apply(null, highs.slice(0, Math.min(10,n)));
+  var high20     = Math.max.apply(null, highs.slice(0, Math.min(20, highs.length)));
+  var box10_high = Math.max.apply(null, highs.slice(0, Math.min(10, highs.length)));
 
-  // MA 정배열 (5 > 10 > 20)
-  var is_aligned = (ma5 > ma10) && (ma10 > ma20);
+  // MA 정배열: 5>20>60 (SWING 기준) 또는 5>10>20 (MOMO 기준)
+  var is_aligned      = (ma5 > ma20) && (ma60 ? ma20 > ma60 : ma10 > ma20); // 5>20>60
+  var is_aligned_momo = (ma5 > ma10) && (ma10 > ma20);                        // 5>10>20
 
   // 전일 양봉
   var prev_bullish = prevClose > opens[0];
 
-  // 거래량 추세: 최근 3일 vs 이전 3일
+  // 거래량 추세
   var vol3r = avg(vols, 3);
-  var vol3p = n >= 6 ? avg(vols.slice(3,6), 3) : vol3r;
+  var vol3p = vols.length >= 6 ? avg(vols.slice(3,6), 3) : vol3r;
   var vol_trend = vol3p > 0 ? vol3r/vol3p : 1;
 
-  // 전일 상한가 여부
+  // 눌림목 거래량 수축: 최근 5일 거래량 < 이전 5일 평균
+  var vol5r = avg(vols, 5);
+  var vol5p = vols.length >= 10 ? avg(vols.slice(5,10), 5) : vol5r;
+  var pullback_vol_quiet = vol5p > 0 && (vol5r / vol5p) < 0.85;
+
+  // 연속 대형 음봉 없음: 최근 3일 중 -3% 이상 음봉이 2연속 없어야
+  var no_consecutive_bear = true;
+  var bearCount = 0;
+  for(var i=0; i<Math.min(4, closes.length); i++){
+    var dayChg = opens[i] > 0 ? (closes[i]/opens[i]-1)*100 : 0;
+    if(dayChg <= -3) bearCount++;
+    else bearCount = 0;
+    if(bearCount >= 2){ no_consecutive_bear = false; break; }
+  }
+
+  // RSI 14
+  var rsi14 = null;
+  if(closes.length >= 15){
+    var prices = closes.slice(0,15).reverse(); // 오래된 순
+    var gains=0, losses=0;
+    for(var j=1; j<15; j++){
+      var diff = prices[j] - prices[j-1];
+      if(diff > 0) gains += diff; else losses -= diff;
+    }
+    var ag = gains/14, al = losses/14;
+    rsi14 = al===0 ? 100 : parseFloat((100 - 100/(1+ag/al)).toFixed(1));
+  }
+
+  // 눌림목 깊이: 10일 고점 대비 현재가 (currentPrice 있으면 사용, 없으면 전일 종가)
+  var priceRef = currentPrice || prevClose;
+  var pullback_depth_pct = box10_high > 0 ? (priceRef/box10_high - 1)*100 : null;
+
+  // 상한가 관련 (MOMO용)
   var prev_day_limit = candles[0].prdy_vrss_sign === '1'
     || (closes[1] > 0 && (prevClose/closes[1]-1) >= 0.295);
-
-  // 전일 거래대금 소진 배수 (5일 이전 평균 대비)
-  var tv_prev  = tvs[0];
-  var tv5_base = avg(tvs.slice(1,6), Math.min(5, tvs.length-1));
+  var tv_prev   = tvs[0];
+  var tv5_base  = avg(tvs.slice(1,6), Math.min(5, tvs.length-1));
   var tv_ratio_prev = tv5_base > 0 ? tv_prev/tv5_base : 0;
 
   return {
-    ma5, ma10, ma20,
-    ma20_gap,       // MA20 이격도 % (양=위, 음=아래)
-    high20,         // 최근 20일 고가 최고점
-    box10_high,     // 최근 10일 고가 최고점 (박스권 상단)
-    is_aligned,     // MA 정배열 여부
-    prev_bullish,   // 전일 양봉
-    vol_trend,      // 거래량 추세 배수
-    prev_day_limit, // 전일 상한가 여부
-    tv_ratio_prev,  // 전일 거래대금/5일평균 배수 (소진 판정)
+    // 공통
+    ma5, ma10, ma20, ma60,
+    ma60_slope,         // MA60 기울기 % (양=우상향)
+    ma20_gap,           // MA20 이격도 % (양=위)
+    ma60_gap,           // MA60 이격도 % (양=위)
+    high20,
+    box10_high,
+    is_aligned,         // 5>20>60 (SWING 기준)
+    is_aligned_momo,    // 5>10>20 (MOMO 기준)
+    prev_bullish,
+    vol_trend,
+    // SWING 전용
+    pullback_vol_quiet, // 거래량 수축 여부
+    no_consecutive_bear,// 연속 대형 음봉 없음
+    rsi14,              // RSI 14
+    pullback_depth_pct, // 10일 고점 대비 조정폭 %
+    // MOMO 전용
+    prev_day_limit,
+    tv_ratio_prev,
   };
 }
 
@@ -1784,6 +1871,8 @@ async function testKisConnection(){
     showToast('KIS 연결 성공 ✓');
     // 연결 성공 시 종목명 캐시 빌드
     // 마스터는 정적 데이터 → 별도 빌드 불필요
+  // 추적 데이터 초기 렌더링
+  setTimeout(initAllTracks, 1500);  // 세 모드 추적 초기화
   }catch(e){
     if(el) el.textContent = '✗ 실패: '+e.message;
     if(st) { st.textContent='연결 실패'; st.style.color='var(--r)'; }
@@ -1889,7 +1978,7 @@ function hardCut_momo(q, cfg){
 
   if(price < 500)                                    return null;
   if(chgPct < minGap)                                return null;
-  if(chgPct > 28)                                    return null;
+  if(chgPct > 15)                                    return null; // 15% 초과 = 고점추격
   if(cap !== null && cap < minCap)                   return null;
   // KIS 데이터면 tv/tvRatio 체크 스킵 (tradingValue=0, avgVol=0으로 오는 경우 대응)
   if(q._source !== 'KIS'){
@@ -1966,7 +2055,7 @@ function score_momo(s){
 
   // ── 즉시 0점
   if(ul < 5)   return { score:0, reasons:['⛔ 상한가 '+ul.toFixed(0)+'% 소진'] };
-  if(gap > 20) return { score:0, reasons:['⛔ 갭 '+gap.toFixed(1)+'% 고점추격'] };
+  if(gap > 15) return { score:0, reasons:['⛔ 갭 '+gap.toFixed(1)+'% — 고점추격 진입 금지'] };
   if(d && d.ma20_gap > 35) return { score:0, reasons:['⛔ MA20 +'+d.ma20_gap.toFixed(0)+'% 과열'] };
 
   // ── ① 일봉 구조 (max 45pt) — 핵심 추가 요소
@@ -1979,8 +2068,9 @@ function score_momo(s){
     }
 
     // MA 정배열
-    if(d.is_aligned){ score += 10; reasons.push('MA 정배열'); }
-    else if(d.ma5 > d.ma20){ score += 4; }  // 부분 정배열
+    if(d.is_aligned_momo){ score += 10; reasons.push('MA 정배열(5>10>20)'); }
+    else if(d.is_aligned){ score += 6; reasons.push('정배열(5>20>60)'); }
+    else if(d.ma5 > d.ma20){ score += 3; }  // 부분
 
     // 전일 양봉 (방향성 연속)
     if(d.prev_bullish){ score += 7; reasons.push('전일 양봉'); }
@@ -2015,12 +2105,12 @@ function score_momo(s){
   else if(gap >= 3 && gap < 5)   { score += 7;  reasons.push('갭 '+gap.toFixed(1)+'%'); }
   else if(gap > 12 && gap <= 20) { score += 4;  reasons.push('갭 '+gap.toFixed(1)+'% ⚠추격'); }
 
-  // ── ⑤ VWAP 위치 (max 10pt)
+  // ── ⑤ VWAP 위치 (max 10pt) — 엔진 기준 -2% 통일
   if(vwapPct !== null){
     if(vwapPct >= 2)           { score += 10; reasons.push('VWAP +'+vwapPct.toFixed(1)+'% 위'); }
     else if(vwapPct >= 0)      { score += 6;  reasons.push('VWAP 위'); }
-    else if(vwapPct >= -1.5)   { score += 2;  }   // VWAP 근접
-    else                       { score -= 5;  reasons.push('VWAP -'+Math.abs(vwapPct).toFixed(1)+'% 아래'); }
+    else if(vwapPct >= -2)     { score += 1;  }   // VWAP 근접 (-2% 이내)
+    else                       { score -= 8;  reasons.push('VWAP -'+Math.abs(vwapPct).toFixed(1)+'% 아래 ⚠'); }
   }
 
   // ── ⑥ 체결강도
@@ -2028,12 +2118,12 @@ function score_momo(s){
   else if(vp >= 120) { score += 6; }
   else if(vp >= 100) { score += 3; }
 
-  // ── ⑥ 시간대
+  // ── ⑦ 시간대
   var ph = G.marketPhase || '';
+  if(ph==='LATE') return { score:0, reasons:['⛔ 오후 페이드 — 신규 MOMO 진입 금지'] };
   if(ph==='EARLY')      { score += 10; reasons.push('골든윈도우'); }
   else if(ph==='PRIME') { score += 5; }
   else if(ph==='ORB')   { score -= 10; }
-  else if(ph==='LATE')  { score -= 15; reasons.push('오후페이드'); }
 
   // ── 보조 감점
   if(rvol > 0 && rvol < 1.5) { score -= 8; reasons.push('RVol '+rvol.toFixed(1)+'x 약함'); }
@@ -2042,80 +2132,297 @@ function score_momo(s){
   return { score: Math.min(100, Math.max(0, score)), reasons };
 }
 function score_swing(s){
-  // ── SWING 철학: "조용히 눌렸다가 살아나는 종목"
-  // 출처(poolSource)로 성격 구분:
-  //   disparity → MA20 실제 이격도 낮음 (가장 신뢰)
-  //   inst      → 기관/외인이 사는 눌림목 (스마트머니 지지)
-  //   decline   → 아직 조정 중 (주의)
+  // 엔진 4레이어 구조 반영: 시장(20) + 구조(30) + 눌림(30) + 트리거(20)
   var score   = 0;
   var reasons = [];
-  var chg     = s.chgPct    || 0;
-  var vr      = s.volRatio  || 0;
-  var cap     = s.cap       || 0;
-  var tv      = s.tv        || (s.price * s.vol) / 100_000_000;
-  var d20     = s._disparity20 || 0;   // 20일 이격도 (100=MA20, <100=아래)
-  var mrbn    = s._mrbn     || 0;      // 연기금 순매수
-  var frgn    = s._frgn     || 0;      // 외국인 순매수
-  var orgn    = s._orgn     || 0;      // 기관 전체
+  var d       = s._daily || null;
   var src     = s._poolSources || [];
   var code    = (s.symbol||'').replace(/\.(KS|KQ)$/i,'');
   var isNxt   = _NXT_CODES.has(code);
+  var price   = s.price || s.regularMarketPrice || 0;
+  var chg     = s.chgPct || 0;
+  var tv      = s.tv || 0;
 
-  // ── ① 출처 기반 기본 점수
-  if(src.includes('disparity')) {
-    // 이격도 낮은 순 = 가장 직접적인 눌림목 증거
-    if(d20 > 0 && d20 <= 95)        { score += 25; reasons.push('MA20 이격 '+d20.toFixed(1)+'% ★ 눌림목'); }
-    else if(d20 > 95 && d20 <= 100) { score += 18; reasons.push('MA20 근접 '+d20.toFixed(1)+'%'); }
-    else if(d20 > 100 && d20 <= 105){ score += 10; reasons.push('MA20 소폭 위 '+d20.toFixed(1)+'%'); }
-    else                             { score += 5; }
+  // ── Layer A: 시장 (max 20pt) ──────────────────────────────
+  var mktScore = 0;
+  if(G.spyAboveMA200 === true)        { mktScore += 8; reasons.push('KOSPI 120일선 위'); }
+  else if(G.spyAboveMA200 === false)  { mktScore -= 5; reasons.push('⚠ KOSPI 약세 구조'); }
+  var kospiChg = G.spyIntraday ? G.spyIntraday.change_pct : null;
+  if(kospiChg !== null){
+    if(kospiChg > 0.8)       mktScore += 12;
+    else if(kospiChg > 0.3)  mktScore += 9;
+    else if(kospiChg > -0.3) mktScore += 6;
+    else if(kospiChg > -0.8) mktScore += 2;
+    else                     mktScore -= 3;
+  } else { mktScore += 6; }
+  score += Math.max(0, Math.min(20, mktScore));
+
+  // ── Layer B: 구조 (max 30pt) ──────────────────────────────
+  var strScore = 0;
+  if(d){
+    // B1. MA20 > MA60 정배열 (+10)
+    if(d.ma60 && d.ma20 > d.ma60)       { strScore += 10; reasons.push('MA20>MA60 정배열'); }
+    else if(d.ma60 && d.ma20 > d.ma60*0.98){ strScore += 5; }
+    // B2. 현재가 > MA60 위치
+    if(d.ma60 && price > d.ma60 * 1.03) { strScore += 8; reasons.push('MA60 위 안착'); }
+    else if(d.ma60 && price > d.ma60)   { strScore += 4; }
+    // B3. MA60 기울기
+    if(d.ma60_slope !== null){
+      if(d.ma60_slope > 0)   { strScore += 4; reasons.push('MA60 우상향'); }
+      else if(d.ma60_slope < -0.5){ strScore -= 3; }
+    }
+    // B4. MA20 이격도 -5%~+10%
+    if(d.ma20_gap >= -5 && d.ma20_gap <= 10){ strScore += 4; }
+    else if(d.ma20_gap > 10 && d.ma20_gap <= 15){ strScore += 1; }
+    // B5. 거래대금
+    if(tv >= 100)      { strScore += 3; reasons.push('거래대금 '+Math.round(tv)+'억'); }
+    else if(tv >= 50)  { strScore += 1; }
+    // B6. NXT 우량주
+    if(isNxt) { strScore += 1; }
   }
-  if(src.includes('inst')){
-    // 기관/외인이 사는 것 = 스마트머니 지지선 확인
-    if(mrbn > 0 && frgn > 0)  { score += 22; reasons.push('연기금+외인 동시 순매수 ★'); }
-    else if(frgn > 0)          { score += 16; reasons.push('외국인 순매수 '+frgn.toLocaleString()+'주'); }
-    else if(mrbn > 0)          { score += 14; reasons.push('연기금 순매수 '+mrbn.toLocaleString()+'주'); }
-    else if(orgn > 0)          { score += 10; reasons.push('기관 순매수'); }
+  // 출처: inst 포함 → 기관 지지 확인
+  if(src.includes('inst')){ strScore += 3; reasons.push('기관/외인 수급'); }
+  score += Math.max(0, Math.min(30, strScore));
+
+  // ── Layer C: 눌림목 품질 (max 30pt) ──────────────────────
+  var pbScore = 0;
+  if(d){
+    // C1. 눌림목 깊이 (10일 고점 대비)
+    var depth = d.pullback_depth_pct;
+    if(depth !== null){
+      if(depth >= -7 && depth <= -3)      { pbScore += 10; reasons.push('조정폭 '+depth.toFixed(1)+'% 최적'); }
+      else if(depth > -3 && depth <= 0)   { pbScore += 6;  reasons.push('얕은 눌림 '+depth.toFixed(1)+'%'); }
+      else if(depth < -7 && depth >= -12) { pbScore += 5;  }
+      else if(depth < -12)                { pbScore += 1;  reasons.push('⚠ 깊은 조정 '+depth.toFixed(1)+'%'); }
+      else if(depth > 0)                  { pbScore += 3;  } // 신고가 근처
+    }
+    // C2. MA20 대비 위치
+    if(d.ma20_gap >= 0 && d.ma20_gap <= 3)       { pbScore += 8; reasons.push('MA20 위 '+d.ma20_gap.toFixed(1)+'% 최적'); }
+    else if(d.ma20_gap > 3 && d.ma20_gap <= 7)   { pbScore += 5; reasons.push('MA20 위 '+d.ma20_gap.toFixed(1)+'%'); }
+    else if(d.ma20_gap >= -2 && d.ma20_gap < 0)  { pbScore += 3; reasons.push('MA20 근접'); }
+    else if(d.ma20_gap >= -5 && d.ma20_gap < -2) { pbScore += 1; }
+    // C3. 거래량 수축 (조용한 눌림)
+    if(d.pullback_vol_quiet){ pbScore += 5; reasons.push('거래량 수축 (조용한 눌림)'); }
+    // C4. 연속 음봉 없음 (이미 BLOCK에서 걸러지지만 점수도 반영)
+    if(d.no_consecutive_bear){ pbScore += 4; }
+    // C5. RSI
+    if(d.rsi14 !== null){
+      if(d.rsi14 >= 40 && d.rsi14 <= 60)   { pbScore += 3; reasons.push('RSI '+d.rsi14+' 적정'); }
+      else if(d.rsi14 > 60 && d.rsi14 <= 70){ pbScore += 1; }
+      else if(d.rsi14 < 40)                 { pbScore -= 2; reasons.push('⚠ RSI '+d.rsi14+' 과매도'); }
+    }
   }
-  if(src.includes('decline') && !src.includes('disparity') && !src.includes('inst')){
-    // 하락률 상위만 있는 경우 = 아직 조정 중 → 감점
-    score -= 5;
-    reasons.push('⚠ 조정 진행 중 (단독)');
+  // 이격도 출처 → 실제 MA20 눌림목 확인됨
+  if(src.includes('disparity')){ pbScore += 3; reasons.push('이격도 눌림 확인'); }
+  score += Math.max(0, Math.min(30, pbScore));
+
+  // ── Layer D: 트리거 임박 신호 (max 20pt) ─────────────────
+  var trigScore = 0;
+  if(d){
+    // 오늘 회복 조짐 (소폭 양봉)
+    if(chg >= 0 && chg <= 3)       { trigScore += 8; reasons.push('회복 조짐 +'+chg.toFixed(1)+'%'); }
+    else if(chg > 3 && chg <= 6)   { trigScore += 5; reasons.push('반등 시작 +'+chg.toFixed(1)+'%'); }
+    else if(chg < 0 && chg >= -2)  { trigScore += 3; }
+    // 거래량 슬슬 살아남 (트리거 임박)
+    if(d.vol_trend >= 1.2 && d.vol_trend <= 2){ trigScore += 7; reasons.push('거래량 회복 '+d.vol_trend.toFixed(1)+'x'); }
+    else if(d.vol_trend >= 0.8)    { trigScore += 3; }
+    // 전일 양봉
+    if(d.prev_bullish){ trigScore += 5; reasons.push('전일 양봉'); }
   }
-  // 교집합 보너스 (disparity + inst = 눌림목에서 기관이 산다 = SWING 핵심 패턴)
-  if(src.includes('disparity') && src.includes('inst')){
-    score += 15; reasons.push('눌림목+기관지지 교집합 ★★');
-  }
+  score += Math.max(0, Math.min(20, trigScore));
 
-  // ── ② 당일 변동률 — 회복 조짐 vs 조정 중
-  if(chg >= 0 && chg <= 2)       { score += 20; reasons.push('회복 조짐 +'+chg.toFixed(1)+'%'); }
-  else if(chg > 2 && chg <= 5)   { score += 13; reasons.push('모멘텀 회복 +'+chg.toFixed(1)+'%'); }
-  else if(chg >= -2 && chg < 0)  { score += 12; reasons.push('눌림 저점 '+chg.toFixed(1)+'%'); }
-  else if(chg > 5 && chg <= 10)  { score += 5; }
-  else if(chg < -2 && chg >= -5) { score += 6; }
-  else if(chg < -5)              { score += 2; reasons.push('⚠ 깊은 조정 '+chg.toFixed(1)+'%'); }
-
-  // ── ③ 거래량 — 눌림 후 조용 or 소폭 회복이 이상적
-  if(vr >= 0.6 && vr <= 1.5 && chg >= 0) { score += 18; reasons.push('회복 거래량 '+vr.toFixed(1)+'x'); }
-  else if(vr >= 0.3 && vr <= 1.5)        { score += 12; reasons.push('조용한 눌림 '+vr.toFixed(1)+'x'); }
-  else if(vr > 1.5 && vr <= 3)           { score += 8; }
-  else if(vr > 3 && vr <= 5)             { score += 3; }
-  else if(vr < 0.3)                       { score += 1; reasons.push('거래량 매우 적음'); }
-
-  // ── ④ 시총: SWING 적정 유니버스
-  if(cap >= 3000 && cap <= 50000)    { score += 15; reasons.push('시총 '+(cap/10000).toFixed(1)+'조'); }
-  else if(cap >= 1000 && cap < 3000) { score += 8; }
-
-  // ── ⑤ 절대 거래대금
-  if(tv >= 200)      { score += 10; reasons.push('거래대금 '+Math.round(tv)+'억'); }
-  else if(tv >= 100) { score += 7; }
-  else if(tv >= 50)  { score += 3; }
-
-  // ── ⑥ NXT 우량주 가산점
-  if(isNxt) { score += 5; reasons.push('NXT 우량주'); }
-
-  reasons.push('※ MA정배열·트리거 → 분석 탭에서 확인');
+  reasons.push('※ 트리거 확정 → 분석 탭에서 확인');
   return { score: Math.min(100, Math.max(0, score)), reasons };
 }
+// ═══════════════════════════════════════════════════════════
+// SWING 결과 추적 시스템
+// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// 공통 스캐너 결과 추적 시스템 (MOMO / SWING / CORE)
+// ═══════════════════════════════════════════════════════════
+var TRACK_CFG = {
+  momo:  { key:'reconkr_track_momo',  periods:[1,3],   labels:['1일','3일'],   color:'var(--a)',  prefix:'mo' },
+  swing: { key:'reconkr_track_swing', periods:[5,10],  labels:['5일','10일'],  color:'var(--bl)', prefix:'sw' },
+  core:  { key:'reconkr_track_core',  periods:[20,60], labels:['20일','60일'], color:'var(--pu)', prefix:'co' },
+};
+var TRACK_MAX = 150;
+
+function loadTrack(mode){
+  try{ return JSON.parse(localStorage.getItem(TRACK_CFG[mode].key)||'[]'); }
+  catch(e){ return []; }
+}
+
+function saveTrackResults(mode, candidates){
+  var cfg   = TRACK_CFG[mode];
+  if(!cfg) return;
+  var track = loadTrack(mode);
+  var now   = Date.now();
+  var today = new Date().toISOString().slice(0,10);
+  var minScore = mode==='momo' ? 50 : 40;
+
+  candidates.forEach(function(s){
+    if((s._score||0) < minScore) return;
+    var code = (s.symbol||'').replace(/\.(KS|KQ)$/i,'');
+    if(track.some(function(t){ return t.code===code && t.scannedAt > now-86400000; })) return;
+
+    var d = s._daily || {};
+    var cond = {};
+    if(mode==='momo'){
+      cond = {
+        gap_pct:      parseFloat((s.chgPct||0).toFixed(1)),
+        tv_ratio:     parseFloat((s.tvRatio||0).toFixed(1)),
+        vwap_above:   s._vwapPct!==null&&s._vwapPct!==undefined ? s._vwapPct>=0 : null,
+        ma_aligned:   !!(d.is_aligned_momo),
+        high20_break: !!(d.high20 && (s.price||0) >= d.high20*0.99),
+        phase:        G.marketPhase||'',
+      };
+    } else if(mode==='swing'){
+      cond = {
+        ma60_above:     !!(d.ma60 && (s.price||0) > d.ma60),
+        ma_aligned:     !!d.is_aligned,
+        ma20_gap:       d.ma20_gap!=null ? parseFloat(d.ma20_gap.toFixed(1)) : null,
+        pullback_depth: d.pullback_depth_pct!=null ? parseFloat(d.pullback_depth_pct.toFixed(1)) : null,
+        vol_quiet:      !!d.pullback_vol_quiet,
+        rsi14:          d.rsi14||null,
+        ma60_slope_pos: d.ma60_slope!=null ? d.ma60_slope>=0 : null,
+      };
+    } else if(mode==='core'){
+      cond = {
+        inst_buy:   (s._mrbn||0)>0||(s._frgn||0)>0,
+        frgn_buy:   (s._frgn||0)>0,
+        vol_trend:  parseFloat((s.volRatio||0).toFixed(1)),
+        ma20_gap:   d.ma20_gap!=null ? parseFloat(d.ma20_gap.toFixed(1)) : null,
+        cap_large:  (s.cap||0)>=5000,
+        nxt:        _NXT_CODES.has(code),
+      };
+    }
+
+    var entry = {
+      id:          cfg.prefix+'_'+now+'_'+code,
+      code:        code,
+      name:        s.name||(masterByCode(code)||{}).name||code,
+      symbol:      s.symbol,
+      scannedAt:   now,
+      scanDate:    today,
+      scanPrice:   s.price||0,
+      score:       s._score||0,
+      conditions:  cond,
+      poolSources: s._poolSources||[],
+      p1: null, p2: null,
+      status: 'pending',
+    };
+    track.push(entry);
+  });
+
+  track.sort(function(a,b){ return b.scannedAt-a.scannedAt; });
+  if(track.length > TRACK_MAX) track = track.slice(0, TRACK_MAX);
+  localStorage.setItem(cfg.key, JSON.stringify(track));
+}
+
+async function checkTrackUpdates(mode){
+  var cfg   = TRACK_CFG[mode];
+  if(!cfg) return;
+  var track = loadTrack(mode);
+  var now   = Date.now();
+  var updated = false;
+  var p1Days  = cfg.periods[0];
+  var p2Days  = cfg.periods[1];
+
+  var toUpdate = track.filter(function(t){
+    if(t.status==='complete') return false;
+    var td = (now - t.scannedAt) / 86400000 * 5/7;
+    return (!t.p1 && td >= p1Days) || (!t.p2 && td >= p2Days);
+  }).slice(0, 10);
+
+  if(!toUpdate.length) return;
+
+  var results = await Promise.allSettled(
+    toUpdate.map(function(t){ return fetchKisPrice(t.code); })
+  );
+
+  toUpdate.forEach(function(t, i){
+    if(results[i].status !== 'fulfilled') return;
+    var cp  = results[i].value.price;
+    var pct = t.scanPrice>0 ? parseFloat(((cp/t.scanPrice-1)*100).toFixed(2)) : 0;
+    var td  = (now - t.scannedAt) / 86400000 * 5/7;
+    var dt  = new Date().toISOString().slice(0,10);
+    if(!t.p1 && td >= p1Days)  { t.p1 = {price:cp,pct:pct,date:dt}; updated=true; }
+    if(!t.p2 && td >= p2Days)  { t.p2 = {price:cp,pct:pct,date:dt}; t.status='complete'; updated=true; }
+    else if(t.p1 && !t.p2)    { t.status='p1_done'; }
+  });
+
+  if(updated){
+    localStorage.setItem(cfg.key, JSON.stringify(track));
+    renderTrack(mode);
+  }
+}
+
+function renderTrack(mode){
+  var cfg = TRACK_CFG[mode];
+  if(!cfg) return;
+  var el  = document.getElementById(mode+'TrackArea');
+  if(!el) return;
+  var track = loadTrack(mode);
+
+  if(!track.length){
+    el.innerHTML='<div class="sc-status" style="font-size:11px">스캔 후 자동 저장됩니다</div>';
+    return;
+  }
+
+  var l1 = cfg.labels[0], l2 = cfg.labels[1];
+
+  // 통계
+  var done = track.filter(function(t){ return t.p1||t.p2; });
+  var finalPct = function(t){ return t.p2?t.p2.pct:(t.p1?t.p1.pct:0); };
+  var wins = done.filter(function(t){ return finalPct(t)>0; });
+  var avgP = done.length ? done.reduce(function(s,t){ return s+finalPct(t); },0)/done.length : null;
+
+  var statsHtml = '';
+  if(done.length >= 3){
+    var wr    = Math.round(wins.length/done.length*100);
+    var wrCol = wr>=55?'var(--g)':wr>=45?'var(--gold)':'var(--r)';
+    var avgS  = avgP!==null?(avgP>=0?'+':'')+avgP.toFixed(1)+'%':'-';
+    statsHtml =
+      '<div style="display:flex;gap:12px;padding:8px 14px;border-bottom:1px solid var(--b);font-family:var(--mono);font-size:11px">'+
+      '<span>추적 <b>'+track.length+'</b></span>'+
+      '<span>검증 <b>'+done.length+'</b></span>'+
+      '<span>승률 <b style="color:'+wrCol+'">'+wr+'%</b></span>'+
+      '<span>평균 <b style="color:'+(avgP>=0?'var(--g)':'var(--r)')+'">'+avgS+'</b></span>'+
+      '</div>';
+  }
+
+  var header =
+    '<div style="display:flex;align-items:center;gap:6px;padding:5px 14px;font-size:10px;color:var(--t3);font-family:var(--mono);border-bottom:1px solid var(--b)">'+
+    '<span style="min-width:14px"></span><span style="flex:1">종목</span>'+
+    '<span style="min-width:52px;color:var(--t3)">스캔일</span>'+
+    '<span style="min-width:26px;text-align:right">점수</span>'+
+    '<span style="min-width:44px;text-align:right">'+l1+'</span>'+
+    '<span style="min-width:44px;text-align:right">'+l2+'</span>'+
+    '</div>';
+
+  var rows = track.slice(0,30).map(function(t){
+    function fmtPct(v){ return v!=null?(v>=0?'<span style="color:var(--g)">+'+v+'%</span>':'<span style="color:var(--r)">'+v+'%</span>'):'<span style="color:var(--t3)">-</span>'; }
+    return '<div style="display:flex;align-items:center;gap:6px;padding:6px 14px;border-bottom:1px solid var(--b);font-size:11px">'+
+      '<span style="font-family:var(--mono);min-width:14px;color:var(--t3)">'+(t.status==='complete'?'✓':'⏳')+'</span>'+
+      '<span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+t.name+'</span>'+
+      '<span style="font-family:var(--mono);font-size:10px;color:var(--t3);min-width:52px">'+t.scanDate+'</span>'+
+      '<span style="font-family:var(--mono);min-width:26px;text-align:right;color:'+cfg.color+'">'+t.score+'</span>'+
+      '<span style="font-family:var(--mono);min-width:44px;text-align:right">'+fmtPct(t.p1?t.p1.pct:null)+'</span>'+
+      '<span style="font-family:var(--mono);min-width:44px;text-align:right">'+fmtPct(t.p2?t.p2.pct:null)+'</span>'+
+      '</div>';
+  }).join('');
+
+  el.innerHTML = statsHtml + header + rows;
+}
+
+function initAllTracks(){
+  ['momo','swing','core'].forEach(function(m){
+    renderTrack(m);
+    checkTrackUpdates(m);
+  });
+}
+
+
 function score_core(s){
   // ── CORE 철학: "기관이 조용히 사고 있는 중대형주"
   // 급등도 급락도 아닌, 기관/외인 순매수 + 거래량 점진 증가 = 매집 직접 증거
@@ -2285,10 +2592,9 @@ async function runScreener(mode){
         // MA20 실제 이격도 과열 (일봉 기반)
         if(daily.ma20_gap > 35)                   { s._blockReason = 'MA20 '+daily.ma20_gap.toFixed(0)+'% 과열'; return false; }
 
-        // VWAP 아래 + 갭 5% 미만 = 매수세 없음 → BLOCK
-        // (갭이 크면 VWAP 아래라도 상승 모멘텀으로 봄)
+        // VWAP -2% 아래 → 매도 구조 (엔진 기준과 동일, 갭 크기 무관)
         if(s._vwapPct !== null && s._vwapPct !== undefined){
-          if(s._vwapPct < -3 && s.chgPct < 5)    { s._blockReason = 'VWAP -'+Math.abs(s._vwapPct).toFixed(1)+'% 아래'; return false; }
+          if(s._vwapPct < -2) { s._blockReason = 'VWAP -'+Math.abs(s._vwapPct).toFixed(1)+'% 아래 (매도 구조)'; return false; }
         }
 
         // 전일 상한가 소진 판정
@@ -2300,6 +2606,54 @@ async function runScreener(mode){
       });
 
       if(area) area.innerHTML = '<div class="sc-status">'+passed.length+'개 BLOCK 통과 · 점수 계산 중...</div>';
+    }
+
+    // 3-B. SWING: 일봉 + 주식기본조회 + 현재가 병렬 조회
+    if(mode === 'swing'){
+      if(area) area.innerHTML = '<div class="sc-status">'+passed.length+'개 통과 · 일봉 분석 중...</div>';
+      var swDailyRes = await Promise.allSettled(
+        passed.map(function(s){ return fetchKisDailyChart(s.symbol); })
+      );
+      var swInfoRes = await Promise.allSettled(
+        passed.map(function(s){ return fetchKisStockInfo(s.symbol); })
+      );
+      var swPriceRes = await Promise.allSettled(
+        passed.map(function(s){ return fetchKisPrice(s.symbol.replace(/\.(KS|KQ)$/i,'')); })
+      );
+
+      passed.forEach(function(s, i){
+        var cp = (swPriceRes[i].status==='fulfilled') ? swPriceRes[i].value.price : null;
+        s._daily = (swDailyRes[i].status==='fulfilled') ? calcDailyStats(swDailyRes[i].value, cp) : null;
+        s._info  = (swInfoRes[i].status==='fulfilled')  ? swInfoRes[i].value : null;
+        if(swPriceRes[i].status==='fulfilled'){
+          var p = swPriceRes[i].value;
+          s._vwap    = p.vol > 0 ? p.tradingValue / p.vol : null;
+          s._vwapPct = (s._vwap && cp > 0) ? (cp / s._vwap - 1)*100 : null;
+        }
+      });
+
+      // SWING BLOCK 필터
+      passed = passed.filter(function(s){
+        var info  = s._info  || {};
+        var daily = s._daily || {};
+        // 종목 상태
+        if(info.admn_item_yn === 'Y')              { s._blockReason = '관리종목';  return false; }
+        if(info.tr_stop_yn   === 'Y')              { s._blockReason = '거래정지';  return false; }
+        // G1: MA60 아래 → 수급선 이탈 (엔진 1순위 게이트)
+        if(daily.ma60 && s.price && s.price < daily.ma60){
+          s._blockReason = 'MA60(수급선) 아래'; return false;
+        }
+        // 연속 대형 음봉 → 하락 지속
+        if(daily.no_consecutive_bear === false){
+          s._blockReason = '연속 대형 음봉'; return false;
+        }
+        return true;
+      });
+
+      if(area) area.innerHTML = '<div class="sc-status">'+passed.length+'개 BLOCK 통과 · 점수 계산 중...</div>';
+
+      // SWING 스캔 결과 자동 추적 저장
+      // saveTrackResults는 runScreener 결과 저장에서 처리
     }
 
     // 4. 2차 스코어링
@@ -2315,6 +2669,8 @@ async function runScreener(mode){
 
     G.screenerResults[mode]  = top;
     G.screenerLastRun[mode]  = new Date();
+    // 결과 자동 추적 저장
+    try{ saveTrackResults(mode, top); renderTrack(mode); }catch(e){}
 
     if(bar) { bar.classList.remove('indeterminate'); bar.style.width='100%'; }
     renderScreenerResults(mode);
@@ -5404,6 +5760,14 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
     if(ydata.trading_value_m && ydata.avgVolume && ydata.price && ydata.avgVolume > 0){
       var avgTV = ydata.avgVolume * ydata.price / 100_000_000;
       ydata.trading_value_ratio = avgTV > 0 ? parseFloat((ydata.trading_value_m / avgTV).toFixed(1)) : null;
+    }
+    // VWAP: KIS 누적거래대금/누적거래량 (Yahoo 분봉 근사치보다 정확한 실제 체결 기반)
+    if(kisPrice.tradingValue && kisPrice.vol && kisPrice.vol > 0){
+      var _kisVwap = kisPrice.tradingValue / kisPrice.vol;
+      ydata.vwap     = parseFloat(_kisVwap.toFixed(2));
+      ydata.vwap_pct = ydata.price && ydata.vwap > 0
+        ? parseFloat(((ydata.price - ydata.vwap) / ydata.vwap * 100).toFixed(1))
+        : ydata.vwap_pct;
     }
     ydata._source = 'KIS+Yahoo';
     ydata._kisTs  = kisPrice.ts || Date.now();  // KIS 수신 시각
