@@ -1797,7 +1797,8 @@ function hardCut_momo(q, cfg){
     if(tv < minTvAbs)     return null;
     if(tvRatio !== null && tvRatio < minTvRatio){ if(_dbg) console.log('[hardCut]', q.symbol, '거래대금배수 탈락:', (tvRatio||0).toFixed(1)+'x (기준:'+minTvRatio+'x)'); return null; }
   }
-  if(ulimitPct < 5)                                  return null; // 상한가 5% 미만 제외
+  // KIS 데이터면 ulimit 체크 스킵 (stck_mxpr 필드 없는 API에서 0으로 옴)
+  if(q._source !== 'KIS' && ulimitPct < 5)           return null;
   if(q.exchange && ['PNK','OTC'].includes(q.exchange)) return null;
 
   return { symbol:q.symbol, name:q.shortName||q.longName||q.symbol,
