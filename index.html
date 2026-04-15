@@ -2000,17 +2000,28 @@ function hardCut_swing(q){
   var vol    = q.regularMarketVolume        || 0;
   var avgVol = q.averageDailyVolume3Month   || q.averageDailyVolume10Day || 0;
   var volRatio = avgVol>0 ? vol/avgVol : null;
-  var tv     = q._kisTV !== undefined ? q._kisTV : (price*vol)/100_000_000; // 거래대금 억원
+  var tv     = q._kisTV !== undefined ? q._kisTV : (price*vol)/100_000_000;
+  var isKIS  = q._source === 'KIS';
 
   if(price < 500)                                  return null;
-  if(cap !== null && cap < 1000)                   return null; // 시총 1000억+ (스윙은 유동성 더 필요)
-  if(chgPct < -7 || chgPct > 10)                  return null; // 너무 급등/급락 제외 (-7%까지 허용: 눌림목 후보 포함)
-  if(volRatio !== null && volRatio > 5)            return null; // 거래량 폭발 = MOMO 영역
-  if(volRatio !== null && volRatio < 0.3)          return null; // 거래량 너무 없음
-  if(tv < 50)                                      return null; // [이슈 D] 최소 거래대금 50억
+  if(chgPct < -10 || chgPct > 12)                 return null; // 범위 약간 완화
+
+  // KIS 이격도/기관API는 cap=0, tv=0 반환 → 데이터 없는 것이지 소형주 아님
+  // KIS 소스일 때만 체크 스킵 (MOMO hardCut과 동일 원칙)
+  if(!isKIS){
+    if(cap !== null && cap > 0 && cap < 1000)      return null;
+    if(tv < 50)                                    return null;
+  } else {
+    // KIS: cap 있으면 체크, 없으면 통과
+    if(cap !== null && cap > 0 && cap < 500)       return null; // 500억 미만만 제외
+  }
+
+  if(volRatio !== null && volRatio > 8)            return null; // 거래량 폭발
+  if(volRatio !== null && volRatio < 0.2)          return null; // 거래량 극소
 
   return { symbol:q.symbol, name:q.shortName||q.longName||q.symbol,
-    price, chgPct, cap, vol, avgVol, volRatio, tv, _source: q._source||'Yahoo' };
+    price, chgPct, cap, vol, avgVol, volRatio, tv,
+    _source: q._source||'Yahoo', _poolSources: q._poolSources||[] };
 }
 
 function hardCut_core(q){
@@ -2555,15 +2566,18 @@ async function runScreener(mode){
 
     // 3. MOMO: 일봉 + 주식기본조회 병렬 조회 → BLOCK 추가필터 → 일봉 스코어
     if(mode === 'momo'){
-      var dailyRes = await Promise.allSettled(
-        passed.map(function(s){ return fetchKisDailyChart(s.symbol); })
-      );
-      var infoRes = await Promise.allSettled(
-        passed.map(function(s){ return fetchKisStockInfo(s.symbol); })
-      );
-      var priceRes = await Promise.allSettled(
-        passed.map(function(s){ return fetchKisPrice(s.symbol.replace(/\.(KS|KQ)$/i,'')); })
-      );
+      async function _batchSettle(items, fn, batchSize){
+        var results = [];
+        for(var _b=0; _b<items.length; _b+=batchSize){
+          var _chunk = items.slice(_b, _b+batchSize);
+          var _r = await Promise.allSettled(_chunk.map(fn));
+          results = results.concat(_r);
+        }
+        return results;
+      }
+      var dailyRes = await _batchSettle(passed, function(s){ return fetchKisDailyChart(s.symbol); }, 5);
+      var infoRes  = await _batchSettle(passed, function(s){ return fetchKisStockInfo(s.symbol); }, 5);
+      var priceRes = await _batchSettle(passed, function(s){ return fetchKisPrice(s.symbol.replace(/\.(KS|KQ)$/i,'')); }, 5);
 
       // 일봉·종목정보·현재가(VWAP) 부착
       passed.forEach(function(s, i){
@@ -2611,15 +2625,21 @@ async function runScreener(mode){
     // 3-B. SWING: 일봉 + 주식기본조회 + 현재가 병렬 조회
     if(mode === 'swing'){
       if(area) area.innerHTML = '<div class="sc-status">'+passed.length+'개 통과 · 일봉 분석 중...</div>';
-      var swDailyRes = await Promise.allSettled(
-        passed.map(function(s){ return fetchKisDailyChart(s.symbol); })
-      );
-      var swInfoRes = await Promise.allSettled(
-        passed.map(function(s){ return fetchKisStockInfo(s.symbol); })
-      );
-      var swPriceRes = await Promise.allSettled(
-        passed.map(function(s){ return fetchKisPrice(s.symbol.replace(/\.(KS|KQ)$/i,'')); })
-      );
+
+      // Oracle VM 과부하 방지: 5개씩 배치 처리
+      async function batchSettle(items, fn, batchSize){
+        var results = [];
+        for(var b=0; b<items.length; b+=batchSize){
+          var chunk = items.slice(b, b+batchSize);
+          var r = await Promise.allSettled(chunk.map(fn));
+          results = results.concat(r);
+        }
+        return results;
+      }
+
+      var swDailyRes  = await batchSettle(passed, function(s){ return fetchKisDailyChart(s.symbol); }, 5);
+      var swInfoRes   = await batchSettle(passed, function(s){ return fetchKisStockInfo(s.symbol); }, 5);
+      var swPriceRes  = await batchSettle(passed, function(s){ return fetchKisPrice(s.symbol.replace(/\.(KS|KQ)$/i,'')); }, 5);
 
       passed.forEach(function(s, i){
         var cp = (swPriceRes[i].status==='fulfilled') ? swPriceRes[i].value.price : null;
