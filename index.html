@@ -1368,6 +1368,74 @@ async function fetchKisInstitutionFlow(market){
   });
 }
 
+// ── MOMO: 체결강도 상위 — 매수세 폭발 종목
+// fid_input_iscd=0000 → 코스피+코스닥 전체 한번에
+async function fetchKisVolumePower(){
+  var headers = await kisAuthHeaders('FHPST01680000');
+  var data = await kisGet('/uapi/domestic-stock/v1/ranking/volume-power', {
+    FID_COND_MRKT_DIV_CODE: 'J',
+    FID_COND_SCR_DIV_CODE:  '20168',
+    FID_INPUT_ISCD:         '0000',  // 전체시장
+    FID_DIV_CLS_CODE:       '0',
+    FID_INPUT_PRICE_1:      '500',
+    FID_INPUT_PRICE_2:      '',
+    FID_VOL_CNT:            '30',
+    FID_TRGT_EXLS_CLS_CODE: '0',
+    FID_TRGT_CLS_CODE:      '0',
+  }, headers);
+  if(data.rt_cd !== '0') throw new Error('KIS 체결강도 오류: ' + data.msg1);
+  return (data.output || []).map(function(o){
+    return {
+      symbol:       o.stck_shrn_iscd,
+      name:         o.hts_kor_isnm,
+      price:        parseFloat(o.stck_prpr)||0,
+      chgPct:       parseFloat(o.prdy_ctrt)||0,
+      vol:          parseFloat(o.acml_vol)||0,
+      tradingValue: 0,
+      avgVol:       0,
+      marketCap:    0,
+      ulimit:       0,
+      _volumePower: parseFloat(o.tday_rltv)||0,  // 당일 체결강도
+    };
+  }).filter(function(o){ return o.symbol && o.price > 0; });
+}
+
+// ── SWING: 이격도 순위 — MA20 이격 낮은 종목 (진짜 눌림목)
+// fid_rank_sort_cls_code=1 → 이격도 낮은 순
+// fid_div_cls_code=2 → 20일 이격도 기준
+async function fetchKisDisparity(market){
+  var headers = await kisAuthHeaders('FHPST01780000');
+  var data = await kisGet('/uapi/domestic-stock/v1/ranking/disparity', {
+    FID_COND_MRKT_DIV_CODE:  'J',
+    FID_COND_SCR_DIV_CODE:   '20178',
+    FID_INPUT_ISCD:           market,
+    FID_DIV_CLS_CODE:         '2',    // 20일 이격도 기준
+    FID_RANK_SORT_CLS_CODE:   '1',    // 낮은 순 (눌림목 후보)
+    FID_HOUR_CLS_CODE:        '0',
+    FID_TRGT_CLS_CODE:        '0',
+    FID_TRGT_EXLS_CLS_CODE:   '0',
+    FID_INPUT_PRICE_1:        '1000',
+    FID_INPUT_PRICE_2:        '',
+    FID_VOL_CNT:              '30',
+  }, headers);
+  if(data.rt_cd !== '0') throw new Error('KIS 이격도 오류: ' + data.msg1);
+  return (data.output || []).map(function(o){
+    var d20 = parseFloat(o.d20_dsrt)||100;  // 20일 이격도
+    return {
+      symbol:       o.mksc_shrn_iscd || o.stck_shrn_iscd,
+      name:         o.hts_kor_isnm,
+      price:        parseFloat(o.stck_prpr)||0,
+      chgPct:       parseFloat(o.prdy_ctrt)||0,
+      vol:          parseFloat(o.acml_vol)||0,
+      tradingValue: 0,
+      avgVol:       0,
+      marketCap:    0,
+      ulimit:       0,
+      _disparity20: d20,  // 20일 이격도 (100=MA20 일치, <100=MA20 아래)
+    };
+  }).filter(function(o){ return o.symbol && o.price > 0; });
+}
+
 async function fetchKisFluctuationRanking(market, sortDiv){
   // sortDiv: '1'=상승률순
   var headers = await kisAuthHeaders('FHPST01730000');
@@ -1417,48 +1485,48 @@ async function fetchKisCandidates(mode){
   }
 
   if(mode === 'momo'){
-    // MOMO 후보 = 등락률 상위 AND 거래량 상위 교집합
-    // 갭 크면서 거래량도 터진 종목만 — 둘 중 하나만은 노이즈
-    var [fKp, fKq, vKp, vKq] = await Promise.allSettled([
-      fetchKisFluctuationRanking('0001','0'),
-      fetchKisFluctuationRanking('1001','0'),
-      fetchKisVolumeRanking('0001'),
-      fetchKisVolumeRanking('1001'),
+    // MOMO 후보 = 등락률 상위 AND 체결강도 상위 교집합
+    // 갭(등락률) + 매수세(체결강도) 동시 발생 = 진짜 MOMO 후보
+    var [fKp, fKq, vpAll] = await Promise.allSettled([
+      fetchKisFluctuationRanking('0001','0'),  // 코스피 등락률 상위
+      fetchKisFluctuationRanking('1001','0'),  // 코스닥 등락률 상위
+      fetchKisVolumePower(),                   // 체결강도 상위 (전체시장 한번에)
     ]);
     // 1차: 등락률 상위 심볼 세트
     var fluctSymbols = {};
     [fKp, fKq].forEach(function(r){
       if(r.status==='fulfilled')(r.value||[]).forEach(function(s){ fluctSymbols[s.symbol]=true; });
     });
-    // 2차: 거래량 상위 중 등락률 상위에도 있는 것만 merge
-    // (교집합 없으면 등락률 상위 전체 fallback)
+    // 2차: 체결강도 상위 중 등락률에도 있는 것 (교집합)
     var intersect = [];
-    [vKp, vKq].forEach(function(r){
-      if(r.status==='fulfilled')(r.value||[]).forEach(function(s){
+    if(vpAll.status==='fulfilled'){
+      (vpAll.value||[]).forEach(function(s){
         if(fluctSymbols[s.symbol]) intersect.push(s);
       });
-    });
-    if(intersect.length >= 5){
-      intersect.forEach(function(s){ if(!seen[s.symbol]){ seen[s.symbol]=true; all.push(s); } });
-    } else {
-      // 교집합이 너무 적으면 두 리스트 합산 (fallback)
-      [fKp, fKq, vKp, vKq].forEach(function(r){
-        if(r.status==='fulfilled') merge(r.value);
-      });
     }
-    [fKp, fKq, vKp, vKq].forEach(function(r){
-      if(r.status==='rejected') console.warn('[KIS API]', r.reason?.message||r.reason);
+    if(intersect.length >= 3){
+      intersect.forEach(function(s){ if(!seen[s.symbol]){ seen[s.symbol]=true; all.push(s); } });
+      // 등락률 상위도 합산 (체결강도 없어도 갭만으로 유효한 것)
+      [fKp, fKq].forEach(function(r){ if(r.status==='fulfilled') merge(r.value); });
+    } else {
+      // 교집합 부족 → 등락률 상위 + 체결강도 상위 전부 합산
+      [fKp, fKq].forEach(function(r){ if(r.status==='fulfilled') merge(r.value); });
+      if(vpAll.status==='fulfilled') merge(vpAll.value);
+    }
+    [fKp, fKq, vpAll].forEach(function(r){
+      if(r.status==='rejected') console.warn('[KIS MOMO]', r.reason?.message||r.reason);
     });
 
   } else if(mode === 'swing'){
-    // SWING: 신고가근접(눌림목 구간) + 소폭 하락 종목
-    var [nhKp, nhKq, fKpD, fKqD] = await Promise.allSettled([
-      fetchKisNearNewHigh('0001'),
-      fetchKisNearNewHigh('1001'),
-      fetchKisFluctuationRanking('0001','1'),
-      fetchKisFluctuationRanking('1001','1'),
+    // SWING: 신고근접(상승 후 눌림) + 이격도 낮은 종목(MA20 눌림목)
+    // 이격도 낮은 순 = MA20 근처/아래 = 진짜 눌림목 후보
+    var [nhKp, nhKq, dKp, dKq] = await Promise.allSettled([
+      fetchKisNearNewHigh('0001'),      // 코스피 신고가 근접
+      fetchKisNearNewHigh('1001'),      // 코스닥 신고가 근접
+      fetchKisDisparity('0001'),        // 코스피 이격도 낮은 순
+      fetchKisDisparity('1001'),        // 코스닥 이격도 낮은 순
     ]);
-    [nhKp, nhKq, fKpD, fKqD].forEach(function(r){
+    [nhKp, nhKq, dKp, dKq].forEach(function(r){
       if(r.status==='fulfilled') merge(r.value);
       else console.warn('[KIS swing]', r.reason?.message||r.reason);
     });
