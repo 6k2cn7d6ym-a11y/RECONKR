@@ -2649,8 +2649,11 @@ async function runScreener(mode){
         s._info  = (swInfoRes[i].status==='fulfilled')  ? swInfoRes[i].value : null;
         if(swPriceRes[i].status==='fulfilled'){
           var p = swPriceRes[i].value;
+          // price=0(이격도 API 미제공)이면 실제 KIS 현재가로 업데이트
+          if(!s.price && p.price) s.price = p.price;
+          s._tv_m    = p.tradingValue > 0 ? p.tradingValue / 100_000_000 : s._tv_m || 0;
           s._vwap    = p.vol > 0 ? p.tradingValue / p.vol : null;
-          s._vwapPct = (s._vwap && cp > 0) ? (cp / s._vwap - 1)*100 : null;
+          s._vwapPct = (s._vwap && s.price > 0) ? (s.price / s._vwap - 1)*100 : null;
         }
       });
 
@@ -2662,10 +2665,18 @@ async function runScreener(mode){
         if(info.admn_item_yn === 'Y')              { s._blockReason = '관리종목';  return false; }
         if(info.tr_stop_yn   === 'Y')              { s._blockReason = '거래정지';  return false; }
         // G1: MA60 아래 → 수급선 이탈 (엔진 1순위 게이트)
-        if(daily.ma60 && s.price && s.price < daily.ma60){
+        if(daily.ma60 && s.price > 0 && s.price < daily.ma60){
           s._blockReason = 'MA60(수급선) 아래'; return false;
         }
-        // 연속 대형 음봉 → 하락 지속
+        // G2: 거래대금 50억 미달 (실제 KIS 현재가 기반으로 재체크)
+        if(s._tv_m > 0 && s._tv_m < 50){
+          s._blockReason = '거래대금 '+s._tv_m.toFixed(0)+'억 — 최소 50억 미달'; return false;
+        }
+        // G3: VWAP -2% 아래 → 매도 구조 (엔진 기준)
+        if(s._vwapPct !== null && s._vwapPct !== undefined && s._vwapPct < -2){
+          s._blockReason = 'VWAP -'+Math.abs(s._vwapPct).toFixed(1)+'% 아래 (매도 구조)'; return false;
+        }
+        // G4: 연속 대형 음봉 → 하락 지속
         if(daily.no_consecutive_bear === false){
           s._blockReason = '연속 대형 음봉'; return false;
         }
