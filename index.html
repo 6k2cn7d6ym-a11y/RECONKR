@@ -5761,13 +5761,23 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
       var avgTV = ydata.avgVolume * ydata.price / 100_000_000;
       ydata.trading_value_ratio = avgTV > 0 ? parseFloat((ydata.trading_value_m / avgTV).toFixed(1)) : null;
     }
-    // VWAP: KIS 누적거래대금/누적거래량 (Yahoo 분봉 근사치보다 정확한 실제 체결 기반)
-    if(kisPrice.tradingValue && kisPrice.vol && kisPrice.vol > 0){
-      var _kisVwap = kisPrice.tradingValue / kisPrice.vol;
-      ydata.vwap     = parseFloat(_kisVwap.toFixed(2));
-      ydata.vwap_pct = ydata.price && ydata.vwap > 0
-        ? parseFloat(((ydata.price - ydata.vwap) / ydata.vwap * 100).toFixed(1))
-        : ydata.vwap_pct;
+    // VWAP: KIS 누적거래대금/누적거래량 우선
+    // tradingValue > 0이면 KIS가 정확 → 덮어씀
+    // tradingValue = 0이면 KIS 미집계 → Yahoo 분봉 결과 유지
+    if(kisPrice.vol && kisPrice.vol > 0){
+      if(kisPrice.tradingValue > 0){
+        // KIS 정상 → 누적거래대금/거래량으로 계산 (실제 체결 기반)
+        var _kisVwap = kisPrice.tradingValue / kisPrice.vol;
+        ydata.vwap     = parseFloat(_kisVwap.toFixed(2));
+        ydata.vwap_pct = ydata.price && ydata.vwap > 0
+          ? parseFloat(((ydata.price - ydata.vwap) / ydata.vwap * 100).toFixed(1))
+          : ydata.vwap_pct;
+      } else if(!ydata.vwap && ydata.price){
+        // 둘 다 없음 → 현재가를 VWAP 근사값으로 (오차 있지만 미계산보다 나음)
+        ydata.vwap     = ydata.price;
+        ydata.vwap_pct = 0;
+        ydata._vwapEstimated = true; // 추정값 플래그
+      }
     }
     ydata._source = 'KIS+Yahoo';
     ydata._kisTs  = kisPrice.ts || Date.now();  // KIS 수신 시각
@@ -6287,7 +6297,7 @@ function _calcEntryActionInner(r){
   }
   // Default — VWAP 위/아래에 따라 트리거 다르게
   // Default — 상황별로 가장 유용한 정보 표시
-  var vwapLabel=vwap?'VWAP '+(aboveVwap?'위':'아래')+' $'+vwap.toFixed(2):'VWAP 미계산';
+  var vwapLabel=vwap?(r._vwapEstimated?'VWAP 추정':'VWAP ')+(aboveVwap?'위':'아래')+' ₩'+Math.round(vwap).toLocaleString():'VWAP 미계산 (KIS 재연결 확인)';
   var defaultReason='['+phase+'] '+vwapLabel;
   if(pmHigh) defaultReason+=' / PM고점 $'+pmHigh.toFixed(2);
   if(sup1) defaultReason+=' / 지지 $'+sup1.toFixed(2);
