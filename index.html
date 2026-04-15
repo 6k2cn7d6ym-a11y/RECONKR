@@ -1467,7 +1467,7 @@ async function fetchKisFluctuationRanking(market, sortDiv){
   if(data.rt_cd !== '0') throw new Error('KIS 등락률순위 오류: ' + data.msg1);
   return (data.output || []).map(function(o){
     return {
-      symbol:       o.mksc_shrn_iscd,
+      symbol:       o.stck_shrn_iscd,   // 등락률 순위: stck_shrn_iscd
       name:         o.hts_kor_isnm,
       price:        parseFloat(o.stck_prpr)||0,
       chgPct:       parseFloat(o.prdy_ctrt)||0,
