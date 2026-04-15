@@ -1484,71 +1484,168 @@ async function fetchKisFluctuationRanking(market, sortDiv){
 // [4] KIS 후보 풀 — 모드별
 // 코스피 + 코스닥 병합 → 중복 제거
 // ─────────────────────────────────────────
+// ─────────────────────────────────────────
+// 일봉 조회 (최근 30거래일) — MOMO 일봉 분석용
+// TR: FHKST03010100
+// ─────────────────────────────────────────
+async function fetchKisDailyChart(symbol){
+  var code = symbol.replace(/\.(KS|KQ)$/i,'');
+  var today = new Date();
+  var from  = new Date(today); from.setDate(from.getDate()-50); // 여유있게 50일치 요청
+  function fmt(d){ return d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0'); }
+  var headers = await kisAuthHeaders('FHKST03010100');
+  var data = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice',{
+    FID_COND_MRKT_DIV_CODE: 'J',
+    FID_INPUT_ISCD:          code,
+    FID_INPUT_DATE_1:        fmt(from),
+    FID_INPUT_DATE_2:        fmt(today),
+    FID_PERIOD_DIV_CODE:    'D',
+    FID_ORG_ADJ_PRC:        '0',
+  }, headers);
+  if(data.rt_cd !== '0') throw new Error('일봉오류:'+data.msg1);
+  return data.output2 || [];  // 최신 날짜가 index 0
+}
+
+// ─────────────────────────────────────────
+// 주식기본조회 — 관리종목/거래정지/투자유의 체크
+// TR: CTPF1002R
+// ─────────────────────────────────────────
+async function fetchKisStockInfo(symbol){
+  var code = symbol.replace(/\.(KS|KQ)$/i,'');
+  var headers = await kisAuthHeaders('CTPF1002R');
+  var data = await kisGet('/uapi/domestic-stock/v1/quotations/search-stock-info',{
+    PRDT_TYPE_CD: '300',
+    PDNO:          code,
+  }, headers);
+  if(data.rt_cd !== '0') throw new Error('종목정보오류:'+data.msg1);
+  return data.output || {};
+}
+
+// ─────────────────────────────────────────
+// 일봉 통계 계산 — MOMO 스코어링/BLOCK용
+// candles: fetchKisDailyChart 결과 (최신 index 0)
+// ─────────────────────────────────────────
+function calcDailyStats(candles){
+  if(!candles || candles.length < 5) return null;
+  var n = Math.min(candles.length, 20);
+
+  var closes = candles.slice(0,n).map(function(c){ return parseFloat(c.stck_clpr)||0; });
+  var opens  = candles.slice(0,n).map(function(c){ return parseFloat(c.stck_oprc)||0; });
+  var highs  = candles.slice(0,n).map(function(c){ return parseFloat(c.stck_hgpr)||0; });
+  var vols   = candles.slice(0,n).map(function(c){ return parseFloat(c.acml_vol)||0; });
+  var tvs    = candles.slice(0,n).map(function(c){ return parseFloat(c.acml_tr_pbmn)||0; });
+
+  function avg(arr, len){ var a=arr.slice(0,len); return a.reduce(function(s,v){return s+v;},0)/a.length; }
+
+  var ma5  = avg(closes, Math.min(5,  n));
+  var ma10 = avg(closes, Math.min(10, n));
+  var ma20 = avg(closes, Math.min(20, n));
+
+  var prevClose = closes[0];  // 전일 종가
+  var ma20_gap  = ma20 > 0 ? (prevClose/ma20 - 1)*100 : 0;
+
+  // 최근 20일/10일 최고가 (오늘 제외 = 어제까지의 저항선)
+  var high20     = Math.max.apply(null, highs.slice(0, Math.min(20,n)));
+  var box10_high = Math.max.apply(null, highs.slice(0, Math.min(10,n)));
+
+  // MA 정배열 (5 > 10 > 20)
+  var is_aligned = (ma5 > ma10) && (ma10 > ma20);
+
+  // 전일 양봉
+  var prev_bullish = prevClose > opens[0];
+
+  // 거래량 추세: 최근 3일 vs 이전 3일
+  var vol3r = avg(vols, 3);
+  var vol3p = n >= 6 ? avg(vols.slice(3,6), 3) : vol3r;
+  var vol_trend = vol3p > 0 ? vol3r/vol3p : 1;
+
+  // 전일 상한가 여부
+  var prev_day_limit = candles[0].prdy_vrss_sign === '1'
+    || (closes[1] > 0 && (prevClose/closes[1]-1) >= 0.295);
+
+  // 전일 거래대금 소진 배수 (5일 이전 평균 대비)
+  var tv_prev  = tvs[0];
+  var tv5_base = avg(tvs.slice(1,6), Math.min(5, tvs.length-1));
+  var tv_ratio_prev = tv5_base > 0 ? tv_prev/tv5_base : 0;
+
+  return {
+    ma5, ma10, ma20,
+    ma20_gap,       // MA20 이격도 % (양=위, 음=아래)
+    high20,         // 최근 20일 고가 최고점
+    box10_high,     // 최근 10일 고가 최고점 (박스권 상단)
+    is_aligned,     // MA 정배열 여부
+    prev_bullish,   // 전일 양봉
+    vol_trend,      // 거래량 추세 배수
+    prev_day_limit, // 전일 상한가 여부
+    tv_ratio_prev,  // 전일 거래대금/5일평균 배수 (소진 판정)
+  };
+}
+
 async function fetchKisCandidates(mode){
+  // _poolSource 태그: 출처 추적 (스코어링 가중치 활용)
   var all = [], seen = {};
 
-  function merge(list){
+  function mergeTagged(list, tag){
     (list||[]).forEach(function(s){
-      if(!seen[s.symbol]){ seen[s.symbol]=true; all.push(s); }
+      if(!s.symbol) return;
+      if(!seen[s.symbol]){
+        seen[s.symbol] = true;
+        s._poolSources = [tag];
+        all.push(s);
+      } else {
+        // 이미 있는 종목 → 출처 누적 (교집합 판정용)
+        var existing = all.find(function(x){ return x.symbol===s.symbol; });
+        if(existing && !existing._poolSources.includes(tag)) existing._poolSources.push(tag);
+      }
     });
   }
 
   if(mode === 'momo'){
-    // MOMO 후보 = 등락률 상위 AND 체결강도 상위 교집합
-    // 갭(등락률) + 매수세(체결강도) 동시 발생 = 진짜 MOMO 후보
-    var [fKp, fKq, vpAll] = await Promise.allSettled([
+    // MOMO: 등락률 + 체결강도 + 거래량 → 교집합 3중 우선순위
+    var [fKp, fKq, vpAll, vKp, vKq] = await Promise.allSettled([
       fetchKisFluctuationRanking('0001','0'),  // 코스피 등락률 상위
       fetchKisFluctuationRanking('1001','0'),  // 코스닥 등락률 상위
-      fetchKisVolumePower(),                   // 체결강도 상위 (전체시장 한번에)
+      fetchKisVolumePower(),                   // 체결강도 상위 (전시장)
+      fetchKisVolumeRanking('0001'),           // 코스피 거래량 상위
+      fetchKisVolumeRanking('1001'),           // 코스닥 거래량 상위
     ]);
-    // 1차: 등락률 상위 심볼 세트
-    var fluctSymbols = {};
-    [fKp, fKq].forEach(function(r){
-      if(r.status==='fulfilled')(r.value||[]).forEach(function(s){ fluctSymbols[s.symbol]=true; });
-    });
-    // 2차: 체결강도 상위 중 등락률에도 있는 것 (교집합)
-    var intersect = [];
-    if(vpAll.status==='fulfilled'){
-      (vpAll.value||[]).forEach(function(s){
-        if(fluctSymbols[s.symbol]) intersect.push(s);
-      });
-    }
-    if(intersect.length >= 3){
-      intersect.forEach(function(s){ if(!seen[s.symbol]){ seen[s.symbol]=true; all.push(s); } });
-      // 등락률 상위도 합산 (체결강도 없어도 갭만으로 유효한 것)
-      [fKp, fKq].forEach(function(r){ if(r.status==='fulfilled') merge(r.value); });
-    } else {
-      // 교집합 부족 → 등락률 상위 + 체결강도 상위 전부 합산
-      [fKp, fKq].forEach(function(r){ if(r.status==='fulfilled') merge(r.value); });
-      if(vpAll.status==='fulfilled') merge(vpAll.value);
-    }
-    [fKp, fKq, vpAll].forEach(function(r){
+    [fKp, fKq].forEach(function(r){ if(r.status==='fulfilled') mergeTagged(r.value,'fluct'); });
+    if(vpAll.status==='fulfilled') mergeTagged(vpAll.value,'vpower');
+    [vKp, vKq].forEach(function(r){ if(r.status==='fulfilled') mergeTagged(r.value,'vol'); });
+    [fKp, fKq, vpAll, vKp, vKq].forEach(function(r){
       if(r.status==='rejected') console.warn('[KIS MOMO]', r.reason?.message||r.reason);
     });
 
   } else if(mode === 'swing'){
-    // SWING: 신고근접(상승 후 눌림) + 이격도 낮은 종목(MA20 눌림목)
-    // 이격도 낮은 순 = MA20 근처/아래 = 진짜 눌림목 후보
-    var [nhKp, nhKq, dKp, dKq] = await Promise.allSettled([
-      fetchKisNearNewHigh('0001'),      // 코스피 신고가 근접
-      fetchKisNearNewHigh('1001'),      // 코스닥 신고가 근접
-      fetchKisDisparity('0001'),        // 코스피 이격도 낮은 순
-      fetchKisDisparity('1001'),        // 코스닥 이격도 낮은 순
+    // SWING: 이격도(눌림목) + 기관/외인 순매수(스마트머니) + 하락률 상위(조정 중)
+    // ※ 신고가 근접 제거 — 눌림목 성격과 반대
+    var [dKp, dKq, iKp, iKq, dnKp, dnKq] = await Promise.allSettled([
+      fetchKisDisparity('0001'),                   // 코스피 MA20 이격도 낮은 순
+      fetchKisDisparity('1001'),                   // 코스닥 MA20 이격도 낮은 순
+      fetchKisInstitutionFlow('0001'),              // 코스피 기관/외인 순매수
+      fetchKisInstitutionFlow('1001'),              // 코스닥 기관/외인 순매수
+      fetchKisFluctuationRanking('0001','1'),       // 코스피 하락률 상위 (눌린 종목)
+      fetchKisFluctuationRanking('1001','1'),       // 코스닥 하락률 상위
     ]);
-    [nhKp, nhKq, dKp, dKq].forEach(function(r){
-      if(r.status==='fulfilled') merge(r.value);
-      else console.warn('[KIS swing]', r.reason?.message||r.reason);
+    [dKp, dKq].forEach(function(r){ if(r.status==='fulfilled') mergeTagged(r.value,'disparity'); });
+    [iKp, iKq].forEach(function(r){ if(r.status==='fulfilled') mergeTagged(r.value,'inst'); });
+    [dnKp, dnKq].forEach(function(r){ if(r.status==='fulfilled') mergeTagged(r.value,'decline'); });
+    [dKp, dKq, iKp, iKq, dnKp, dnKq].forEach(function(r){
+      if(r.status==='rejected') console.warn('[KIS SWING]', r.reason?.message||r.reason);
     });
 
   } else if(mode === 'core'){
-    // CORE: 연기금/외국인 순매수 종목 (장기 매집 직접 증거)
-    var [instKp, instKq] = await Promise.allSettled([
-      fetchKisInstitutionFlow('0001'),
-      fetchKisInstitutionFlow('1001'),
+    // CORE: 기관/외인 순매수 + 거래량 상위 (매집 특징 = 조용한 거래량 증가)
+    var [iKp, iKq, vKp, vKq] = await Promise.allSettled([
+      fetchKisInstitutionFlow('0001'),   // 코스피 기관/외인 순매수
+      fetchKisInstitutionFlow('1001'),   // 코스닥 기관/외인 순매수
+      fetchKisVolumeRanking('0001'),     // 코스피 거래량 상위 (매집 포착)
+      fetchKisVolumeRanking('1001'),     // 코스닥 거래량 상위
     ]);
-    [instKp, instKq].forEach(function(r){
-      if(r.status==='fulfilled') merge(r.value);
-      else console.warn('[KIS core]', r.reason?.message||r.reason);
+    [iKp, iKq].forEach(function(r){ if(r.status==='fulfilled') mergeTagged(r.value,'inst'); });
+    [vKp, vKq].forEach(function(r){ if(r.status==='fulfilled') mergeTagged(r.value,'vol'); });
+    [iKp, iKq, vKp, vKq].forEach(function(r){
+      if(r.status==='rejected') console.warn('[KIS CORE]', r.reason?.message||r.reason);
     });
   }
 
@@ -1564,12 +1661,15 @@ async function fetchKisCandidates(mode){
       regularMarketVolume:         s.vol,
       averageDailyVolume3Month:    avgVol,
       marketCap:                   s.marketCap * 100_000_000,
-      _kisTV:       tv,
-      _kisUlimit:   s.ulimit,
-      _source:      'KIS',
-      _mrbn:        s._mrbn || 0,  // 연기금 순매수
-      _frgn:        s._frgn || 0,  // 외국인 순매수
-      _orgn:        s._orgn || 0,  // 기관 순매수
+      _kisTV:         tv,
+      _kisUlimit:     s.ulimit,
+      _source:        'KIS',
+      _mrbn:          s._mrbn        || 0,   // 연기금 순매수
+      _frgn:          s._frgn        || 0,   // 외국인 순매수
+      _orgn:          s._orgn        || 0,   // 기관 순매수
+      _disparity20:   s._disparity20 || 0,   // 20일 이격도
+      _volumePower:   s._volumePower || 0,   // 체결강도
+      _poolSources:   s._poolSources || [],  // 출처 배열 (교집합 판정)
     };
   });
 }
@@ -1849,134 +1949,230 @@ function hardCut_core(q){
 //   스크리너에서 불가한 항목(세력스테이지·VWAP)은 중립 처리
 // ─────────────────────────────────────────────────────────────
 function score_momo(s){
-  // ※ momoEngine 핵심 4개 점수와 동기화 유지
   var score   = 0;
   var reasons = [];
 
-  var tv   = s.tvRatio  || 0;
-  var tvM  = s.tv       || 0;
-  var gap  = s.chgPct   || 0;
-  var cap  = s.cap      || 0;
-  var ul   = s.ulimitPct !== undefined ? s.ulimitPct : (30 - gap);
-  var rvol = s.rvol     || 0;
+  var tv    = s.tvRatio  || 0;
+  var tvM   = s.tv       || 0;
+  var gap   = s.chgPct   || 0;
+  var cap   = s.cap      || 0;
+  var ul    = s.ulimitPct !== undefined ? s.ulimitPct : (30 - gap);
+  var rvol  = s.rvol     || 0;
+  var vp    = s._volumePower || 0;
+  var src   = s._poolSources || [];
+  var code  = (s.symbol||'').replace(/\.(KS|KQ)$/i,'');
+  var d     = s._daily   || null;   // 일봉 통계
 
-  // 즉시 0점 (하드 BLOCK과 동일)
-  if(ul < 5)          return { score:0, reasons:['⛔ 상한가 '+ul.toFixed(0)+'% — 에너지 소진'] };
-  if(gap > 20)        return { score:0, reasons:['⛔ 갭 '+gap.toFixed(1)+'% — 고점 추격'] };
-  if((s.ma20_gap_pct||0) > 30) return { score:0, reasons:['⛔ MA20 이격 +'+s.ma20_gap_pct+'%'] };
+  // ── 즉시 0점
+  if(ul < 5)   return { score:0, reasons:['⛔ 상한가 '+ul.toFixed(0)+'% 소진'] };
+  if(gap > 20) return { score:0, reasons:['⛔ 갭 '+gap.toFixed(1)+'% 고점추격'] };
+  if(d && d.ma20_gap > 35) return { score:0, reasons:['⛔ MA20 +'+d.ma20_gap.toFixed(0)+'% 과열'] };
 
-  // ① 거래대금 배수 (max 35pt)
-  if(tv >= 10)     { score += 35; reasons.push('거래대금 '+tv.toFixed(0)+'배 폭발'); }
-  else if(tv >= 5) { score += 25; reasons.push('거래대금 '+tv.toFixed(1)+'배'); }
-  else if(tv >= 3) { score += 15; reasons.push('거래대금 '+tv.toFixed(1)+'배'); }
-  // 절대 거래대금 (max +5pt)
-  if(tvM >= 100)     { score += 5; reasons.push(tvM.toFixed(0)+'억'); }
-  else if(tvM >= 50) { score += 3; }
-  else if(tvM >= 10) { score += 1; }
+  // ── ① 일봉 구조 (max 45pt) — 핵심 추가 요소
+  if(d){
+    // 신고가/박스권 돌파 — 가장 강한 MOMO 셋업
+    if(s.price > 0 && d.high20 > 0 && s.price >= d.high20 * 0.99){
+      score += 25; reasons.push('20일 신고가 돌파 ★★');
+    } else if(s.price > 0 && d.box10_high > 0 && s.price >= d.box10_high * 0.99){
+      score += 18; reasons.push('10일 박스권 돌파 ★');
+    }
 
-  // ② 갭 (max 15pt)
-  if(gap >= 5 && gap <= 12)      { score += 15; reasons.push('갭 '+gap.toFixed(1)+'%'); }
-  else if(gap >= 3 && gap < 5)   { score += 8;  reasons.push('갭 '+gap.toFixed(1)+'%'); }
-  else if(gap > 12 && gap <= 20) { score += 5;  reasons.push('갭 '+gap.toFixed(1)+'% ⚠추격'); }
+    // MA 정배열
+    if(d.is_aligned){ score += 10; reasons.push('MA 정배열'); }
+    else if(d.ma5 > d.ma20){ score += 4; }  // 부분 정배열
 
-  // ③ 시간대 (+10 → -15)
+    // 전일 양봉 (방향성 연속)
+    if(d.prev_bullish){ score += 7; reasons.push('전일 양봉'); }
+
+    // 거래량 증가 추세
+    if(d.vol_trend >= 1.5)      { score += 8; reasons.push('거래량 추세 '+d.vol_trend.toFixed(1)+'x'); }
+    else if(d.vol_trend >= 1.2) { score += 4; }
+
+    // MA20 이격도 — 적정 달림 구간
+    if(d.ma20_gap >= 5 && d.ma20_gap <= 20)       { score += 5; reasons.push('MA20 이격 '+d.ma20_gap.toFixed(0)+'%'); }
+    else if(d.ma20_gap > 20 && d.ma20_gap <= 30)  { score -= 3; }
+    else if(d.ma20_gap < 0)                        { score -= 5; reasons.push('MA20 아래 눌림'); }
+
+    // 전일 상한가 → 오늘 연속 (소진 BLOCK 통과한 것만 여기 도달)
+    if(d.prev_day_limit){ score += 10; reasons.push('전일상한가 연속 모멘텀'); }
+  }
+
+  // ── ② 출처 교집합 보너스
+  if(src.length >= 3)      { score += 20; reasons.push('3중 교집합 ★★★'); }
+  else if(src.length >= 2) { score += 12; reasons.push('2중 교집합 ★★'); }
+
+  // ── ③ 거래대금 배수 (max 30pt)
+  if(tv >= 10)     { score += 30; reasons.push('거래대금 '+tv.toFixed(0)+'배 폭발'); }
+  else if(tv >= 5) { score += 22; reasons.push('거래대금 '+tv.toFixed(1)+'배'); }
+  else if(tv >= 3) { score += 13; reasons.push('거래대금 '+tv.toFixed(1)+'배'); }
+  if(tvM >= 100)   { score += 5;  reasons.push(tvM.toFixed(0)+'억'); }
+  else if(tvM >= 50){ score += 3; }
+  else if(tvM >= 10){ score += 1; }
+
+  // ── ④ 갭 (max 12pt)
+  if(gap >= 5 && gap <= 12)      { score += 12; reasons.push('갭 '+gap.toFixed(1)+'%'); }
+  else if(gap >= 3 && gap < 5)   { score += 7;  reasons.push('갭 '+gap.toFixed(1)+'%'); }
+  else if(gap > 12 && gap <= 20) { score += 4;  reasons.push('갭 '+gap.toFixed(1)+'% ⚠추격'); }
+
+  // ── ⑤ 체결강도
+  if(vp >= 150)      { score += 10; reasons.push('체결강도 '+vp.toFixed(0)+'%'); }
+  else if(vp >= 120) { score += 6; }
+  else if(vp >= 100) { score += 3; }
+
+  // ── ⑥ 시간대
   var ph = G.marketPhase || '';
-  if(ph === 'EARLY')      { score += 10; reasons.push('골든윈도우'); }
-  else if(ph === 'PRIME') { score += 5; }
-  else if(ph === 'ORB')   { score -= 10; }
-  else if(ph === 'LATE')  { score -= 15; reasons.push('오후페이드'); }
+  if(ph==='EARLY')      { score += 10; reasons.push('골든윈도우'); }
+  else if(ph==='PRIME') { score += 5; }
+  else if(ph==='ORB')   { score -= 10; }
+  else if(ph==='LATE')  { score -= 15; reasons.push('오후페이드'); }
 
-  // 보조 감점
+  // ── 보조 감점
   if(rvol > 0 && rvol < 1.5) { score -= 8; reasons.push('RVol '+rvol.toFixed(1)+'x 약함'); }
   if(cap > 0 && cap < 200)   { score -= 10; reasons.push('시총 '+cap.toFixed(0)+'억 초소형'); }
 
   return { score: Math.min(100, Math.max(0, score)), reasons };
 }
-
 function score_swing(s){
-  // ── 스크리너 철학: "회복 조짐 있는 눌림목" ──
-  // 엔진 트리거(양봉+거래량+고가돌파)에 가장 근접한 후보를 최우선으로
-  // "완전히 조용한 종목"이 아니라 "눌림 후 슬슬 살아나는 종목"
-  var score = 0;
+  // ── SWING 철학: "조용히 눌렸다가 살아나는 종목"
+  // 출처(poolSource)로 성격 구분:
+  //   disparity → MA20 실제 이격도 낮음 (가장 신뢰)
+  //   inst      → 기관/외인이 사는 눌림목 (스마트머니 지지)
+  //   decline   → 아직 조정 중 (주의)
+  var score   = 0;
   var reasons = [];
-  var chg = s.chgPct || 0;
-  var vr  = s.volRatio || 0;
+  var chg     = s.chgPct    || 0;
+  var vr      = s.volRatio  || 0;
+  var cap     = s.cap       || 0;
+  var tv      = s.tv        || (s.price * s.vol) / 100_000_000;
+  var d20     = s._disparity20 || 0;   // 20일 이격도 (100=MA20, <100=아래)
+  var mrbn    = s._mrbn     || 0;      // 연기금 순매수
+  var frgn    = s._frgn     || 0;      // 외국인 순매수
+  var orgn    = s._orgn     || 0;      // 기관 전체
+  var src     = s._poolSources || [];
+  var code    = (s.symbol||'').replace(/\.(KS|KQ)$/i,'');
+  var isNxt   = _NXT_CODES.has(code);
 
-  // ① 당일 변동률 — 회복 조짐 최우선
-  if(chg >= 0 && chg <= 2)           { score+=25; reasons.push('회복 조짐 +'+chg.toFixed(1)+'%'); }  // 최적: 소폭 회복
-  else if(chg > 2 && chg <= 4)       { score+=18; reasons.push('모멘텀 회복 +'+chg.toFixed(1)+'%'); } // 트리거 근접
-  else if(chg >= -2 && chg < 0)      { score+=15; reasons.push('눌림목 저점 '+chg.toFixed(1)+'%'); }  // 아직 찾는 중
-  else if(chg > 4 && chg <= 7)       { score+=10; }                                                    // 이미 올라감
-  else if(chg < -2 && chg >= -4)     { score+=8;  }                                                    // 조정 중
-  else if(chg < -4 && chg >= -7)     { score+=3;  }                                                    // 깊은 조정
+  // ── ① 출처 기반 기본 점수
+  if(src.includes('disparity')) {
+    // 이격도 낮은 순 = 가장 직접적인 눌림목 증거
+    if(d20 > 0 && d20 <= 95)        { score += 25; reasons.push('MA20 이격 '+d20.toFixed(1)+'% ★ 눌림목'); }
+    else if(d20 > 95 && d20 <= 100) { score += 18; reasons.push('MA20 근접 '+d20.toFixed(1)+'%'); }
+    else if(d20 > 100 && d20 <= 105){ score += 10; reasons.push('MA20 소폭 위 '+d20.toFixed(1)+'%'); }
+    else                             { score += 5; }
+  }
+  if(src.includes('inst')){
+    // 기관/외인이 사는 것 = 스마트머니 지지선 확인
+    if(mrbn > 0 && frgn > 0)  { score += 22; reasons.push('연기금+외인 동시 순매수 ★'); }
+    else if(frgn > 0)          { score += 16; reasons.push('외국인 순매수 '+frgn.toLocaleString()+'주'); }
+    else if(mrbn > 0)          { score += 14; reasons.push('연기금 순매수 '+mrbn.toLocaleString()+'주'); }
+    else if(orgn > 0)          { score += 10; reasons.push('기관 순매수'); }
+  }
+  if(src.includes('decline') && !src.includes('disparity') && !src.includes('inst')){
+    // 하락률 상위만 있는 경우 = 아직 조정 중 → 감점
+    score -= 5;
+    reasons.push('⚠ 조정 진행 중 (단독)');
+  }
+  // 교집합 보너스 (disparity + inst = 눌림목에서 기관이 산다 = SWING 핵심 패턴)
+  if(src.includes('disparity') && src.includes('inst')){
+    score += 15; reasons.push('눌림목+기관지지 교집합 ★★');
+  }
 
-  // ② 거래량 — 회복 신호 + 조용한 눌림 구분
-  // 0.8~1.5x + 양봉 조합 = 엔진 트리거와 가장 가까운 신호
-  if(vr >= 0.8 && vr <= 1.5 && chg >= 0) { score+=25; reasons.push('회복 거래량 '+vr.toFixed(1)+'x'); }  // 핵심
-  else if(vr >= 0.4 && vr <= 1.5)        { score+=18; reasons.push('눌림 거래량 '+vr.toFixed(1)+'x'); }  // 조용한 눌림
-  else if(vr > 1.5 && vr <= 2.5)         { score+=12; }                                                   // 거래량 회복 중
-  else if(vr > 2.5 && vr <= 4)           { score+=6; }                                                    // 과도한 거래량
-  else if(vr < 0.4)                       { score+=2; }                                                    // 너무 죽어있음
+  // ── ② 당일 변동률 — 회복 조짐 vs 조정 중
+  if(chg >= 0 && chg <= 2)       { score += 20; reasons.push('회복 조짐 +'+chg.toFixed(1)+'%'); }
+  else if(chg > 2 && chg <= 5)   { score += 13; reasons.push('모멘텀 회복 +'+chg.toFixed(1)+'%'); }
+  else if(chg >= -2 && chg < 0)  { score += 12; reasons.push('눌림 저점 '+chg.toFixed(1)+'%'); }
+  else if(chg > 5 && chg <= 10)  { score += 5; }
+  else if(chg < -2 && chg >= -5) { score += 6; }
+  else if(chg < -5)              { score += 2; reasons.push('⚠ 깊은 조정 '+chg.toFixed(1)+'%'); }
 
-  // ③ 시총: 3000억~5조 = SWING 최적 유니버스
-  if(s.cap >= 3000 && s.cap <= 50000)     { score+=20; reasons.push('시총 '+Math.round(s.cap/10000).toFixed(1)+'조'); }
-  else if(s.cap >= 1000 && s.cap < 3000)  { score+=10; }
+  // ── ③ 거래량 — 눌림 후 조용 or 소폭 회복이 이상적
+  if(vr >= 0.6 && vr <= 1.5 && chg >= 0) { score += 18; reasons.push('회복 거래량 '+vr.toFixed(1)+'x'); }
+  else if(vr >= 0.3 && vr <= 1.5)        { score += 12; reasons.push('조용한 눌림 '+vr.toFixed(1)+'x'); }
+  else if(vr > 1.5 && vr <= 3)           { score += 8; }
+  else if(vr > 3 && vr <= 5)             { score += 3; }
+  else if(vr < 0.3)                       { score += 1; reasons.push('거래량 매우 적음'); }
 
-  // ④ 절대 거래대금 (일 유동성)
-  var tv = s.tv !== undefined ? s.tv : (s.price*s.vol)/100_000_000;
-  if(tv >= 200)      { score+=15; reasons.push('거래대금 '+Math.round(tv)+'억'); }
-  else if(tv >= 100) { score+=10; reasons.push('거래대금 '+Math.round(tv)+'억'); }
-  else if(tv >= 50)  { score+=4; }
+  // ── ④ 시총: SWING 적정 유니버스
+  if(cap >= 3000 && cap <= 50000)    { score += 15; reasons.push('시총 '+(cap/10000).toFixed(1)+'조'); }
+  else if(cap >= 1000 && cap < 3000) { score += 8; }
 
-  // ⑤ KIS 실시간
-  if(s._source === 'KIS') { score+=5; reasons.push('KIS 실시간'); }
+  // ── ⑤ 절대 거래대금
+  if(tv >= 200)      { score += 10; reasons.push('거래대금 '+Math.round(tv)+'억'); }
+  else if(tv >= 100) { score += 7; }
+  else if(tv >= 50)  { score += 3; }
 
-  reasons.push('※ 분석 탭에서 MA/RSI/트리거 확인 필요');
+  // ── ⑥ NXT 우량주 가산점
+  if(isNxt) { score += 5; reasons.push('NXT 우량주'); }
+
+  reasons.push('※ MA정배열·트리거 → 분석 탭에서 확인');
   return { score: Math.min(100, Math.max(0, score)), reasons };
 }
-
 function score_core(s){
-  // ── CORE 스크리너 철학: "조용한 수급 개선 중인 중대형주" ──
-  // 급등(MOMO)도 급락도 아닌, 완만한 가격 움직임 + 거래량 점진 증가
-  // 이 단계에서 OBV/A/D/RS는 계산 불가 → 분석 탭에서 확인
-  var score = 0;
+  // ── CORE 철학: "기관이 조용히 사고 있는 중대형주"
+  // 급등도 급락도 아닌, 기관/외인 순매수 + 거래량 점진 증가 = 매집 직접 증거
+  var score   = 0;
   var reasons = [];
-  var chg = s.chgPct || 0;
-  var vr  = s.volRatio || 0;
-  var cap = s.cap || 0;
-  var tv  = s.tv !== undefined ? s.tv : (s.price*s.vol)/100_000_000;
+  var chg     = s.chgPct   || 0;
+  var vr      = s.volRatio || 0;
+  var cap     = s.cap      || 0;
+  var tv      = s.tv       || (s.price * s.vol) / 100_000_000;
+  var mrbn    = s._mrbn    || 0;   // 연기금
+  var frgn    = s._frgn    || 0;   // 외국인
+  var orgn    = s._orgn    || 0;   // 기관 전체
+  var src     = s._poolSources || [];
+  var code    = (s.symbol||'').replace(/\.(KS|KQ)$/i,'');
+  var isNxt   = _NXT_CODES.has(code);
 
-  // ① 가격 움직임 — CORE 핵심: 조용한 횡보 or 완만한 상승 (급등 아님)
-  if(chg >= 0 && chg <= 2)            { score+=25; reasons.push('조용한 회복 +'+chg.toFixed(1)+'%'); }
-  else if(chg >= -1 && chg < 0)       { score+=20; reasons.push('바닥 다지기 '+chg.toFixed(1)+'%'); }
-  else if(chg > 2 && chg <= 4)        { score+=12; reasons.push('완만 상승 +'+chg.toFixed(1)+'%'); }
-  else if(chg >= -3 && chg < -1)      { score+=8;  }  // 소폭 조정, 아직 관심권
-  else if(chg > 4 && chg <= 8)        { score+=5;  }  // 이미 움직임, MOMO 경계
-  // 나머지(급락/급등): hardCut에서 이미 제거됨
+  // ── ① 수급 — CORE의 핵심 (기관/외인 실제 순매수량 반영)
+  var instScore = 0;
+  if(mrbn > 0 && frgn > 0) {
+    instScore = 35; reasons.push('연기금+외인 동시 순매수 ★★');
+  } else if(frgn > 0 && orgn > 0) {
+    instScore = 30; reasons.push('외인+기관 동시 순매수 ★');
+  } else if(frgn > 0) {
+    instScore = 22; reasons.push('외국인 순매수 '+frgn.toLocaleString()+'주');
+  } else if(mrbn > 0) {
+    instScore = 20; reasons.push('연기금 순매수 '+mrbn.toLocaleString()+'주');
+  } else if(orgn > 0) {
+    instScore = 12; reasons.push('기관 순매수');
+  }
+  score += instScore;
 
-  // ② 거래량 — 물밑 매집 특징: 평균 대비 1.1~2.5x (과도하지 않게 증가)
-  if(vr >= 1.1 && vr <= 2.5)          { score+=30; reasons.push('수급 증가 '+vr.toFixed(1)+'x'); }
-  else if(vr >= 0.8 && vr < 1.1)      { score+=18; reasons.push('거래량 안정 '+vr.toFixed(1)+'x'); }
-  else if(vr > 2.5 && vr <= 5)        { score+=10; } // 거래량 높음, 주시 필요
-  else if(vr > 5)                      { score+=3;  } // 너무 많음 — MOMO 성격
+  // 거래량상위 출처 → 매집 특징 (기관순매수와 교집합이면 더 강력)
+  if(src.includes('vol')){
+    if(src.includes('inst')){ score += 15; reasons.push('수급+거래량 교집합 ★'); }
+    else                     { score += 6; }
+  }
 
-  // ③ 시총 — 기관/외인 개입 가능 규모 (2000억 이상)
-  if(cap >= 10000)           { score+=20; reasons.push('대형주 '+Math.round(cap/10000).toFixed(1)+'조'); }
-  else if(cap >= 5000)       { score+=15; reasons.push('중대형주'); }
-  else if(cap >= 2000)       { score+=10; }
+  // ── ② 가격 움직임 — CORE: 조용한 횡보/완만 상승 선호
+  if(chg >= 0 && chg <= 2)       { score += 20; reasons.push('조용한 회복 +'+chg.toFixed(1)+'%'); }
+  else if(chg >= -1 && chg < 0)  { score += 18; reasons.push('바닥 다지기 '+chg.toFixed(1)+'%'); }
+  else if(chg > 2 && chg <= 4)   { score += 10; reasons.push('완만 상승 +'+chg.toFixed(1)+'%'); }
+  else if(chg >= -3 && chg < -1) { score += 7; }
+  else if(chg > 4 && chg <= 8)   { score += 4; }
 
-  // ④ 거래대금 — 절대 유동성 (기관 개입 최소 규모)
-  if(tv >= 200)      { score+=15; reasons.push('거래대금 '+Math.round(tv)+'억'); }
-  else if(tv >= 100) { score+=10; reasons.push('거래대금 '+Math.round(tv)+'억'); }
-  else if(tv >= 50)  { score+=5; }
+  // ── ③ 거래량 — 물밑 매집: 평균보다 살짝 많으면서 꾸준한 것
+  if(vr >= 1.1 && vr <= 3)       { score += 20; reasons.push('수급 증가 '+vr.toFixed(1)+'x'); }
+  else if(vr >= 0.7 && vr < 1.1) { score += 13; reasons.push('거래량 안정 '+vr.toFixed(1)+'x'); }
+  else if(vr > 3 && vr <= 6)     { score += 7; }
+  else if(vr > 6)                 { score += 2; }  // 너무 많으면 MOMO 성격
+
+  // ── ④ 시총 — 기관/외인 개입 최소 규모 (2000억+)
+  if(cap >= 10000)        { score += 15; reasons.push('대형주 '+(cap/10000).toFixed(1)+'조'); }
+  else if(cap >= 5000)    { score += 12; reasons.push('중대형주 '+(cap/10000).toFixed(1)+'조'); }
+  else if(cap >= 2000)    { score += 7; }
+
+  // ── ⑤ 거래대금
+  if(tv >= 200)      { score += 10; reasons.push('거래대금 '+Math.round(tv)+'억'); }
+  else if(tv >= 100) { score += 7; }
+  else if(tv >= 50)  { score += 3; }
+
+  // ── ⑥ NXT 우량주 — 기관이 선호하는 우량 종목
+  if(isNxt) { score += 8; reasons.push('NXT 우량주'); }
 
   reasons.push('※ A/D·OBV·RS·베이스 → 분석 탭에서 확인');
   return { score: Math.min(100, Math.max(0, score)), reasons };
 }
-
-// ─────────────────────────────────────────────────────────────
-// 메인 스크리너 실행
-// ─────────────────────────────────────────────────────────────
 async function runScreener(mode){
   if(G.screenerRunning){ showToast('스캔 진행 중입니다'); return; }
   G.screenerRunning = true;
@@ -2039,9 +2235,48 @@ async function runScreener(mode){
       G.screenerRunning = false;
       return;
     }
-    if(area) area.innerHTML = '<div class="sc-status">'+pool.length+'개 수집 → '+passed.length+'개 통과 · 점수 계산 중...</div>';
+    if(area) area.innerHTML = '<div class="sc-status">'+pool.length+'개 수집 → '+passed.length+'개 통과'+(mode==='momo'?' · 일봉 분석 중...':' · 점수 계산 중...')+'</div>';
 
-    // 3. 2차 스코어링
+    // 3. MOMO: 일봉 + 주식기본조회 병렬 조회 → BLOCK 추가필터 → 일봉 스코어
+    if(mode === 'momo'){
+      var dailyRes = await Promise.allSettled(
+        passed.map(function(s){ return fetchKisDailyChart(s.symbol); })
+      );
+      var infoRes = await Promise.allSettled(
+        passed.map(function(s){ return fetchKisStockInfo(s.symbol); })
+      );
+
+      // 일봉·종목정보 부착
+      passed.forEach(function(s, i){
+        s._daily = (dailyRes[i].status==='fulfilled') ? calcDailyStats(dailyRes[i].value) : null;
+        s._info  = (infoRes[i].status==='fulfilled')  ? infoRes[i].value : null;
+      });
+
+      // BLOCK 추가 필터
+      passed = passed.filter(function(s){
+        var info  = s._info  || {};
+        var daily = s._daily || {};
+
+        // 관리종목 / 거래정지 / 투자유의
+        if(info.admn_item_yn === 'Y')             { s._blockReason = '관리종목'; return false; }
+        if(info.tr_stop_yn   === 'Y')             { s._blockReason = '거래정지'; return false; }
+        if(info.etf_etn_ivst_heed_item_yn === 'Y'){ s._blockReason = '투자유의'; return false; }
+
+        // MA20 실제 이격도 과열 (일봉 기반)
+        if(daily.ma20_gap > 35)                   { s._blockReason = 'MA20 '+daily.ma20_gap.toFixed(0)+'% 과열'; return false; }
+
+        // 전일 상한가 소진 판정
+        if(daily.prev_day_limit){
+          if(daily.tv_ratio_prev > 10)            { s._blockReason = '전일상한가 거래대금소진 '+daily.tv_ratio_prev.toFixed(0)+'x'; return false; }
+          if(daily.ma20_gap > 30)                 { s._blockReason = '전일상한가 MA20과열 '+daily.ma20_gap.toFixed(0)+'%'; return false; }
+        }
+        return true;
+      });
+
+      if(area) area.innerHTML = '<div class="sc-status">'+passed.length+'개 BLOCK 통과 · 점수 계산 중...</div>';
+    }
+
+    // 4. 2차 스코어링
     passed.forEach(function(s){
       var sc = mode==='momo' ? score_momo(s) : mode==='swing' ? score_swing(s) : score_core(s);
       s._score   = sc.score;
@@ -2050,7 +2285,7 @@ async function runScreener(mode){
 
     // 4. 점수 내림차순 정렬, 상위 8개
     passed.sort(function(a,b){ return b._score - a._score; });
-    var top = passed.slice(0, 8);
+    var top = passed.slice(0, 12);
 
     G.screenerResults[mode]  = top;
     G.screenerLastRun[mode]  = new Date();
@@ -11256,6 +11491,9 @@ var _MASTER_RAW = `000020|동화약품|0|0
 499150|SOL 미국S&P500엔화노출(H)|0|1
 499660|TIGER CD금리플러스액티브(합성)|0|1
 499790|GS피앤엘|0|0`;
+
+// ── NXT(넥스트레이드) 대상 우량주 코드 Set (KOSPI 357 + KOSDAQ 284) ──
+var _NXT_CODES = new Set(['000070','000080','000100','000120','000150','000210','000240','000250','000270','000320','000500','000640','000660','000670','000720','000810','000880','000990','001040','001060','001120','001130','001270','001430','001450','001460','001500','001530','001630','001680','001720','001750','001800','001820','001940','002020','002030','002240','002320','002380','002710','002790','002810','002840','002960','003030','003090','003120','003160','003200','003220','003230','003240','003300','003490','003540','003550','003570','003670','003690','003850','003920','003960','004000','004020','004170','004360','004370','004490','004690','004700','004800','004980','004990','005070','005090','005180','005250','005290','005300','005380','005420','005440','005490','005500','005610','005690','005710','005810','005830','005850','005930','005940','006040','006110','006120','006260','006280','006360','006400','006650','006800','007070','007160','007310','007340','007390','007660','007690','007700','007810','008060','008490','008730','008770','008930','009150','009240','009420','009450','009520','009540','009680','009830','009900','009970','010060','010120','010130','010140','010690','010780','010950','011070','011170','011200','011210','011760','011780','011790','012330','012450','012510','012630','012750','013030','013890','014620','014680','014820','014830','014940','015360','015750','015760','016360','016590','016610','016800','017390','017670','017800','017810','017860','017940','017960','018250','018260','018290','018310','018670','019170','020000','020150','020560','021240','022100','023160','023530','023590','024110','024720','025320','025540','025770','025900','026890','026960','028050','028260','028300','029460','029530','029780','030000','030190','030200','030520','030610','031210','031430','031980','032190','032350','032500','032640','032830','033100','033240','033270','033500','033640','033780','034020','034120','034230','034310','034730','034950','035150','035250','035420','035600','035720','035760','035900','036200','036460','036530','036570','036620','036800','036810','036830','036890','037710','039030','039130','039200','039440','039490','039840','041510','041830','042000','042520','042660','042700','043150','043370','044490','045100','046890','047050','047810','047920','049070','051360','051500','051600','051900','051910','052400','052690','053030','053610','053800','054950','055550','056190','057050','058470','058610','058970','059090','060370','060980','061090','062040','064350','064400','064550','064760','064820','064960','065350','065660','065680','066570','066970','067080','067160','068270','068760','069080','069260','069620','069960','071050','071320','071970','072710','073240','074600','075580','077970','078160','078340','078350','078520','078600','078930','079550','079900','079940','081660','082270','082740','082920','083450','083650','084010','084110','084370','084690','084850','085620','085660','086280','086390','086450','086520','086790','086900','087010','089010','089860','089890','089970','089980','090360','090430','090460','092230','092460','092730','092790','093050','093320','093370','093520','094170','094360','095340','095500','095610','095660','096530','096770','097520','097950','098070','099190','099320','100090','100840','101160','101360','101490','101730','101930','102710','102940','103140','103590','104700','104830','105560','105630','107640','108320','108380','108490','108670','108860','110990','111770','112040','112610','114090','114190','114810','114840','115180','117730','119850','120110','121600','122640','122870','124500','126340','126720','127120','128940','131290','131970','137310','137400','138040','138490','138610','138930','139130','139480','140860','141080','144510','145020','145720','145990','161390','161580','161890','166090','168360','170900','171090','175330','176750','178920','180640','181710','183190','183300','185750','189300','190510','192080','192400','192820','194370','194480','194700','195870','195940','196170','199430','199800','200130','200670','200710','200880','204270','204320','206640','207940','211050','213420','214150','214320','214370','214430','214450','215000','215200','217590','218410','220100','222800','225570','226320','226950','228760','229640','230360','236200','237690','237880','240810','241560','241710','241770','243070','247540','248070','249420','251270','251970','253450','257720','259960','263750','265520','267250','267260','267270','267980','268280','270660','271560','271940','272210','272290','277810','278280','278470','280360','281820','282330','284740','285130','286940','287840','290650','293490','294570','294870','295310','298020','298040','298050','298380','299030','300080','300720','302440','304100','304360','306200','307950','308430','310210','314930','316140','317330','317450','319400','319660','323280','323410','326030','328130','329180','336260','336370','336570','338220','338840','340570','344820','347700','347850','348210','348370','352480','352820','356680','356860','357550','357780','358570','361610','365340','372170','372320','373220','375500','376270','376300','376900','377300','378340','381970','382900','383220','383800','388210','388720','389260','389470','389650','394280','394800','397030','399720','402030','402340','403550','403850','416180','419530','420770','424870','425420','437730','439090','439260','441270','443060','445090','445680','448280','448900','450950','452430','453340','454910','455900','456040','456160','457190','458870','459510','460860','460930','462870','466100','468530','469610','472850','473980','475150','475400','475560','475830','475960','476060','476830','481070','483650','484120','484590','484810','484870','486990','488280','488900','489790','494120','499790']);
 
 var _masterByCode = null;
 var _masterArr    = null;
