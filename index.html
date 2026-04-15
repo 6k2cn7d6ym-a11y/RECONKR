@@ -1792,10 +1792,11 @@ function hardCut_momo(q, cfg){
   if(chgPct < minGap)                                return null;
   if(chgPct > 28)                                    return null;
   if(cap !== null && cap < minCap)                   return null;
-  if(tv < minTvAbs)                                  return null;
-  // KIS 데이터면 tvRatio 체크 스킵 (장 초반 avrg_vol 신뢰 불가)
-  // Yahoo 데이터일 때만 배수 체크
-  if(!q._source && tvRatio !== null && tvRatio < minTvRatio){ if(_dbg) console.log('[hardCut]', q.symbol, '거래대금배수 탈락:', (tvRatio||0).toFixed(1)+'x (기준:'+minTvRatio+'x)'); return null; }
+  // KIS 데이터면 tv/tvRatio 체크 스킵 (tradingValue=0, avgVol=0으로 오는 경우 대응)
+  if(q._source !== 'KIS'){
+    if(tv < minTvAbs)     return null;
+    if(tvRatio !== null && tvRatio < minTvRatio){ if(_dbg) console.log('[hardCut]', q.symbol, '거래대금배수 탈락:', (tvRatio||0).toFixed(1)+'x (기준:'+minTvRatio+'x)'); return null; }
+  }
   if(ulimitPct < 5)                                  return null; // 상한가 5% 미만 제외
   if(q.exchange && ['PNK','OTC'].includes(q.exchange)) return null;
 
