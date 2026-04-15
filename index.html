@@ -4984,6 +4984,16 @@ function momoEngine(ydata){
     r.decision_path.push({gate:'하드필터',status:'block',note:'이격 MA20 +'+isoK+'%'}); return r; }
   r.decision_path.push({gate:'하드필터',status:'pass',note:'갭 '+gap.toFixed(1)+'% · 상한가 '+ul.toFixed(0)+'% · 이격 '+isoK+'%'});
 
+  // ── 추격 방지 플래그 ──
+  // BREAKOUT / EARLY_MOVE 는 팩트공시 or 세력 초기이동 기반 → +20%까지 허용 (기존 하드필터 통과한 것)
+  // 그 외 (NORMAL / NO_NEWS_SURGE / SHAKEOUT / ACCUMULATING): +12% 초과 시 ENTER 금지
+  var _chaseWatchFlag = false;
+  if(gap > 12 && ws.stage !== 'BREAKOUT' && ws.stage !== 'EARLY_MOVE'){
+    _chaseWatchFlag = true;
+    r.warnings.push('[추격방지] +'+gap.toFixed(1)+'% 급등 — 팩트공시 미확인 구조, 점수와 무관하게 ENTER 금지');
+    r.decision_path.push({gate:'추격방지',status:'watch',note:'+'+gap.toFixed(1)+'% ('+ws.stage+') — 추격 구조'});
+  }
+
   // ── 2-B. KOSPI 시장 게이트 (점수가 아닌 행동 제한) ──
   var kospiChg = G.spyIntraday ? G.spyIntraday.change_pct : null;
   var _kospiBlock  = false;
@@ -5101,6 +5111,9 @@ function momoEngine(ydata){
   if(_kospiWatchOnly){
     r.action = 'WATCH';
     r.decision_path.push({gate:'트리거',status:'watch',note:'KOSPI 강하락 — ENTER 금지'});
+  } else if(_chaseWatchFlag){
+    r.action = 'WATCH';
+    r.decision_path.push({gate:'트리거',status:'watch',note:'추격방지 +'+gap.toFixed(1)+'% — 점수 '+r.score+'pt이나 ENTER 금지'});
   } else if(r.score >= 60){
     // ── 단일 하드 트리거: ORB 저점 이탈 (가격 붕괴, 객관적) ──
     if(ph !== 'PRE' && ydata.orb_low && ydata.price && ydata.price < ydata.orb_low * 0.99){
@@ -5126,10 +5139,18 @@ function momoEngine(ydata){
   r.action_reason = _topSigs + (r.action==='ENTER'?' → 진입':r.action==='WATCH'?' → 대기':' → 차단') + _topWarn;
 
   // ── 6. 포지션 크기 ──
+  // 스테이지 × 점수 매트릭스:
+  //   BREAKOUT  + score≥75  → half(50%)   : 팩트공시 + 강한 확증
+  //   BREAKOUT  + score<75  → quarter(25%): 팩트공시이나 확증 부족
+  //   EARLY_MOVE             → quarter(25%): 초기 이동, 추가 확인 필요
+  //   NORMAL    + score≥75  → quarter(25%): 고신뢰 무세력 진입
+  //   NORMAL    + score<75  → small(10%)  : 저신뢰 — 탐색용 소량만
   if(r.action === 'ENTER'){
-    if(ws.stage === 'BREAKOUT' && r.score >= 75)  r.position_size = 'half(50%)';
-    else if(ws.stage === 'BREAKOUT')              r.position_size = 'quarter(25%)';
-    else                                          r.position_size = 'quarter(25%)';
+    if(ws.stage === 'BREAKOUT' && r.score >= 75)       r.position_size = 'half(50%)';
+    else if(ws.stage === 'BREAKOUT')                    r.position_size = 'quarter(25%)';
+    else if(ws.stage === 'EARLY_MOVE')                  r.position_size = 'quarter(25%)';
+    else if(r.score >= 75)                              r.position_size = 'quarter(25%)';
+    else                                                r.position_size = 'small(10%)';
     if(_kospiHalfCap && r.position_size === 'half(50%)') r.position_size = 'quarter(25%)';
 
     // 슬리피지 HIGH → WATCH (R:R 구조 붕괴)
@@ -6586,7 +6607,23 @@ function momoCardHTML(r){
     var rrV=r.rr?r.rr+'R':'--';
     var slipNote=r.slippage_risk==='high'?'<div class="mc-slip">⚡ 슬리피지 '+(r.slippage_pct||'')+'% — 지정가 전용</div>':
                  r.slippage_risk==='medium'?'<div style="font-size:10px;color:var(--a);margin-top:4px;padding-left:4px">△ 슬리피지 있음 — 지정가 권장</div>':'';
+    // 포지션 크기 pill
+    var _ps = r.position_size||'quarter(25%)';
+    var _psLabel = _ps==='half(50%)'?'50% 진입':_ps==='quarter(25%)'?'25% 진입':_ps==='small(10%)'?'10% 탐색':'--';
+    var _psColor = _ps==='half(50%)'?'var(--g)':_ps==='quarter(25%)'?'var(--gold)':'var(--t2)';
+    var _psBg    = _ps==='half(50%)'?'rgba(0,240,122,.12)':_ps==='quarter(25%)'?'rgba(255,106,0,.12)':'rgba(90,122,149,.10)';
+    var _psBd    = _ps==='half(50%)'?'rgba(0,240,122,.35)':_ps==='quarter(25%)'?'rgba(255,106,0,.35)':'rgba(90,122,149,.30)';
+    var _psNote  = _ps==='half(50%)'?'BREAKOUT 확증':_ps==='quarter(25%)'?'표준 진입':_ps==='small(10%)'?'세력 미확인 — 소량만':'--';
+    var posSizePill=
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;padding:5px 10px;background:'+_psBg+';border:1px solid '+_psBd+';border-radius:8px">'+
+        '<span style="font-size:9px;color:var(--t3);letter-spacing:.06em">포지션 크기</span>'+
+        '<div style="display:flex;align-items:center;gap:7px">'+
+          '<span style="font-size:9px;color:var(--t3)">'+_psNote+'</span>'+
+          '<span style="font-family:var(--mono);font-size:13px;font-weight:700;color:'+_psColor+'">'+_psLabel+'</span>'+
+        '</div>'+
+      '</div>';
     levelsHtml=
+      posSizePill+
       '<div class="mc-levels">'+
         '<div class="mc-lv mc-lv-entry"><div class="mc-lv-label">진입</div><div class="mc-lv-val">'+eV+'</div></div>'+
         '<div class="mc-lv mc-lv-stop"><div class="mc-lv-label">손절</div><div class="mc-lv-val">'+sV+'</div></div>'+
