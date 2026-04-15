@@ -1293,6 +1293,81 @@ async function fetchKisVolumeRanking(market){
 // [3] 등락률 순위 조회 (급등 후보)
 // tr_id: FHPST01730000
 // ─────────────────────────────────────────
+async function fetchKisNearNewHigh(market){
+  // 신고/신저근접종목 상위 — SWING 후보풀 핵심
+  // 신고가 근접(FID_DIV_CLS_CODE=0): 최근 신고가 찍고 눌림목 구간 종목
+  var headers = await kisAuthHeaders('FHPST01870000');
+  var data = await kisGet('/uapi/domestic-stock/v1/ranking/near-new-highlow', {
+    FID_COND_MRKT_DIV_CODE: 'J',
+    FID_COND_SCR_DIV_CODE:  '20187',
+    FID_INPUT_ISCD:          market,
+    FID_DIV_CLS_CODE:        '0',   // 0=신고가근접, 1=신저가근접
+    FID_INPUT_CNT_1:         '10',  // 고가 대비 10% 이내
+    FID_TRGT_CLS_CODE:       '0',
+    FID_TRGT_EXLS_CLS_CODE:  '0',
+    FID_INPUT_PRICE_1:       '1000',
+    FID_INPUT_PRICE_2:       '',
+    FID_VOL_CNT:             '30',
+  }, headers);
+  if(data.rt_cd !== '0') throw new Error('KIS 신고근접종목 오류: ' + data.msg1);
+  return (data.output || []).map(function(o){
+    return {
+      symbol:       o.mksc_shrn_iscd || o.stck_shrn_iscd,
+      name:         o.hts_kor_isnm,
+      price:        parseFloat(o.stck_prpr)||0,
+      chgPct:       parseFloat(o.prdy_ctrt)||0,
+      vol:          parseFloat(o.acml_vol)||0,
+      tradingValue: parseFloat(o.acml_tr_pbmn)||0,
+      avgVol:       parseFloat(o.avrg_vol)||0,
+      marketCap:    parseFloat(o.stck_avls)||0,
+      ulimit:       0,
+    };
+  }).filter(function(o){ return o.symbol && o.price > 0; });
+}
+
+async function fetchKisInstitutionFlow(market){
+  // 기관/외국인 매매종목가집계 — CORE 후보풀 핵심
+  // 연기금(mrbn_ntby_qty) + 외국인(frgn_ntby_qty) 순매수 종목
+  var headers = await kisAuthHeaders('FHPTJ04400000');
+  var data = await kisGet('/uapi/domestic-stock/v1/quotations/foreign-institution-total', {
+    FID_COND_MRKT_DIV_CODE: 'J',
+    FID_COND_SCR_DIV_CODE:  '20437',
+    FID_INPUT_ISCD:          market,
+    FID_DIV_CLS_CODE:        '0',
+    FID_RANK_SORT_CLS_CODE:  '0',   // 기관 순매수 많은 순
+    FID_ETC_CLS_CODE:        '0',
+    FID_TRGT_CLS_CODE:       '0',
+    FID_TRGT_EXLS_CLS_CODE:  '0',
+    FID_INPUT_PRICE_1:       '1000',
+    FID_INPUT_PRICE_2:       '',
+    FID_VOL_CNT:             '30',
+  }, headers);
+  if(data.rt_cd !== '0') throw new Error('KIS 기관매매 오류: ' + data.msg1);
+  return (data.output || []).map(function(o){
+    // 연기금(종금) 순매수 수량 — CORE 핵심 신호
+    var mrbn = parseFloat(o.mrbn_ntby_qty) || 0;   // 연기금
+    var frgn = parseFloat(o.frgn_ntby_qty) || 0;   // 외국인
+    var orgn = parseFloat(o.orgn_ntby_qty) || 0;   // 기관 전체
+    return {
+      symbol:       o.mksc_shrn_iscd || o.stck_shrn_iscd,
+      name:         o.hts_kor_isnm,
+      price:        parseFloat(o.stck_prpr)||0,
+      chgPct:       parseFloat(o.prdy_ctrt)||0,
+      vol:          parseFloat(o.acml_vol)||0,
+      tradingValue: parseFloat(o.acml_tr_pbmn)||0,
+      avgVol:       0,
+      marketCap:    0,
+      ulimit:       0,
+      _mrbn:        mrbn,   // 연기금 순매수 (양수=매수, 음수=매도)
+      _frgn:        frgn,   // 외국인 순매수
+      _orgn:        orgn,   // 기관 순매수
+    };
+  }).filter(function(o){
+    // 연기금 OR 외국인 순매수 종목만
+    return o.symbol && o.price > 0 && (o._mrbn > 0 || o._frgn > 0);
+  });
+}
+
 async function fetchKisFluctuationRanking(market, sortDiv){
   // sortDiv: '1'=상승률순
   var headers = await kisAuthHeaders('FHPST01730000');
@@ -1342,56 +1417,82 @@ async function fetchKisCandidates(mode){
   }
 
   if(mode === 'momo'){
-    var [vKp, vKq, fKp, fKq] = await Promise.allSettled([
-      fetchKisVolumeRanking('0001'),
-      fetchKisVolumeRanking('1001'),
+    // MOMO 후보 = 등락률 상위 AND 거래량 상위 교집합
+    // 갭 크면서 거래량도 터진 종목만 — 둘 중 하나만은 노이즈
+    var [fKp, fKq, vKp, vKq] = await Promise.allSettled([
       fetchKisFluctuationRanking('0001','0'),
       fetchKisFluctuationRanking('1001','0'),
+      fetchKisVolumeRanking('0001'),
+      fetchKisVolumeRanking('1001'),
     ]);
-    [vKp, vKq, fKp, fKq].forEach(function(r){
-      if(r.status==='fulfilled') merge(r.value);
-      else console.warn('[KIS API]', r.reason?.message || r.reason);
+    // 1차: 등락률 상위 심볼 세트
+    var fluctSymbols = {};
+    [fKp, fKq].forEach(function(r){
+      if(r.status==='fulfilled')(r.value||[]).forEach(function(s){ fluctSymbols[s.symbol]=true; });
+    });
+    // 2차: 거래량 상위 중 등락률 상위에도 있는 것만 merge
+    // (교집합 없으면 등락률 상위 전체 fallback)
+    var intersect = [];
+    [vKp, vKq].forEach(function(r){
+      if(r.status==='fulfilled')(r.value||[]).forEach(function(s){
+        if(fluctSymbols[s.symbol]) intersect.push(s);
+      });
+    });
+    if(intersect.length >= 5){
+      intersect.forEach(function(s){ if(!seen[s.symbol]){ seen[s.symbol]=true; all.push(s); } });
+    } else {
+      // 교집합이 너무 적으면 두 리스트 합산 (fallback)
+      [fKp, fKq, vKp, vKq].forEach(function(r){
+        if(r.status==='fulfilled') merge(r.value);
+      });
+    }
+    [fKp, fKq, vKp, vKq].forEach(function(r){
+      if(r.status==='rejected') console.warn('[KIS API]', r.reason?.message||r.reason);
     });
 
   } else if(mode === 'swing'){
-    // 스윙은 거래량 순위만 (등락률 5% 이하 눌림목 후보)
-    var [vKp, vKq] = await Promise.allSettled([
-      fetchKisVolumeRanking('0001'),
-      fetchKisVolumeRanking('1001'),
+    // SWING: 신고가근접(눌림목 구간) + 소폭 하락 종목
+    var [nhKp, nhKq, fKpD, fKqD] = await Promise.allSettled([
+      fetchKisNearNewHigh('0001'),
+      fetchKisNearNewHigh('1001'),
+      fetchKisFluctuationRanking('0001','1'),
+      fetchKisFluctuationRanking('1001','1'),
     ]);
-    [vKp, vKq].forEach(function(r){
+    [nhKp, nhKq, fKpD, fKqD].forEach(function(r){
       if(r.status==='fulfilled') merge(r.value);
-      else console.warn('[KIS swing/core]', r.reason?.message||r.reason);
+      else console.warn('[KIS swing]', r.reason?.message||r.reason);
     });
 
   } else if(mode === 'core'){
-    // CORE는 거래량 점증 — 거래량 순위 상위 (장기 매집)
-    var [vKp, vKq] = await Promise.allSettled([
-      fetchKisVolumeRanking('0001'),
-      fetchKisVolumeRanking('1001'),
+    // CORE: 연기금/외국인 순매수 종목 (장기 매집 직접 증거)
+    var [instKp, instKq] = await Promise.allSettled([
+      fetchKisInstitutionFlow('0001'),
+      fetchKisInstitutionFlow('1001'),
     ]);
-    [vKp, vKq].forEach(function(r){
+    [instKp, instKq].forEach(function(r){
       if(r.status==='fulfilled') merge(r.value);
+      else console.warn('[KIS core]', r.reason?.message||r.reason);
     });
   }
 
   // KIS 데이터를 Yahoo 형식으로 정규화 (hardCut 함수 재사용)
   return all.map(function(s){
-    var tv = s.tradingValue / 100_000_000;  // 원 → 억원
+    var tv = s.tradingValue / 100_000_000;
     var avgVol = s.avgVol || 0;
     return {
-      // Yahoo 호환 필드명
       symbol:                      s.symbol,
       shortName:                   s.name,
       regularMarketPrice:          s.price,
       regularMarketChangePercent:  s.chgPct,
       regularMarketVolume:         s.vol,
       averageDailyVolume3Month:    avgVol,
-      marketCap:                   s.marketCap * 100_000_000, // 억원 → 원 (hardCut 호환)
-      // KIS 전용 추가 필드
-      _kisTV:       tv,          // 거래대금 억원 (정확)
-      _kisUlimit:   s.ulimit,    // 상한가
+      marketCap:                   s.marketCap * 100_000_000,
+      _kisTV:       tv,
+      _kisUlimit:   s.ulimit,
       _source:      'KIS',
+      _mrbn:        s._mrbn || 0,  // 연기금 순매수
+      _frgn:        s._frgn || 0,  // 외국인 순매수
+      _orgn:        s._orgn || 0,  // 기관 순매수
     };
   });
 }
@@ -1605,6 +1706,8 @@ function hardCut_momo(q, cfg){
   var vol    = q.regularMarketVolume         || 0;
   var avgVol = q.averageDailyVolume3Month    || q.averageDailyVolume10Day || 0;
   var rvol   = avgVol>0 ? vol/avgVol : null;
+  // 디버그: 첫 3개 종목 탈락 이유 로깅
+  var _dbg = (window._hardCutDebugCount = (window._hardCutDebugCount||0)+1) <= 3;
   // KIS 데이터면 정확한 거래대금 사용, 아니면 추산
   var tv     = q._kisTV !== undefined ? q._kisTV : (price*vol)/100_000_000;
   var tvRatio= avgVol>0 ? vol/avgVol : (q._kisTV ? tv / Math.max(1, (price*avgVol)/100_000_000) : null);
@@ -1624,7 +1727,7 @@ function hardCut_momo(q, cfg){
   if(chgPct > 28)                                    return null;
   if(cap !== null && cap < minCap)                   return null;
   if(tv < minTvAbs)                                  return null;
-  if(tvRatio !== null && tvRatio < minTvRatio)       return null;
+  if(tvRatio !== null && tvRatio < minTvRatio){ if(_dbg) console.log('[hardCut]', q.symbol, '거래대금배수 탈락:', (tvRatio||0).toFixed(1)+'x (기준:'+minTvRatio+'x)'); return null; }
   if(ulimitPct < 5)                                  return null; // 상한가 5% 미만 제외
   if(q.exchange && ['PNK','OTC'].includes(q.exchange)) return null;
 
@@ -1968,13 +2071,11 @@ function renderScreenerResults(mode){
 
 // 후보 탭 → 해당 모드로 이동 후 AI 분석
 function scCandidateTap(ticker, mode){
-  // switchMode 토글 버그 우회 — 같은 모드면 서브탭만 전환
-  if(G.currentMode !== mode){
-    G.currentMode = mode;
-    switchMode(mode);
-  } else {
-    switchSubTab('search');
-  }
+  // switchMode 토글 버그 우회 — currentMode를 강제로 다른 값으로 세팅 후 switchMode
+  // (같은 모드일 때 switchMode가 recon으로 토글하는 것 방지)
+  G.currentMode = '__force__';
+  switchMode(mode);
+  switchSubTab('search');
   var inputEl = document.getElementById(mode+'Input');
   if(inputEl) inputEl.value = ticker;
   runModeScan(mode);
