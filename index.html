@@ -2663,7 +2663,23 @@ async function runScreener(mode){
       s._reasons = sc.reasons;
     });
 
-    // 4. 점수 내림차순 정렬, 상위 8개
+    // 4. 0점(BLOCK) 제거 후 점수 내림차순 정렬, 상위 12개
+    passed = passed.filter(function(s){ return s._score > 0; });
+
+    if(!passed.length){
+      var phaseMsg = G.marketPhase === 'LATE'
+        ? '오후 페이드 시간대 (13:00+)<br><span style="font-size:10px;color:var(--t3)">MOMO 신규 진입 금지 구간 · 장 마감까지 기존 포지션 관리</span>'
+        : G.marketPhase === 'CLOSED'
+        ? '장 마감 · 내일 아침 재스캔'
+        : '하드필터/BLOCK 통과 0개';
+      if(area) area.innerHTML = '<div class="sc-status" style="color:var(--a)">'+phaseMsg+'</div>';
+      if(bar){ bar.classList.remove('indeterminate'); bar.style.width='0%'; }
+      if(dot) dot.classList.remove('scanning');
+      if(btn){ btn.disabled=false; btn.textContent='스캔'; }
+      G.screenerRunning = false;
+      return;
+    }
+
     passed.sort(function(a,b){ return b._score - a._score; });
     var top = passed.slice(0, 12);
 
