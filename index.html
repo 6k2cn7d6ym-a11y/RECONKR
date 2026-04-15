@@ -2003,8 +2003,10 @@ function hardCut_swing(q){
   var tv     = q._kisTV !== undefined ? q._kisTV : (price*vol)/100_000_000;
   var isKIS  = q._source === 'KIS';
 
-  if(price < 500)                                  return null;
-  if(chgPct < -10 || chgPct > 12)                 return null; // 범위 약간 완화
+  // KIS 랭킹 API(이격도/기관)는 stck_prpr 미포함 → price=0일 수 있음
+  // price=0이면 실제 가격이 없는 게 아니라 API 미제공인 것 → KIS면 스킵
+  if(price > 0 && price < 500)                    return null;
+  if(chgPct < -10 || chgPct > 12)                 return null;
 
   // KIS 이격도/기관API는 cap=0, tv=0 반환 → 데이터 없는 것이지 소형주 아님
   // KIS 소스일 때만 체크 스킵 (MOMO hardCut과 동일 원칙)
@@ -2032,7 +2034,7 @@ function hardCut_core(q){
   var avgVol = q.averageDailyVolume3Month   || q.averageDailyVolume10Day || 0;
   var volRatio = avgVol>0 ? vol/avgVol : null;
 
-  if(price < 1000)                                 return null;
+  if(price > 0 && price < 1000)                    return null; // KIS API 미제공 시 price=0
   if(cap !== null && cap < 2000)                   return null; // 시총 2000억+ (기관/외인 개입 가능)
   if(chgPct < -3 || chgPct > 15)                  return null; // 너무 많이 빠지거나 급등 제외
   if(volRatio !== null && volRatio > 8)            return null; // 거래량 폭발 = MOMO 영역
@@ -2538,7 +2540,7 @@ async function runScreener(mode){
     var passed = [];
     // 디버그: 처음 5개 종목 데이터 출력
     if(pool.length>0) console.log('[SC DEBUG] pool sample:', pool.slice(0,3).map(function(q){
-      return {sym:q.symbol, chg:q.regularMarketChangePercent, src:q._source};
+      return {sym:q.symbol, chg:q.regularMarketChangePercent, price:q.regularMarketPrice, tv:q._kisTV, src:q._source};
     }));
     pool.forEach(function(q){
       var s = null;
