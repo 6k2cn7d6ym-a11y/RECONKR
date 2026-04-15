@@ -1451,6 +1451,7 @@ async function fetchKisFluctuationRanking(market, sortDiv){
     FID_TRGT_CLS_CODE:       '0',
     FID_TRGT_EXLS_CLS_CODE:  '0',
     FID_DIV_CLS_CODE:        '0',
+    FID_PRC_CLS_CODE:        '0',   // 가격 구분 코드 (필수)
   }, headers);
   if(data.rt_cd !== '0') throw new Error('KIS 등락률순위 오류: ' + data.msg1);
   return (data.output || []).map(function(o){
