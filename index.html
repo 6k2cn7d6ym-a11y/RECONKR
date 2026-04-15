@@ -1961,7 +1961,8 @@ function score_momo(s){
   var vp    = s._volumePower || 0;
   var src   = s._poolSources || [];
   var code  = (s.symbol||'').replace(/\.(KS|KQ)$/i,'');
-  var d     = s._daily   || null;   // 일봉 통계
+  var d        = s._daily   || null;   // 일봉 통계
+  var vwapPct  = (s._vwapPct !== undefined && s._vwapPct !== null) ? s._vwapPct : null;
 
   // ── 즉시 0점
   if(ul < 5)   return { score:0, reasons:['⛔ 상한가 '+ul.toFixed(0)+'% 소진'] };
@@ -2014,7 +2015,15 @@ function score_momo(s){
   else if(gap >= 3 && gap < 5)   { score += 7;  reasons.push('갭 '+gap.toFixed(1)+'%'); }
   else if(gap > 12 && gap <= 20) { score += 4;  reasons.push('갭 '+gap.toFixed(1)+'% ⚠추격'); }
 
-  // ── ⑤ 체결강도
+  // ── ⑤ VWAP 위치 (max 10pt)
+  if(vwapPct !== null){
+    if(vwapPct >= 2)           { score += 10; reasons.push('VWAP +'+vwapPct.toFixed(1)+'% 위'); }
+    else if(vwapPct >= 0)      { score += 6;  reasons.push('VWAP 위'); }
+    else if(vwapPct >= -1.5)   { score += 2;  }   // VWAP 근접
+    else                       { score -= 5;  reasons.push('VWAP -'+Math.abs(vwapPct).toFixed(1)+'% 아래'); }
+  }
+
+  // ── ⑥ 체결강도
   if(vp >= 150)      { score += 10; reasons.push('체결강도 '+vp.toFixed(0)+'%'); }
   else if(vp >= 120) { score += 6; }
   else if(vp >= 100) { score += 3; }
@@ -2245,11 +2254,22 @@ async function runScreener(mode){
       var infoRes = await Promise.allSettled(
         passed.map(function(s){ return fetchKisStockInfo(s.symbol); })
       );
+      var priceRes = await Promise.allSettled(
+        passed.map(function(s){ return fetchKisPrice(s.symbol.replace(/\.(KS|KQ)$/i,'')); })
+      );
 
-      // 일봉·종목정보 부착
+      // 일봉·종목정보·현재가(VWAP) 부착
       passed.forEach(function(s, i){
-        s._daily = (dailyRes[i].status==='fulfilled') ? calcDailyStats(dailyRes[i].value) : null;
-        s._info  = (infoRes[i].status==='fulfilled')  ? infoRes[i].value : null;
+        s._daily = (dailyRes[i].status==='fulfilled')  ? calcDailyStats(dailyRes[i].value) : null;
+        s._info  = (infoRes[i].status==='fulfilled')   ? infoRes[i].value : null;
+        // VWAP = 누적거래대금 / 누적거래량 (분봉과 수학적으로 동일)
+        if(priceRes[i].status==='fulfilled'){
+          var p = priceRes[i].value;
+          s._vwap = (p.vol > 0) ? p.tradingValue / p.vol : null;
+          s._vwapPct = (s._vwap && s.price > 0)
+            ? (s.price / s._vwap - 1) * 100   // 양수 = VWAP 위, 음수 = VWAP 아래
+            : null;
+        }
       });
 
       // BLOCK 추가 필터
@@ -2264,6 +2284,12 @@ async function runScreener(mode){
 
         // MA20 실제 이격도 과열 (일봉 기반)
         if(daily.ma20_gap > 35)                   { s._blockReason = 'MA20 '+daily.ma20_gap.toFixed(0)+'% 과열'; return false; }
+
+        // VWAP 아래 + 갭 5% 미만 = 매수세 없음 → BLOCK
+        // (갭이 크면 VWAP 아래라도 상승 모멘텀으로 봄)
+        if(s._vwapPct !== null && s._vwapPct !== undefined){
+          if(s._vwapPct < -3 && s.chgPct < 5)    { s._blockReason = 'VWAP -'+Math.abs(s._vwapPct).toFixed(1)+'% 아래'; return false; }
+        }
 
         // 전일 상한가 소진 판정
         if(daily.prev_day_limit){
