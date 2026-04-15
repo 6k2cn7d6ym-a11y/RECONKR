@@ -4455,9 +4455,12 @@ function swingEngine(ydata, swingData){
     var sStop = Math.max.apply(null, stopCandidates.filter(function(s){return s < sEntry;}));
     if(!sStop||isNaN(sStop)||sStop>=sEntry) sStop = parseFloat((sEntry*0.965).toFixed(0));
     var sRisk = sEntry - sStop;
-    var sT1 = swingData.high10 && swingData.high10>sEntry*1.02
-      ? parseFloat((swingData.high10*0.99).toFixed(0))
-      : parseFloat((sEntry+sRisk*2).toFixed(0));
+    // T1 = 2R 고정 (10일 고점 기반은 너무 낮을 수 있음)
+    // 단, 2R이 5% 미만이면 최소 5% 보장
+    var t1_2r = parseFloat((sEntry + sRisk*2).toFixed(0));
+    var t1_min5pct = parseFloat((sEntry * 1.05).toFixed(0));
+    var sT1 = Math.max(t1_2r, t1_min5pct);
+    // T2: 저항선 기반 (20일 고점 or 52주 고점 or 4R)
     var fw = ydata.fiftyTwoWeekHigh;
     var sT2 = swingData.high20 && swingData.high20>sT1*1.02
       ? parseFloat((swingData.high20*0.99).toFixed(0))
@@ -5992,10 +5995,17 @@ function momoCardHTML(r){
       '</div>'+
     '</div>':'';
 
-  // 카드 CSS
-  var cardC={ENTER:'enter',WATCH:'watch',BLOCK:'block'}[ac];
+  // 카드 CSS — WATCH는 모드별 색상
+  var cardC = {ENTER:'enter', WATCH:'watch', BLOCK:'block'}[ac] || 'watch';
+  var _modeBorderStyle = '';
+  if(ac === 'WATCH'){
+    var _wc = r._mode==='swing' ? 'rgba(43,159,255,.25)'
+            : r._mode==='core'  ? 'rgba(159,122,255,.25)'
+            : 'rgba(255,58,140,.2)'; // momo 기본
+    _modeBorderStyle = 'border-color:'+_wc+';';
+  }
 
-  return '<div class="stock-card '+cardC+'" style="padding:14px 14px 12px">'+
+  return '<div class="stock-card '+cardC+'" style="padding:14px 14px 12px;'+_modeBorderStyle+'">'+
     // 헤더: 티커 + 판정
     '<div class="mc-header">'+
       '<div class="mc-id">'+
