@@ -1872,7 +1872,13 @@ async function testKisConnection(){
     // 연결 성공 시 종목명 캐시 빌드
     // 마스터는 정적 데이터 → 별도 빌드 불필요
   // 추적 데이터 초기 렌더링
-  setTimeout(initAllTracks, 1500);  // 세 모드 추적 초기화
+  // 세 모드 추적: 렌더링은 즉시, 가격 업데이트는 5분 후 (앱 로드 시 VM 부하 분산)
+  setTimeout(function(){
+    ['momo','swing','core'].forEach(renderTrack);
+  }, 1500);
+  setTimeout(function(){
+    ['momo','swing','core'].forEach(checkTrackUpdates);
+  }, 5 * 60 * 1000);
   }catch(e){
     if(el) el.textContent = '✗ 실패: '+e.message;
     if(st) { st.textContent='연결 실패'; st.style.color='var(--r)'; }
@@ -2012,10 +2018,10 @@ function hardCut_swing(q){
   // KIS 소스일 때만 체크 스킵 (MOMO hardCut과 동일 원칙)
   if(!isKIS){
     if(cap !== null && cap > 0 && cap < 1000)      return null;
-    if(tv < 50)                                    return null;
+    if(tv < 20)                                    return null; // 20억 미만 탈락
   } else {
-    // KIS: cap 있으면 체크, 없으면 통과
-    if(cap !== null && cap > 0 && cap < 500)       return null; // 500억 미만만 제외
+    if(cap !== null && cap > 0 && cap < 500)       return null;
+    // KIS: tv=0 자주 옴 → hardCut 스킵, BLOCK 단계에서 실제값으로 30억 체크
   }
 
   if(volRatio !== null && volRatio > 8)            return null; // 거래량 폭발
@@ -2670,9 +2676,14 @@ async function runScreener(mode){
         if(daily.ma60 && s.price > 0 && s.price < daily.ma60){
           s._blockReason = 'MA60(수급선) 아래'; return false;
         }
-        // G2: 거래대금 50억 미달 (실제 KIS 현재가 기반으로 재체크)
-        if(s._tv_m > 0 && s._tv_m < 50){
-          s._blockReason = '거래대금 '+s._tv_m.toFixed(0)+'억 — 최소 50억 미달'; return false;
+        // G1-B: MA20 < MA60 역배열 → 구조 없음 (엔진 B1 조건)
+        if(daily.ma20 && daily.ma60 && daily.ma20 < daily.ma60 * 0.97){
+          s._blockReason = 'MA 역배열 (MA20 < MA60)'; return false;
+        }
+        // G2: 거래대금 30억 미달 → 유동성 부족 (엔진 G2 설정값과 별도)
+        // 스캐너는 30억, 엔진 분석탭은 설정값(기본 50억) 기준
+        if(s._tv_m > 0 && s._tv_m < 30){
+          s._blockReason = '거래대금 '+s._tv_m.toFixed(0)+'억 — 최소 30억 미달'; return false;
         }
         // G3: VWAP -2% 아래 → 매도 구조 (장중만 체크, 마감 후는 스킵)
         // 장 마감 후 KIS tradingValue=0 → VWAP null → 오탐 방지
@@ -7955,6 +7966,22 @@ function cycle(id,vals){
   var el=document.getElementById(id);
   var i=vals.indexOf(el.textContent);
   el.textContent=vals[(i+1)%vals.length];
+  // 설정값 localStorage에 저장
+  localStorage.setItem('cfg_'+id, el.textContent);
+}
+
+function restoreSettings(){
+  // 저장된 설정값 복원 (페이지 로드 시 호출)
+  var settingIds = [
+    'minGap','minMcap','minTvRatio','minTvAbs','minRvol','minScore',
+    'swingMinRR','swingRsiMax','swingPbMax','swingMa20Max','swingHoldDays','swingMinTV',
+    'coreMinTV','coreMinCAP'
+  ];
+  settingIds.forEach(function(id){
+    var saved = localStorage.getItem('cfg_'+id);
+    var el = document.getElementById(id);
+    if(saved && el) el.textContent = saved;
+  });
 }
 
 function renderUsage(){
@@ -12274,6 +12301,7 @@ async function checkMarketRegime(){
 }
 
 // 대시보드 데이터 로드 (최초 1회)
+restoreSettings();  // 저장된 설정값 복원
 loadAllMarket();
 // KOSPI 방향 3분마다 자동 갱신 (MOMO 필터 최신화)
 setInterval(checkMarketRegime, 3*60*1000);
