@@ -44,7 +44,7 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
 .mode-pill.on.core{color:var(--pu);border-color:transparent;background:none}
 
 /* ─── 하단 탭 ─── */
-.bottom-tabs{display:none;background:var(--bg1);border-top:1px solid var(--b);flex-shrink:0;padding-bottom:env(safe-area-inset-bottom)}
+.bottom-tabs{display:none;background:var(--bg1);border-top:1px solid var(--b);flex-shrink:0;padding-bottom:env(safe-area-inset-bottom);position:relative;z-index:100}
 .bottom-tabs.visible{display:flex}
 .btab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 4px 6px;cursor:pointer;color:var(--t3);font-size:9px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;transition:color .15s;border:none;background:none}
 .btab svg{width:18px;height:18px}
@@ -887,6 +887,7 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
 
 <!-- ─── 보유 종목 패널 ─── -->
 <div class="hold-panel-wrap" id="holdPanelWrap" style="display:none">
+  <div style="display:flex;align-items:center;padding:env(safe-area-inset-top,16px) 20px 10px;background:rgba(6,8,9,.92);border-bottom:1px solid rgba(255,106,0,.15);flex-shrink:0"><button onclick="switchSubTab('search')" style="background:none;border:none;color:var(--gold);font-family:var(--mono);font-size:13px;cursor:pointer;padding:4px 0">← 뒤로</button><span style="flex:1;text-align:center;font-family:var(--mono);font-size:12px;color:var(--gold);letter-spacing:.1em">보유 종목</span></div>
   <div class="hold-panel-scroll">
     <div class="hold-section-title">보유 종목 등록</div>
     <div class="hold-input-row">
@@ -1205,7 +1206,7 @@ function updateClock(){
 // Worker 프록시
 // ═══════════════════════════════════════
 var WORKER_URL = 'https://recon.miinonnnn.workers.dev';
-var DART_URL   = 'https://dart.minon.kr:3000';
+var DART_URL   = 'https://dart.minon.kr';
 var KIS_URL    = 'https://dart.minon.kr'; // KIS도 Oracle VM 경유 (Cloudflare IP 차단 대응) // Oracle DART 프록시
 
 async function fetchWithProxy(url){
