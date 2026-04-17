@@ -51,6 +51,37 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
 .btab.on.momo-tab{color:var(--a)}
 .btab.on.swing-tab{color:var(--bl)}
 .btab.on.core-tab{color:var(--pu)}
+.btab.on.hold-tab{color:var(--gold)}
+
+/* ─── 보유 종목 패널 ─── */
+.hold-panel-wrap{position:absolute;inset:0;background:var(--bg);z-index:50;display:flex;flex-direction:column;overflow:hidden}
+.hold-panel-scroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px 16px 20px}
+.hold-section-title{font-family:var(--mono);font-size:9px;color:var(--gold);letter-spacing:.12em;text-transform:uppercase;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.hold-section-title::after{content:'';flex:1;height:1px;background:var(--b)}
+.hold-input-row{display:flex;gap:6px;margin-bottom:8px}
+.hold-input{background:var(--bg2);border:1px solid var(--b);border-radius:8px;padding:9px 10px;font-family:var(--mono);font-size:13px;color:var(--t);outline:none;width:100%}
+.hold-input::placeholder{color:var(--t3)}
+.hold-input:focus{border-color:rgba(255,106,0,.4)}
+.hold-add-btn{width:100%;padding:10px;background:rgba(255,106,0,.08);border:1px solid rgba(255,106,0,.25);border-radius:10px;font-family:var(--mono);font-size:12px;font-weight:700;color:var(--gold);cursor:pointer;margin-bottom:14px}
+.hold-add-btn:active{background:rgba(255,106,0,.16)}
+.hold-list{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+.hold-item{display:flex;align-items:center;justify-content:space-between;background:var(--bg1);border:1px solid var(--b);border-radius:10px;padding:10px 12px}
+.hold-item-left{display:flex;flex-direction:column;gap:2px}
+.hold-item-code{font-family:var(--mono);font-size:14px;color:var(--t)}
+.hold-item-name{font-size:10px;color:var(--t2)}
+.hold-item-right{display:flex;align-items:center;gap:10px}
+.hold-item-price{font-family:var(--mono);font-size:13px;color:var(--gold)}
+.hold-item-del{font-size:16px;color:var(--t3);cursor:pointer;padding:4px}
+.hold-item-del:active{color:var(--r)}
+.hold-empty{text-align:center;padding:30px;font-family:var(--mono);font-size:11px;color:var(--t3)}
+.hold-sync-row{display:flex;gap:8px;margin-bottom:8px}
+.hold-sync-btn{flex:1;padding:11px 6px;background:rgba(0,240,122,.06);border:1px solid rgba(0,240,122,.2);border-radius:10px;font-family:var(--mono);font-size:10px;color:var(--g);cursor:pointer;text-align:center}
+.hold-sync-btn:active{background:rgba(0,240,122,.12)}
+.hold-test-btn{flex:1;padding:11px 6px;background:rgba(255,106,0,.06);border:1px solid rgba(255,106,0,.2);border-radius:10px;font-family:var(--mono);font-size:10px;color:var(--gold);cursor:pointer;text-align:center}
+.hold-test-btn:active{background:rgba(255,106,0,.12)}
+.hold-status{font-family:var(--mono);font-size:10px;text-align:center;padding:8px;border-radius:8px;margin-top:6px}
+.hold-status.ok{color:var(--g);background:rgba(0,240,122,.06);border:1px solid rgba(0,240,122,.15)}
+.hold-status.err{color:var(--r);background:rgba(255,45,78,.06);border:1px solid rgba(255,45,78,.15)}
 
 /* ─── 스크롤 ─── */
 .scroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:max(20px,env(safe-area-inset-bottom))}
@@ -854,6 +885,29 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
   </div>
 </div>
 
+<!-- ─── 보유 종목 패널 ─── -->
+<div class="hold-panel-wrap" id="holdPanelWrap" style="display:none">
+  <div class="hold-panel-scroll">
+    <div class="hold-section-title">보유 종목 등록</div>
+    <div class="hold-input-row">
+      <input class="hold-input" id="holdCode" placeholder="종목코드 (예: 005930)" maxlength="6" inputmode="numeric" style="max-width:130px">
+      <input class="hold-input" id="holdName" placeholder="종목명">
+    </div>
+    <div class="hold-input-row" style="margin-bottom:10px">
+      <input class="hold-input" id="holdPrice" placeholder="진입가 (원)" inputmode="decimal">
+    </div>
+    <button class="hold-add-btn" onclick="holdAdd()">+ 종목 추가</button>
+    <div class="hold-section-title">보유 중</div>
+    <div class="hold-list" id="holdList"><div class="hold-empty" id="holdEmpty">등록된 종목 없음</div></div>
+    <div class="hold-section-title">알림 설정</div>
+    <div class="hold-sync-row">
+      <button class="hold-sync-btn" onclick="holdSync()">☁️ 서버 저장<br><span style="font-size:9px;opacity:.7">5분마다 자동 감시</span></button>
+      <button class="hold-test-btn" onclick="holdTestTg()">📲 텔레그램<br><span style="font-size:9px;opacity:.7">연결 테스트</span></button>
+    </div>
+    <div id="holdStatus" style="display:none" class="hold-status"></div>
+  </div>
+</div>
+
 <!-- ─── 하단 탭 ─── -->
 <div class="bottom-tabs" id="bottomTabs">
   <button class="btab" id="btabSearch" onclick="switchSubTab('search')">
@@ -871,6 +925,10 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
   <button class="btab" id="btabSettings" onclick="switchSubTab('settings')">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     설정
+  </button>
+  <button class="btab hold-tab" id="btabHold" onclick="switchSubTab('hold')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+    보유
   </button>
 </div>
 
@@ -1045,15 +1103,20 @@ function switchSubTab(sub){
   if(target) target.style.display = '';
 
   document.querySelectorAll('.btab').forEach(function(b){ b.classList.remove('on'); });
-  var map = { search:'btabSearch', history:'btabHistory', journal:'btabJournal', settings:'btabSettings' };
+  var map = { search:'btabSearch', history:'btabHistory', journal:'btabJournal', settings:'btabSettings', hold:'btabHold' };
   var btn = document.getElementById(map[sub]);
   if(btn) btn.classList.add('on');
+
+  // 보유 종목 패널 오버레이 처리
+  var holdWrap = document.getElementById('holdPanelWrap');
+  if(holdWrap) holdWrap.style.display = (sub === 'hold') ? '' : 'none';
 
   G.activeSubTab = sub;
 
   if(sub === 'history') renderHistory(G.currentMode);
   if(sub === 'journal') renderJournal(G.currentMode);
   if(sub === 'search')  renderOpenPositions(G.currentMode);
+  if(sub === 'hold')    holdRender();
 }
 
 function updateKeyStatus(){
@@ -4290,16 +4353,17 @@ function makePrompt(mode, ticker, ydata, swingData, openTrade, coreData){
         '· 눌림목 후 재상승 확인, 박스 상단 미돌파\n\n'+
         '반드시 순수 JSON만 반환:\n'+
         '{"ticker":"'+ticker+'","mode":"hold",'+
-        '"action":"SELL_ALL"|"SELL_HALF"|"HOLD"|"STOP_LOSS",'+
+        '"hold_action":"SELL_ALL"|"SELL_HALF"|"HOLD"|"STOP_LOSS",'+
         '"score":0-100,'+
         '"stop":즉시손절가(숫자),'+
         '"t1":1차목표가(다음저항 or 상한가30%)숫자,'+
         '"t2":2차목표가(상한가70%)숫자,'+
         '"urgency":"immediate"|"today"|"monitor",'+
-        '"action_reason":"지금 해야 할 행동 한 줄 (₩가격 포함)",'+
-        '"sell_signals":["매도 근거1","매도 근거2"],'+
-        '"hold_signals":["홀드 근거1"],'+
+        '"reason":"지금 해야 할 행동 + 핵심 근거 2~3줄",'+
+        '"signals":["긍정 신호1","긍정 신호2"],'+
+        '"warnings":["위험 신호1","위험 신호2","위험 신호3"],'+
         '"summary":"포지션 현황 한줄 판단"}\n\n'+
+        '※ SELL_ALL / STOP_LOSS 시 warnings에 구체적 근거 3개 필수\n'+
         '※ 알수없음은 알고 있는 정보로 최대한 분석';
     }
 
@@ -5989,7 +6053,40 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
       result.ticker = ticker;
       result.price  = ydata.price || result.price;
       result.news   = ydata.newsText || '';
-      // 스윙 청산 신호 — JS 규칙 기반 (MA5/거래량소멸/위꼬리)
+
+      // ── 종목명 (신규 진입과 동일 경로) ──
+      var _tCode2 = ticker.replace(/\.(KS|KQ)$/i,'');
+      var _mEntry2 = masterByCode(_tCode2);
+      result.displayName = (_mEntry2 && _mEntry2.name) || ydata.shortName || ticker;
+
+      // ── MOMO: 엔진으로 현재 상태 재평가 → BLOCK이면 SELL_ALL 승격 ──
+      if(mode === 'momo'){
+        var _holdEng = momoEngine(ydata);
+        result._holdEngineAction  = _holdEng.action;
+        result._holdEngineScore   = _holdEng.score;
+        result.whale_stage        = _holdEng.whale_stage;
+        result.whale_label        = _holdEng.whale_label;
+        result.vwap               = ydata.vwap || null;
+        result.rvol               = ydata.rvol || null;
+
+        // 엔진이 BLOCK → 즉시 매도 승격
+        if(_holdEng.action === 'BLOCK' && result.hold_action === 'HOLD'){
+          result.hold_action = 'SELL_ALL';
+          result.urgency     = 'immediate';
+          var _blkReason     = (_holdEng.blockers||[]).slice(0,2).join(' / ');
+          result.reason      = '⚡ 엔진 BLOCK 감지 — ' + _blkReason + (result.reason ? '\n' + result.reason : '');
+          result.warnings    = (_holdEng.blockers||[]).concat(result.warnings||[]);
+        } else {
+          // 엔진 경고를 기존 warnings 앞에 병합 (중복 제거)
+          var _engWarnMerge = (_holdEng.warnings||[]).filter(function(w){
+            return !(result.warnings||[]).some(function(x){ return x===w; });
+          });
+          result.warnings = _engWarnMerge.concat(result.warnings||[]);
+          result.signals  = (_holdEng.signals||[]).concat(result.signals||[]);
+        }
+      }
+
+      // ── 스윙 청산 신호 — JS 규칙 기반 (MA5/거래량소멸/위꼬리) ──
       if(mode === 'swing' && swingData){
         var _exitSig = calcSwingExitSignals(result, swingData, openTrade);
         result._exitSignals = _exitSig;
@@ -7517,10 +7614,13 @@ function holdCardHTML(r, mode, trade){
   var t1dist  = r.t1  ? ((r.t1  - curP)/curP*100).toFixed(1) : null;
   var stopdist= r.stop? ((curP  - r.stop)/curP*100).toFixed(1) : null;
 
-  var signals = (r.signals||[]).slice(0,3).map(function(s){
+  // SELL_ALL / STOP_LOSS 시 warnings를 더 많이 표시, 나머지는 3개 상한
+  var _sigLimit  = (ac==='HOLD'||ac==='ADD') ? 3 : 5;
+  var _warnLimit = (ac==='SELL_ALL'||ac==='STOP_LOSS') ? 6 : 3;
+  var signals = (r.signals||[]).slice(0,_sigLimit).map(function(s){
     return '<div style="display:flex;gap:6px;font-size:11px;color:var(--t);line-height:1.5"><span style="color:var(--g);flex-shrink:0">✓</span>'+s+'</div>';
   }).join('');
-  var warnings = (r.warnings||[]).slice(0,3).map(function(w){
+  var warnings = (r.warnings||[]).slice(0,_warnLimit).map(function(w){
     return '<div style="display:flex;gap:6px;font-size:11px;color:var(--t);line-height:1.5"><span style="color:var(--a);flex-shrink:0">⚠</span>'+w+'</div>';
   }).join('');
 
@@ -7547,17 +7647,32 @@ function holdCardHTML(r, mode, trade){
     // 티커 + 행동 판단
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
       '<div>'+
-        '<div style="font-family:var(--mono);font-size:22px;color:var(--t)">'+r.ticker+'</div>'+
-        '<div style="font-size:10px;color:var(--t2);font-family:var(--mono);margin-top:2px">'+urgencyLabel+'</div>'+
+        '<div style="display:flex;align-items:baseline;gap:8px">'+
+          '<div style="font-family:var(--mono);font-size:22px;color:var(--t)">'+r.ticker+'</div>'+
+          (r.displayName&&r.displayName!==r.ticker?'<div style="font-size:12px;color:var(--t2)">'+r.displayName+'</div>':'')+
+        '</div>'+
+        '<div style="font-size:10px;color:var(--t2);font-family:var(--mono);margin-top:2px">'+urgencyLabel+
+          (r._holdEngineScore!=null?' · 엔진 '+r._holdEngineScore+'pt':'')+
+          (r.whale_label?' · '+r.whale_label:'')+'</div>'+
       '</div>'+
       '<div style="text-align:center;padding:8px 16px;border-radius:10px;border:1.5px solid '+acColor+';background:rgba(255,255,255,.04)">'+
         '<div style="font-family:var(--mono);font-size:13px;font-weight:700;color:'+acColor+'">'+acLabel+'</div>'+
       '</div>'+
     '</div>'+
 
+    // ── 엔진 BLOCK 배너 (MOMO — 즉시 매도 경보) ──
+    (mode==='momo'&&r._holdEngineAction==='BLOCK'?
+      '<div style="margin-bottom:8px;padding:10px 12px;background:rgba(255,45,78,.10);border:1.5px solid rgba(255,45,78,.40);border-radius:10px">'+
+        '<div style="font-family:var(--mono);font-size:9px;color:var(--r);letter-spacing:.1em;margin-bottom:5px">⚡ 엔진 BLOCK — 즉시 청산 권고</div>'+
+        (r._holdEngineBlock||[]).map(function(b){
+          return '<div style="font-size:11px;color:var(--t);line-height:1.5;padding:2px 0"><span style="color:var(--r);margin-right:5px">✗</span>'+b+'</div>';
+        }).join('')+
+      '</div>':'')+
+
     // 핵심 판단 근거
-    '<div style="font-size:12px;color:var(--t);line-height:1.6;padding:10px 12px;background:var(--bg2);border-radius:10px;margin-bottom:10px">'+
-      (r.reason||r.summary||'')+'</div>'+
+    (r.reason||r.summary?
+      '<div style="font-size:12px;color:var(--t);line-height:1.6;padding:10px 12px;background:var(--bg2);border-radius:10px;margin-bottom:10px;white-space:pre-line">'+
+        (r.reason||r.summary)+'</div>':'')+
 
     // 가격 레벨
     '<div style="display:grid;grid-template-columns:repeat('+(mode==='swing'&&r.add_price?'4':'3')+',1fr);background:var(--bg2);border-radius:11px;overflow:hidden;margin-bottom:10px">'+
@@ -7626,13 +7741,43 @@ function holdCardHTML(r, mode, trade){
       return html;
     })() : '')+
 
+    // ── MOMO 실시간 지표 행 (VWAP 위치 + 엔진 상태) ──
+    (mode==='momo'&&r._holdEngineAction?
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">'+
+        (r.vwap&&r.price?
+          (function(){
+            var vp=((r.price-r.vwap)/r.vwap*100);
+            var vpc=vp>=0?'var(--g)':'var(--r)';
+            return '<div style="display:flex;align-items:center;gap:5px;padding:4px 8px;background:var(--bg2);border-radius:6px;border:1px solid var(--b)">'+
+              '<span style="font-size:9px;color:var(--t3)">VWAP</span>'+
+              '<span style="font-family:var(--mono);font-size:11px;color:'+vpc+'">'+(vp>=0?'+':'')+vp.toFixed(1)+'%</span>'+
+            '</div>';
+          })()
+        :'')+
+        (r.rvol!=null?
+          '<div style="display:flex;align-items:center;gap:5px;padding:4px 8px;background:var(--bg2);border-radius:6px;border:1px solid var(--b)">'+
+            '<span style="font-size:9px;color:var(--t3)">RVol</span>'+
+            '<span style="font-family:var(--mono);font-size:11px;color:'+(r.rvol>=1.5?'var(--g)':r.rvol>=1.0?'var(--a)':'var(--r)')+'">'+r.rvol.toFixed(1)+'x</span>'+
+          '</div>'
+        :'')+
+        (r._holdEngineAction?
+          '<div style="display:flex;align-items:center;gap:5px;padding:4px 8px;background:var(--bg2);border-radius:6px;border:1px solid var(--b)">'+
+            '<span style="font-size:9px;color:var(--t3)">엔진</span>'+
+            '<span style="font-family:var(--mono);font-size:11px;color:'+(r._holdEngineAction==='ENTER'?'var(--g)':r._holdEngineAction==='BLOCK'?'var(--r)':'var(--a)')+'">'+r._holdEngineAction+'</span>'+
+            (r._holdEngineScore!=null?'<span style="font-family:var(--mono);font-size:10px;color:var(--t3)"> '+r._holdEngineScore+'pt</span>':'')+
+          '</div>'
+        :'')+
+      '</div>'
+    :'')+
+
     // 신호
     (signals||warnings?
       '<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px">'+signals+warnings+'</div>'
     :'')+
 
-    // 요약
-    '<div style="font-size:11px;color:var(--t2);margin-bottom:10px">'+(r.summary||'')+'</div>'+
+    // 요약 (reason과 다를 때만 표시)
+    (r.summary&&r.summary!==(r.reason||'')?
+      '<div style="font-size:11px;color:var(--t2);margin-bottom:10px">'+r.summary+'</div>':'')+
 
     // 버튼
     '<div style="display:flex;gap:6px">'+
@@ -12519,7 +12664,112 @@ setTimeout(function(){
   }
 }, 3000);
 
-// ── KIS 초기화 ──
+// ── 보유 종목 관리 ──
+var holdPositions = [];
+
+function holdGetKey() {
+  return 'holdPositions_' + (G.currentMode || 'momo');
+}
+
+function holdLoad() {
+  holdPositions = JSON.parse(localStorage.getItem(holdGetKey()) || '[]');
+}
+
+function holdRender() {
+  holdLoad();
+  var list  = document.getElementById('holdList');
+  if (!list) return;
+  if (!holdPositions.length) {
+    list.innerHTML = '<div class="hold-empty">등록된 종목 없음</div>';
+    return;
+  }
+  list.innerHTML = holdPositions.map(function(p, i) {
+    return '<div class="hold-item">' +
+      '<div class="hold-item-left">' +
+        '<span class="hold-item-code">' + p.code + '</span>' +
+        '<span class="hold-item-name">' + (p.name || '─') + '</span>' +
+      '</div>' +
+      '<div class="hold-item-right">' +
+        '<span class="hold-item-price">' + (p.entryPrice ? Number(p.entryPrice).toLocaleString() + '원' : '─') + '</span>' +
+        '<span class="hold-item-del" onclick="holdDelete(' + i + ')">✕</span>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function holdAdd() {
+  var code  = (document.getElementById('holdCode')  || {}).value || '';
+  var name  = (document.getElementById('holdName')  || {}).value || '';
+  var price = (document.getElementById('holdPrice') || {}).value || '';
+  code = code.trim();
+  if (!code) { alert('종목코드를 입력하세요'); return; }
+  holdLoad();
+  holdPositions.push({ code: code, name: name.trim(), entryPrice: parseFloat(price) || 0 });
+  localStorage.setItem(holdGetKey(), JSON.stringify(holdPositions));
+  document.getElementById('holdCode').value  = '';
+  document.getElementById('holdName').value  = '';
+  document.getElementById('holdPrice').value = '';
+  holdRender();
+}
+
+function holdDelete(i) {
+  holdLoad();
+  holdPositions.splice(i, 1);
+  localStorage.setItem(holdGetKey(), JSON.stringify(holdPositions));
+  holdRender();
+}
+
+function holdShowStatus(msg, type) {
+  var el = document.getElementById('holdStatus');
+  if (!el) return;
+  el.style.display = '';
+  el.className = 'hold-status ' + (type || '');
+  el.textContent = msg;
+}
+
+async function holdSync() {
+  holdLoad();
+  holdShowStatus('저장 중...', '');
+  try {
+    var resp = await fetch(WORKER_URL + '/reconkr/positions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mode:         G.currentMode || 'momo',
+        positions:    holdPositions,
+        kisAppKey:    KIS.appKey    || '',
+        kisAppSecret: KIS.appSecret || '',
+      })
+    });
+    var data = await resp.json();
+    if (data.ok) {
+      holdShowStatus('✅ 저장 완료 — 장 중 5분마다 자동 감시', 'ok');
+    } else {
+      throw new Error('저장 실패');
+    }
+  } catch(e) {
+    holdShowStatus('❌ 저장 실패: ' + e.message, 'err');
+  }
+}
+
+async function holdTestTg() {
+  holdShowStatus('전송 중...', '');
+  try {
+    var resp = await fetch(WORKER_URL + '/reconkr/test-telegram');
+    var data = await resp.json();
+    if (data.ok) {
+      holdShowStatus('✅ 텔레그램 전송 성공', 'ok');
+    } else {
+      throw new Error('전송 실패');
+    }
+  } catch(e) {
+    holdShowStatus('❌ 실패: ' + e.message, 'err');
+  }
+}
+
+holdRender();
+
+
 (function initKis(){
   var k = localStorage.getItem('kisAppKey')||'';
   var s = localStorage.getItem('kisAppSecret')||'';
