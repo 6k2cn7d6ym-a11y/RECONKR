@@ -12789,9 +12789,15 @@ function holdFromAnalysis(ticker){
 
 function holdDelete(i) {
   holdLoad();
+  var removed = holdPositions[i];
+  if(!confirm((removed && (removed.name || removed.code))+' 을(를) 보유 목록에서 제거할까요?\n\n매도 완료 후에 삭제하세요. 삭제 후에는 스톱/T1/T2 알림이 오지 않습니다.')) return;
   holdPositions.splice(i, 1);
   localStorage.setItem(holdGetKey(), JSON.stringify(holdPositions));
   holdRender();
+  // Worker KV 즉시 동기화 — 그래야 서버에서도 이 종목 감시 중단
+  if(typeof holdSync === 'function'){
+    try{ holdSync(); }catch(e){}
+  }
 }
 
 function holdShowStatus(msg, type) {
