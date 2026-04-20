@@ -1208,6 +1208,78 @@ function updateClock(){
   }
 }
 
+// ═══════════════════════════════════════════════════════════════
+// TimeAwareness — 엔진이 사용할 시간대 기반 능력 판정 단일 소스
+// 모든 엔진(MOMO/SWING/CORE)은 이 함수 결과에 따라 Layer 활성화 결정
+// 이전 상태: hasRealtimePrice 같은 변수가 swingEngine 내부에 산발
+// 개선 후: 모든 엔진이 동일 유틸 호출 → 일관된 시간대 정책
+//
+// 반환값 필드:
+//   phase:          'PRE'|'ORB'|'EARLY'|'PRIME'|'LATE'|'NXT_AFTER'|'CLOSED'
+//   isWeekend:      주말/공휴일
+//   isClosed:       정규장 종료 (NXT_AFTER는 false)
+//   hasLivePrice:   실시간 가격 신뢰 가능 (PRE 이후 CLOSED 전)
+//   hasLiveVolume:  실시간 거래량 완성됨 (EARLY 이후)
+//   hasLiveTrigger: 실시간 트리거(양봉/돌파/볼륨) 평가 가능 (EARLY 이후 LATE까지)
+//   hasDailyData:   일봉 데이터 신뢰 (장 마감 후 당일 확정, 장중은 전일까지)
+//   hasVWAP:        VWAP 계산 가능 (장중만)
+//   allowMomoEntry: MOMO 신규 진입 허용 시간대
+//   allowSwingEntry: SWING 신규 진입 허용 (장 마감 후엔 "내일 준비"만)
+//   allowCoreEntry: CORE 신규 진입 허용 (시간 무관 가능)
+// ═══════════════════════════════════════════════════════════════
+function getTimeAwareness(){
+  var ph = G.marketPhase || 'CLOSED';
+  var nxtHours = G._isNxtHours === true;
+
+  // 기본 판정
+  var isWeekend = (ph === 'CLOSED' && !nxtHours);  // 평일 장 마감과 주말 구분은 별도 필요시
+  var isClosed  = (ph === 'CLOSED');
+
+  // 실시간 가격 신뢰: PRE~LATE 사이 (NXT_AFTER는 NXT 종목만)
+  var hasLivePrice = (ph === 'PRE' || ph === 'ORB' || ph === 'EARLY' ||
+                      ph === 'PRIME' || ph === 'LATE' || ph === 'NXT_AFTER');
+
+  // 실시간 거래량 완성도: EARLY 이후 (ORB는 5분뿐이라 부분집계)
+  var hasLiveVolume = (ph === 'EARLY' || ph === 'PRIME' || ph === 'LATE');
+
+  // 실시간 트리거 평가 가능: 의미있는 거래량 확보된 시간대
+  // EARLY 이후 LATE까지. NXT_AFTER는 유동성 너무 낮아 제외.
+  var hasLiveTrigger = (ph === 'EARLY' || ph === 'PRIME' || ph === 'LATE');
+
+  // 일봉 데이터: 어느 시간대에서든 '과거 일봉'은 항상 신뢰
+  // 장 마감 후면 '오늘 일봉'도 확정됨. 장중이면 오늘 일봉은 미완성
+  var hasDailyData        = true;                   // 전일까지 일봉은 항상 있음
+  var hasCurrentDayDaily  = (ph === 'CLOSED' && !isWeekend);  // 당일 일봉 완성
+
+  // VWAP: 장중에만 계산 가능 (누적거래대금/거래량)
+  var hasVWAP = (ph === 'OPEN' || ph === 'MKT' || ph === 'EARLY' ||
+                 ph === 'PRIME' || ph === 'LATE' || ph === 'ORB');
+
+  // 진입 허용 시간대 — 모드별
+  //  MOMO: 장중이면서 페이드 구간 직전까지 (LATE 제외)
+  //  SWING: 장중 언제든 + 장 마감 후엔 "대기 모드"로만 (ENTER 불가, WATCH만)
+  //  CORE: 시간 무관 — 일봉/주봉/월봉 기반이므로 언제든 분석 가능
+  var allowMomoEntry  = (ph === 'ORB' || ph === 'EARLY' || ph === 'PRIME');
+  var allowSwingEntry = (ph === 'EARLY' || ph === 'PRIME' || ph === 'LATE');
+  var allowCoreEntry  = true;  // 항상
+
+  return {
+    phase:              ph,
+    isWeekend:          isWeekend,
+    isClosed:           isClosed,
+    isNxtHours:         nxtHours,
+    hasLivePrice:       hasLivePrice,
+    hasLiveVolume:      hasLiveVolume,
+    hasLiveTrigger:     hasLiveTrigger,
+    hasDailyData:       hasDailyData,
+    hasCurrentDayDaily: hasCurrentDayDaily,
+    hasVWAP:            hasVWAP,
+    allowMomoEntry:     allowMomoEntry,
+    allowSwingEntry:    allowSwingEntry,
+    allowCoreEntry:     allowCoreEntry,
+  };
+}
+
 // ═══════════════════════════════════════
 // Worker 프록시
 // ═══════════════════════════════════════
@@ -2222,107 +2294,63 @@ function score_momo(s){
   return { score: Math.min(100, Math.max(0, score)), reasons };
 }
 function score_swing(s){
-  // 엔진 4레이어 구조 반영: 시장(20) + 구조(30) + 눌림(30) + 트리거(20)
-  var score   = 0;
+  // ════════════════════════════════════════════════════════
+  // A2 통합: 리스트 점수 = predictSwingScore 기반 (0~80pt)
+  //
+  // 기존 문제: score_swing(가점누적) vs swingEngine(엄격평가) 간 최대 50점 괴리
+  //           → 리스트 79점 뜬 종목이 카드에선 27점 BLOCK 되는 혼란
+  //
+  // 통합 방식: predictSwingScore로 A+B (구조 50pt) 계산,
+  //           추가로 Layer C 추정치(일봉 기반) 계산해서 80pt 만점 리스트 점수 산출
+  //           D(트리거)는 장중 변동성 커서 리스트 단계에선 제외
+  //
+  // 이러면 리스트 점수와 카드 점수의 차이가 "당일 트리거 유무"만으로 설명됨
+  // ════════════════════════════════════════════════════════
   var reasons = [];
-  var d       = s._daily || null;
-  var src     = s._poolSources || [];
-  var code    = (s.symbol||'').replace(/\.(KS|KQ)$/i,'');
-  var isNxt   = _NXT_CODES.has(code);
-  var price   = s.price || s.regularMarketPrice || 0;
-  var chg     = s.chgPct || 0;
-  var tv      = s.tv || 0;
+  var d = s._daily;
 
-  // ── Layer A: 시장 (max 20pt) ──────────────────────────────
-  var mktScore = 0;
-  if(G.spyAboveMA200 === true)        { mktScore += 8; reasons.push('KOSPI 120일선 위'); }
-  else if(G.spyAboveMA200 === false)  { mktScore -= 5; reasons.push('⚠ KOSPI 약세 구조'); }
-  var kospiChg = G.spyIntraday ? G.spyIntraday.change_pct : null;
-  if(kospiChg !== null){
-    if(kospiChg > 0.8)       mktScore += 12;
-    else if(kospiChg > 0.3)  mktScore += 9;
-    else if(kospiChg > -0.3) mktScore += 6;
-    else if(kospiChg > -0.8) mktScore += 2;
-    else                     mktScore -= 3;
-  } else { mktScore += 6; }
-  score += Math.max(0, Math.min(20, mktScore));
-
-  // ── Layer B: 구조 (max 30pt) ──────────────────────────────
-  var strScore = 0;
-  if(d){
-    // B1. MA20 > MA60 정배열 (+10)
-    if(d.ma60 && d.ma20 > d.ma60)       { strScore += 10; reasons.push('MA20>MA60 정배열'); }
-    else if(d.ma60 && d.ma20 > d.ma60*0.98){ strScore += 5; }
-    // B2. 현재가 > MA60 위치
-    if(d.ma60 && price > d.ma60 * 1.03) { strScore += 8; reasons.push('MA60 위 안착'); }
-    else if(d.ma60 && price > d.ma60)   { strScore += 4; }
-    // B3. MA60 기울기
-    if(d.ma60_slope !== null){
-      if(d.ma60_slope > 0)   { strScore += 4; reasons.push('MA60 우상향'); }
-      else if(d.ma60_slope < -0.5){ strScore -= 3; }
-    }
-    // B4. MA20 이격도 -5%~+10%
-    if(d.ma20_gap >= -5 && d.ma20_gap <= 10){ strScore += 4; }
-    else if(d.ma20_gap > 10 && d.ma20_gap <= 15){ strScore += 1; }
-    // B5. 거래대금
-    if(tv >= 100)      { strScore += 3; reasons.push('거래대금 '+Math.round(tv)+'억'); }
-    else if(tv >= 50)  { strScore += 1; }
-    // B6. NXT 우량주
-    if(isNxt) { strScore += 1; }
+  // Layer A+B는 predictSwingScore에 위임 (최대 50점)
+  var pred = predictSwingScore(s);
+  if(!pred){
+    return { score: 0, reasons: ['일봉 데이터 부족'] };
   }
-  // 출처: inst 포함 → 기관 지지 확인
-  if(src.includes('inst')){ strScore += 3; reasons.push('기관/외인 수급'); }
-  score += Math.max(0, Math.min(30, strScore));
+  var total = pred.total;
+  if(pred.market >= 15)    reasons.push('시장 '+pred.market+'/20 · 우호적');
+  if(pred.structure >= 20) reasons.push('구조 '+pred.structure+'/30 · 정배열+MA60안착');
+  else if(pred.structure >= 10) reasons.push('구조 '+pred.structure+'/30');
 
-  // ── Layer C: 눌림목 품질 (max 30pt) ──────────────────────
+  // Layer C (눌림목 품질) 간이 추정 — 일봉만으로 계산 가능 (최대 30점)
+  // swingEngine의 C1~C5와 동일 로직
   var pbScore = 0;
   if(d){
-    // C1. 눌림목 깊이 (10일 고점 대비)
+    // C1. 조정폭
     var depth = d.pullback_depth_pct;
     if(depth !== null){
-      if(depth >= -7 && depth <= -3)      { pbScore += 10; reasons.push('조정폭 '+depth.toFixed(1)+'% 최적'); }
-      else if(depth > -3 && depth <= 0)   { pbScore += 6;  reasons.push('얕은 눌림 '+depth.toFixed(1)+'%'); }
-      else if(depth < -7 && depth >= -12) { pbScore += 5;  }
-      else if(depth < -12)                { pbScore += 1;  reasons.push('⚠ 깊은 조정 '+depth.toFixed(1)+'%'); }
-      else if(depth > 0)                  { pbScore += 3;  } // 신고가 근처
+      if(depth >= -7 && depth <= -3)       { pbScore += 10; reasons.push('조정폭 '+depth+'% 최적'); }
+      else if(depth > -3 && depth <= 0)    { pbScore += 6;  }
+      else if(depth < -7 && depth >= -10)  { pbScore += 6;  }
+      else if(depth < -10)                  { pbScore += 2;  }
     }
-    // C2. MA20 대비 위치
-    if(d.ma20_gap >= 0 && d.ma20_gap <= 3)       { pbScore += 8; reasons.push('MA20 위 '+d.ma20_gap.toFixed(1)+'% 최적'); }
-    else if(d.ma20_gap > 3 && d.ma20_gap <= 7)   { pbScore += 5; reasons.push('MA20 위 '+d.ma20_gap.toFixed(1)+'%'); }
-    else if(d.ma20_gap >= -2 && d.ma20_gap < 0)  { pbScore += 3; reasons.push('MA20 근접'); }
-    else if(d.ma20_gap >= -5 && d.ma20_gap < -2) { pbScore += 1; }
-    // C3. 거래량 수축 (조용한 눌림)
-    if(d.pullback_vol_quiet){ pbScore += 5; reasons.push('거래량 수축 (조용한 눌림)'); }
-    // C4. 연속 음봉 없음 (이미 BLOCK에서 걸러지지만 점수도 반영)
-    if(d.no_consecutive_bear){ pbScore += 4; }
+    // C2. MA20 위치
+    var gap20 = d.ma20_gap;
+    if(gap20 !== null){
+      if(gap20 >= 0 && gap20 <= 3)          pbScore += 8;
+      else if(gap20 > 3 && gap20 <= 7)      pbScore += 5;
+      else if(gap20 > 7 && gap20 <= 10)     pbScore += 3;
+      else if(gap20 >= -2 && gap20 < 0)     pbScore += 3;
+      else if(gap20 >= -5 && gap20 < -2)    pbScore += 1;
+    }
+    // C3. 거래량 수축
+    if(d.pullback_vol_quiet){ pbScore += 5; reasons.push('조용한 눌림'); }
+    // C4. 연속 음봉 없음
+    if(d.no_consecutive_bear) pbScore += 4;
     // C5. RSI
-    if(d.rsi14 !== null){
-      if(d.rsi14 >= 40 && d.rsi14 <= 60)   { pbScore += 3; reasons.push('RSI '+d.rsi14+' 적정'); }
-      else if(d.rsi14 > 60 && d.rsi14 <= 70){ pbScore += 1; }
-      else if(d.rsi14 < 40)                 { pbScore -= 2; reasons.push('⚠ RSI '+d.rsi14+' 과매도'); }
-    }
+    if(d.rsi14 !== null && d.rsi14 >= 40 && d.rsi14 <= 70) pbScore += 3;
   }
-  // 이격도 출처 → 실제 MA20 눌림목 확인됨
-  if(src.includes('disparity')){ pbScore += 3; reasons.push('이격도 눌림 확인'); }
-  score += Math.max(0, Math.min(30, pbScore));
+  total += Math.min(30, pbScore);
 
-  // ── Layer D: 트리거 임박 신호 (max 20pt) ─────────────────
-  var trigScore = 0;
-  if(d){
-    // 오늘 회복 조짐 (소폭 양봉)
-    if(chg >= 0 && chg <= 3)       { trigScore += 8; reasons.push('회복 조짐 +'+chg.toFixed(1)+'%'); }
-    else if(chg > 3 && chg <= 6)   { trigScore += 5; reasons.push('반등 시작 +'+chg.toFixed(1)+'%'); }
-    else if(chg < 0 && chg >= -2)  { trigScore += 3; }
-    // 거래량 슬슬 살아남 (트리거 임박)
-    if(d.vol_trend >= 1.2 && d.vol_trend <= 2){ trigScore += 7; reasons.push('거래량 회복 '+d.vol_trend.toFixed(1)+'x'); }
-    else if(d.vol_trend >= 0.8)    { trigScore += 3; }
-    // 전일 양봉
-    if(d.prev_bullish){ trigScore += 5; reasons.push('전일 양봉'); }
-  }
-  score += Math.max(0, Math.min(20, trigScore));
-
-  reasons.push('※ 트리거 확정 → 분석 탭에서 확인');
-  return { score: Math.min(100, Math.max(0, score)), reasons };
+  reasons.push('※ 트리거(D) 20pt는 장중 실시간 재평가');
+  return { score: Math.min(100, Math.max(0, total)), reasons: reasons, _breakdown: { market: pred.market, structure: pred.structure, pullback: pbScore, trigger: 0, max: 80 } };
 }
 // ═══════════════════════════════════════════════════════════
 // SWING 결과 추적 시스템
@@ -2447,6 +2475,213 @@ async function checkTrackUpdates(mode){
   }
 }
 
+// ═══════════════════════════════════════════════════════════════
+// C2: 고급 성과 통계 — 승률·기대값·구간별 분석
+// 콘솔에서 `showPerformanceStats()` 호출 시 전체 대시보드 출력
+// 리스크:리워드 기반 기대값 계산으로 "이 엔진이 실제로 돈이 되냐?" 판정
+// ═══════════════════════════════════════════════════════════════
+function calcPerformanceStats(mode){
+  var cfg = TRACK_CFG[mode];
+  if(!cfg) return null;
+  var track = loadTrack(mode);
+
+  // 검증 완료된 것만 (p1 또는 p2 있음)
+  var done = track.filter(function(t){ return t.p1||t.p2; });
+  if(!done.length) return { total: track.length, done: 0 };
+
+  var finalPct = function(t){ return t.p2?t.p2.pct:(t.p1?t.p1.pct:0); };
+
+  // 전체
+  var wins = done.filter(function(t){ return finalPct(t)>0; });
+  var losses = done.filter(function(t){ return finalPct(t)<0; });
+  var flats = done.filter(function(t){ return finalPct(t)===0; });
+  var avgWin  = wins.length   ? wins.reduce(function(s,t){return s+finalPct(t);},0)/wins.length   : 0;
+  var avgLoss = losses.length ? losses.reduce(function(s,t){return s+finalPct(t);},0)/losses.length : 0;
+  var winRate = done.length ? wins.length / done.length : 0;
+
+  // 기대값 (EV) = winRate * avgWin + lossRate * avgLoss
+  // "100번 돌리면 평균 몇 % 수익?" 지표
+  var ev = winRate * avgWin + (1 - winRate) * avgLoss;
+
+  // Profit Factor = 총이익 / 총손실 (1.0 초과해야 돈됨)
+  var totalProfit = wins.reduce(function(s,t){return s+finalPct(t);},0);
+  var totalLoss   = Math.abs(losses.reduce(function(s,t){return s+finalPct(t);},0));
+  var profitFactor = totalLoss > 0 ? totalProfit / totalLoss : null;
+
+  // 점수 구간별 분석 (60+ vs 70+ vs 80+)
+  var byScore = [
+    { range: '50~59', filter: function(t){ return t.score>=50 && t.score<60; } },
+    { range: '60~69', filter: function(t){ return t.score>=60 && t.score<70; } },
+    { range: '70~79', filter: function(t){ return t.score>=70 && t.score<80; } },
+    { range: '80+',   filter: function(t){ return t.score>=80; } },
+  ].map(function(bucket){
+    var inRange = done.filter(bucket.filter);
+    if(!inRange.length) return Object.assign({}, bucket, { count:0 });
+    var w = inRange.filter(function(t){ return finalPct(t)>0; });
+    var avg = inRange.reduce(function(s,t){return s+finalPct(t);},0)/inRange.length;
+    return {
+      range: bucket.range,
+      count: inRange.length,
+      winRate: w.length/inRange.length,
+      avgReturn: avg,
+    };
+  });
+
+  // 최근 30일 vs 전체 (최근 추세)
+  var thirtyAgo = Date.now() - 30*86400000;
+  var recent = done.filter(function(t){ return t.scannedAt >= thirtyAgo; });
+  var recentWins = recent.filter(function(t){ return finalPct(t)>0; });
+  var recentWR = recent.length ? recentWins.length/recent.length : null;
+  var recentEV = null;
+  if(recent.length){
+    var rW = recentWins.length ? recentWins.reduce(function(s,t){return s+finalPct(t);},0)/recentWins.length : 0;
+    var rL = (recent.length-recentWins.length) ? recent.filter(function(t){return finalPct(t)<=0;}).reduce(function(s,t){return s+finalPct(t);},0)/(recent.length-recentWins.length) : 0;
+    recentEV = recentWR*rW + (1-recentWR)*rL;
+  }
+
+  return {
+    mode: mode,
+    total: track.length,
+    done: done.length,
+    wins: wins.length,
+    losses: losses.length,
+    flats: flats.length,
+    winRate: winRate,
+    avgWin: avgWin,
+    avgLoss: avgLoss,
+    ev: ev,
+    profitFactor: profitFactor,
+    byScore: byScore,
+    recent30: { count: recent.length, winRate: recentWR, ev: recentEV },
+  };
+}
+
+function showPerformanceStats(){
+  console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('RECONKR 성과 대시보드');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+  ['momo','swing','core'].forEach(function(mode){
+    var s = calcPerformanceStats(mode);
+    if(!s){ console.log('[' + mode.toUpperCase() + '] TRACK_CFG 없음'); return; }
+    console.log('\n【' + mode.toUpperCase() + '】');
+    console.log('  누적 추적: ' + s.total + ' · 검증 완료: ' + s.done);
+    if(s.done === 0){
+      console.log('  (검증 완료 데이터 없음 — 기간 경과 대기)');
+      return;
+    }
+    var wrPct = Math.round(s.winRate*100);
+    var evStr = s.ev!=null ? (s.ev>=0?'+':'')+s.ev.toFixed(2)+'%' : '-';
+    var pfStr = s.profitFactor!=null ? s.profitFactor.toFixed(2) : '-';
+
+    console.log('  승률: ' + wrPct + '%  ( ' + s.wins + 'W / ' + s.losses + 'L / ' + s.flats + 'E )');
+    console.log('  평균 승/패: +' + s.avgWin.toFixed(2) + '% / ' + s.avgLoss.toFixed(2) + '%');
+    console.log('  기대값(EV): ' + evStr + '/회  · Profit Factor: ' + pfStr + (s.profitFactor>=1.5?' 🚀':s.profitFactor>=1?' ✓':s.profitFactor!=null?' ⚠ 손실 구조':''));
+
+    if(s.recent30.count > 0){
+      console.log('  최근 30일: ' + s.recent30.count + '건 · 승률 ' + Math.round(s.recent30.winRate*100) + '% · EV ' + (s.recent30.ev>=0?'+':'') + s.recent30.ev.toFixed(2) + '%');
+    }
+
+    console.log('  ──────── 점수 구간별 ────────');
+    s.byScore.forEach(function(b){
+      if(b.count === 0) return;
+      var wrb = Math.round(b.winRate*100);
+      var avgb = (b.avgReturn>=0?'+':'')+b.avgReturn.toFixed(1)+'%';
+      console.log('    ' + b.range + ': ' + b.count + '건 · 승률 ' + wrb + '% · 평균 ' + avgb);
+    });
+  });
+
+  console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('해석:');
+  console.log('  · EV > 0 : 이 엔진은 장기적으로 돈이 됨');
+  console.log('  · Profit Factor > 1.5 : 견고한 구조');
+  console.log('  · 구간별 승률 상승 = 점수 체계 신뢰성 검증됨');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+  return ['momo','swing','core'].map(calcPerformanceStats);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// C3: A/B 테스트 — 설정 변경 전후 가상 비교
+// 과거 TRACK 데이터에 새 필터(임계점수, 스테이지 등)를 적용해서
+// "이 설정이면 몇 %가 필터링됐을까" + "그 결과 승률·EV 어떻게 바뀌었을까"
+// ═══════════════════════════════════════════════════════════════
+function simulateFilter(mode, filterFn, label){
+  var track = loadTrack(mode);
+  var done = track.filter(function(t){ return t.p1||t.p2; });
+  var finalPct = function(t){ return t.p2?t.p2.pct:(t.p1?t.p1.pct:0); };
+  if(!done.length) return null;
+
+  var passed = done.filter(filterFn);
+  var filtered = done.filter(function(t){ return !filterFn(t); });
+
+  function calc(arr){
+    if(!arr.length) return { count:0 };
+    var wins = arr.filter(function(t){ return finalPct(t)>0; });
+    var wr = wins.length/arr.length;
+    var avgWin = wins.length ? wins.reduce(function(s,t){return s+finalPct(t);},0)/wins.length : 0;
+    var losses = arr.filter(function(t){ return finalPct(t)<=0; });
+    var avgLoss = losses.length ? losses.reduce(function(s,t){return s+finalPct(t);},0)/losses.length : 0;
+    return {
+      count: arr.length,
+      winRate: wr,
+      avgWin: avgWin,
+      avgLoss: avgLoss,
+      ev: wr*avgWin + (1-wr)*avgLoss,
+    };
+  }
+
+  return {
+    label: label,
+    total: done.length,
+    passed: calc(passed),
+    filtered: calc(filtered),
+  };
+}
+
+// 예시: SWING 임계값 50 vs 60 vs 70 비교
+function compareSwingThresholds(){
+  console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('SWING 임계값 A/B 비교');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+  var thresholds = [50, 60, 70, 80];
+  thresholds.forEach(function(th){
+    var sim = simulateFilter('swing', function(t){ return t.score >= th; }, th+'+');
+    if(!sim){ console.log('[score≥'+th+'] 데이터 없음'); return; }
+    var p = sim.passed;
+    if(p.count === 0){
+      console.log('[score≥'+th+'] 통과 0건');
+      return;
+    }
+    console.log('[score≥'+th+']');
+    console.log('  통과: ' + p.count + '/' + sim.total + ' ('+Math.round(p.count/sim.total*100)+'%)');
+    console.log('  승률: ' + Math.round(p.winRate*100) + '% · EV: ' + (p.ev>=0?'+':'') + p.ev.toFixed(2) + '%');
+    console.log('');
+  });
+
+  console.log('해석: 임계값 올리면 후보 수 줄지만 승률·EV 올라가야 정상');
+  console.log('올렸는데 EV 안 오르면 → 점수 체계에 문제 있음\n');
+}
+
+// 거래대금 미달 종목 실제로 잘 걸러지는지 검증
+function validateTVGate(){
+  var tvThreshold = 50;
+  var sim = simulateFilter('swing', function(t){
+    // t.conditions에 tv 정보 있으면 그걸 사용, 아니면 score가 50+ 인걸 proxy
+    return !(t.conditions && t.conditions.tv_m !== undefined && t.conditions.tv_m < tvThreshold);
+  }, '거래대금 '+tvThreshold+'억+');
+
+  if(!sim || sim.total === 0){
+    console.log('데이터 부족 — 거래대금 게이트 검증 불가');
+    return;
+  }
+  console.log('[거래대금 '+tvThreshold+'억+ 필터]');
+  console.log('  통과: '+sim.passed.count+'건 · 승률 '+Math.round(sim.passed.winRate*100)+'% · EV '+sim.passed.ev.toFixed(2)+'%');
+  console.log('  필터됨: '+sim.filtered.count+'건 · 승률 '+Math.round(sim.filtered.winRate*100)+'% · EV '+sim.filtered.ev.toFixed(2)+'%');
+  console.log('통과 그룹 EV > 필터 그룹 EV 이어야 거래대금 게이트 정당화됨');
+}
+
 function renderTrack(mode){
   var cfg = TRACK_CFG[mode];
   if(!cfg) return;
@@ -2461,24 +2696,57 @@ function renderTrack(mode){
 
   var l1 = cfg.labels[0], l2 = cfg.labels[1];
 
-  // 통계
-  var done = track.filter(function(t){ return t.p1||t.p2; });
-  var finalPct = function(t){ return t.p2?t.p2.pct:(t.p1?t.p1.pct:0); };
-  var wins = done.filter(function(t){ return finalPct(t)>0; });
-  var avgP = done.length ? done.reduce(function(s,t){ return s+finalPct(t); },0)/done.length : null;
-
+  // C2: 고급 성과 통계 (기존 간이 통계 대체)
+  var stats = calcPerformanceStats(mode);
   var statsHtml = '';
-  if(done.length >= 3){
-    var wr    = Math.round(wins.length/done.length*100);
+  if(stats && stats.done >= 3){
+    var wr    = Math.round(stats.winRate*100);
     var wrCol = wr>=55?'var(--g)':wr>=45?'var(--gold)':'var(--r)';
-    var avgS  = avgP!==null?(avgP>=0?'+':'')+avgP.toFixed(1)+'%':'-';
+    var evStr = stats.ev!=null ? (stats.ev>=0?'+':'')+stats.ev.toFixed(1)+'%' : '-';
+    var evCol = stats.ev>=0 ? 'var(--g)' : 'var(--r)';
+    var pfStr = stats.profitFactor!=null ? stats.profitFactor.toFixed(1) : '-';
+    var pfCol = stats.profitFactor>=1.5 ? 'var(--g)' : stats.profitFactor>=1 ? 'var(--gold)' : 'var(--r)';
+
     statsHtml =
-      '<div style="display:flex;gap:12px;padding:8px 14px;border-bottom:1px solid var(--b);font-family:var(--mono);font-size:11px">'+
-      '<span>추적 <b>'+track.length+'</b></span>'+
-      '<span>검증 <b>'+done.length+'</b></span>'+
+      '<div style="padding:8px 14px;border-bottom:1px solid var(--b);font-family:var(--mono);font-size:10px">'+
+      '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:4px">'+
+      '<span>추적 <b>'+stats.total+'</b></span>'+
+      '<span>검증 <b>'+stats.done+'</b></span>'+
       '<span>승률 <b style="color:'+wrCol+'">'+wr+'%</b></span>'+
-      '<span>평균 <b style="color:'+(avgP>=0?'var(--g)':'var(--r)')+'">'+avgS+'</b></span>'+
+      '<span>EV <b style="color:'+evCol+'">'+evStr+'</b></span>'+
+      '<span title="Profit Factor: 총이익÷총손실 · 1.5+ 견고">PF <b style="color:'+pfCol+'">'+pfStr+'</b></span>'+
       '</div>';
+
+    // 점수 구간별 미니 바 (검증 2+ 있는 구간만)
+    var bucketsWithData = stats.byScore.filter(function(b){ return b.count>=2; });
+    if(bucketsWithData.length >= 2){
+      statsHtml += '<div style="margin-top:4px;padding-top:4px;border-top:1px dashed var(--b)">'+
+        '<div style="color:var(--t3);font-size:9px;margin-bottom:3px">점수 구간별 승률</div>'+
+        bucketsWithData.map(function(b){
+          var wrb = Math.round(b.winRate*100);
+          var wrbCol = wrb>=55?'var(--g)':wrb>=45?'var(--gold)':'var(--r)';
+          return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:2px">'+
+            '<span style="color:var(--t3);width:38px">'+b.range+'</span>'+
+            '<div style="flex:1;height:3px;background:var(--bg3);border-radius:2px;overflow:hidden">'+
+              '<div style="height:100%;width:'+wrb+'%;background:'+wrbCol+'"></div>'+
+            '</div>'+
+            '<span style="color:'+wrbCol+';width:32px;text-align:right">'+wrb+'%</span>'+
+            '<span style="color:var(--t3);width:20px;text-align:right">'+b.count+'건</span>'+
+          '</div>';
+        }).join('')+
+        '</div>';
+    }
+
+    // 최근 30일 vs 전체
+    if(stats.recent30.count >= 3){
+      var rWR = Math.round(stats.recent30.winRate*100);
+      var rEV = stats.recent30.ev!=null ? (stats.recent30.ev>=0?'+':'')+stats.recent30.ev.toFixed(1)+'%' : '-';
+      var trend = rWR > wr+5 ? '📈' : rWR < wr-5 ? '📉' : '→';
+      statsHtml += '<div style="margin-top:4px;padding-top:4px;border-top:1px dashed var(--b);color:var(--t3);font-size:9px">'+
+        '최근 30일: '+stats.recent30.count+'건 · 승률 '+rWR+'% · EV '+rEV+' '+trend+
+        '</div>';
+    }
+    statsHtml += '</div>';
   }
 
   var header =
@@ -2828,6 +3096,41 @@ async function runScreener(mode){
 } // end runScreener
 
 // ─────────────────────────────────────────────────────────────
+// 리스트 단계에서 SWING 실전 예상 점수 계산 (Layer A+B만, 간이 버전)
+// swingEngine과 동일 로직이되 리스트 데이터로만 판단 → 실제 카드 점수와 근사
+// Layer C (눌림목) + D (트리거)는 실시간 swingData 필요 → 여기선 제외
+// 따라서 이 예측값은 "최대 50점" (20+30) 중 얼마나 받을지
+// ─────────────────────────────────────────────────────────────
+function predictSwingScore(s){
+  var d = s._daily; if(!d) return null;
+  var price = s.price || 0;
+  var tv = s.tv || (d.tv_prev ? d.tv_prev/100000000 : 0);
+
+  // Layer A (max 20)
+  var mkt = 0;
+  if(G.spyAboveMA200 === true) mkt += 8;
+  var kc = G.spyIntraday ? G.spyIntraday.change_pct : null;
+  if(kc===null) mkt += 7;
+  else if(kc>0.8) mkt += 12;
+  else if(kc>0.3) mkt += 10;
+  else if(kc>-0.3) mkt += 7;
+  else if(kc>-0.8) mkt += 3;
+
+  // Layer B (max 30)
+  var str = 0;
+  if(d.ma20 && d.ma60 && d.ma20 > d.ma60) str += 8;
+  if(d.ma60 && price && price > d.ma60 * 1.03) str += 8;
+  else if(d.ma60 && price && price > d.ma60) str += 4;
+  if(d.ma60_slope !== null && d.ma60_slope >= 0) str += 4;
+  var swingMa20Max = parseFloat(((document.getElementById('swingMa20Max')||{textContent:'10%'}).textContent||'10%').replace('%',''))||10;
+  if(d.ma20_gap !== null && d.ma20_gap >= -5 && d.ma20_gap <= swingMa20Max) str += 4;
+  if(tv >= 100) str += 3;
+  else if(tv >= 50) str += 1;
+
+  return { total: mkt + str, market: mkt, structure: str, max: 50 };
+}
+
+// ─────────────────────────────────────────────────────────────
 // 리스트 단계에서 예상 BLOCK 사유 사전 감지
 // 리스트 점수는 가점 위주라 BLOCK 게이트 반영 안 됨 →
 // 카드 열었을 때 BLOCK 되는 종목을 미리 배지로 표시해서 사용자 혼란 방지
@@ -2897,7 +3200,11 @@ function renderScreenerResults(mode){
 
   var html = '';
   results.forEach(function(s, i){
-    var ringClass = s._score>=70?'high':s._score>=50?'mid':'low';
+    // SWING은 A2 통합으로 80pt 만점 (A+B+C), MOMO/CORE는 100pt 그대로
+    // 임계값도 비율 기반으로 통일
+    var scoreMax = mode==='swing' ? 80 : 100;
+    var scorePct = s._score / scoreMax;
+    var ringClass = scorePct>=0.7?'high':scorePct>=0.5?'mid':'low';
     var chgStr    = (s.chgPct>=0?'+':'')+s.chgPct.toFixed(1)+'%';
     var chgColor  = s.chgPct>0?'var(--g)':s.chgPct<0?'var(--r)':'var(--t2)';
 
@@ -2908,7 +3215,9 @@ function renderScreenerResults(mode){
       ? '<span class="sc-risk-badge" title="'+blockRisks.join(' · ')+'">⚠ BLOCK 예상</span>'
       : '';
 
-    var hotBadge  = s._score>=minScoreForMode && !isBlockRisk
+    // 후보 기준도 비율 기반 (SWING: 80점 중 60% = 48+ 가 후보)
+    var candThreshold = mode==='swing' ? 48 : minScoreForMode;
+    var hotBadge  = s._score >= candThreshold && !isBlockRisk
       ? '<span style="font-family:var(--mono);font-size:9px;padding:2px 5px;border-radius:3px;background:rgba(255,106,0,.12);color:var(--gold);border:1px solid rgba(255,106,0,.25)">후보</span>'+
         (mode==='swing'?'<span style="font-family:var(--mono);font-size:9px;padding:2px 5px;border-radius:3px;background:rgba(43,159,255,.08);color:var(--t3);border:1px solid var(--b);margin-left:3px">트리거 확인 필요</span>':'')
       : '';
@@ -2920,6 +3229,14 @@ function renderScreenerResults(mode){
     var blockReason = isBlockRisk
       ? '<div style="font-family:var(--mono);font-size:9px;color:var(--r);margin-top:2px;opacity:0.85">⚠ '+blockRisks[0]+'</div>'
       : '';
+
+    // SWING 리스트 점수는 이미 predictSwingScore 기반(A+B+C 통합, 80pt 만점)
+    // 카드에서 추가되는 건 Layer D(트리거 20pt)만. 이를 사용자에게 투명하게 고지
+    var predictBadge = '';
+    if(mode === 'swing' && s._score > 0){
+      var remaining = 20; // Layer D 트리거 최대 20점
+      predictBadge = '<div style="font-family:var(--mono);font-size:9px;color:var(--t3);margin-top:2px;text-align:right;opacity:0.7" title="리스트 점수는 Layer A+B+C(80pt 만점). 카드에서 Layer D(트리거) 최대 +20pt 추가 평가됨">+D(트리거) 카드서 ~+'+remaining+'pt</div>';
+    }
 
     html +=
       '<div class="sc-candidate" onclick="scCandidateTap(\''+s.symbol+'\',\''+mode+'\')">'+
@@ -2940,6 +3257,7 @@ function renderScreenerResults(mode){
           '<div style="text-align:right">'+
             '<div class="sc-chg" style="color:'+chgColor+'">'+chgStr+'</div>'+
             '<div style="font-family:var(--mono);font-size:10px;color:var(--t2);margin-top:1px">₩'+Math.round(s.price).toLocaleString()+'</div>'+
+            predictBadge+
           '</div>'+
           '<div class="sc-score-ring '+ringClass+'" style="'+ringStyle+'">'+s._score+'</div>'+
         '</div>'+
@@ -5087,6 +5405,21 @@ function momoEngine(ydata){
     pullback_rr:     ydata.pullback_rr     || null,
   };
 
+  // ── 시간대 기록 (MOMO는 장중 실시간 기반) ──
+  var _ta = getTimeAwareness();
+  r._timeAwareness = {
+    phase: _ta.phase,
+    livePrice: _ta.hasLivePrice && !!ydata.price,
+    liveTrigger: _ta.hasLiveTrigger,
+    dailyStructure: _ta.hasDailyData,
+  };
+  // MOMO는 장외 시간대엔 신규 진입 불가 — 조기 BLOCK (단 분석 자체는 진행)
+  // 장중이 아니면 결과에 flag만 남기고 기존 점수 계산은 그대로 진행
+  // (사용자가 "어제/내일 이 종목 MOMO로 적합했을까" 참고 가능)
+  if(!_ta.allowMomoEntry){
+    r.warnings.push('[시간대] '+_ta.phase+' — MOMO 신규 진입 시간 아님 (참고용 분석)');
+  }
+
   var gap  = ydata.gap_pct              || 0;
   var tv   = ydata.trading_value_ratio  || 0;
   var tvM  = ydata.trading_value_m      || 0;
@@ -5321,8 +5654,14 @@ function swingEngine(ydata, swingData){
     swing_grade:null,        // 'A' | 'B' | null
     wait_reason:null,        // 'structure' | 'trigger'
     swing_score_layers:null, // {market, structure, pullback, trigger}
+    decision_path: [],       // B1: 결정 경로 추적
   };
-  if(!swingData){ r.blockers.push('기술 데이터 부족'); r.action='BLOCK'; return r; }
+  if(!swingData){
+    r.blockers.push('기술 데이터 부족'); r.action='BLOCK';
+    r.decision_path.push({gate:'입력',status:'block',note:'swingData 없음'});
+    return r;
+  }
+  r.decision_path.push({gate:'입력',status:'pass',note:'일봉/시세 데이터 확인'});
 
   r.conditions_met = swingData.conditions_met || 0;
   r.swing_detail   = swingData.condition_detail || [];
@@ -5338,9 +5677,20 @@ function swingEngine(ydata, swingData){
   var swingMa20Max= parseFloat(((document.getElementById('swingMa20Max')||{textContent:'10%'}).textContent||'10%').replace('%',''))||10;
   var tv_m = ydata.trading_value_m || 0;
 
-  // ── 실시간 가격 없음 (장 마감 후) → 일봉 기반 구조 분석만 ──
-  var hasRealtimePrice = price && price > 0 && G.marketPhase !== 'CLOSED';
-  r._swingScoreType = hasRealtimePrice ? 'LIVE' : 'PREP'; // LIVE=장중 / PREP=장마감
+  // ── 시간대 인식 (TimeAwareness 유틸) ──
+  // Layer C (눌림목 품질) — 일봉 기반이므로 장 마감 후에도 계산 가능
+  // Layer D (실시간 트리거) — 장 중 거래량/양봉 기반이라 장 마감 후 불가
+  var _ta = getTimeAwareness();
+  var hasLivePrice   = _ta.hasLivePrice && price && price > 0;
+  var hasLiveTrigger = _ta.hasLiveTrigger && price && price > 0;
+  var hasStructure   = _ta.hasDailyData;  // Layer C: 일봉 기반 (항상 가능)
+  r._swingScoreType  = (hasLivePrice && hasLiveTrigger) ? 'LIVE' : hasStructure ? 'PREP' : 'UNAVAILABLE';
+  r._timeAwareness   = {
+    phase: _ta.phase,
+    livePrice: hasLivePrice,
+    liveTrigger: hasLiveTrigger,
+    dailyStructure: hasStructure,
+  };
 
   // ════════════════════════════════════════
   // 진입각 계산 (게이트 전에 필요)
@@ -5382,24 +5732,39 @@ function swingEngine(ydata, swingData){
   // G1. MA60 위 (기관 수급선 위) — 스윙은 일봉 기준이므로 항상 체크
   if(ma60 && price && price < ma60){
     r.blockers.push('[G1] MA60(₩'+Math.round(ma60).toLocaleString()+') 아래 — 수급선 이탈');
-    r.action='BLOCK'; return r;
+    r.action='BLOCK';
+    r.decision_path.push({gate:'G1 MA60',status:'block',note:'MA60 이탈 (가격 '+price+' < '+Math.round(ma60)+')'});
+    return r;
   }
+  r.decision_path.push({gate:'G1 MA60',status:'pass',note: ma60 ? 'MA60 '+Math.round(ma60)+' 위' : 'MA60 데이터 없음'});
+
   // G2. 최소 거래대금
   if(tv_m > 0 && tv_m < swingMinTV){
     r.blockers.push('[G2] 거래대금 '+tv_m+'억 — 최소 '+swingMinTV+'억 미달');
-    r.action='BLOCK'; return r;
+    r.action='BLOCK';
+    r.decision_path.push({gate:'G2 거래대금',status:'block',note:tv_m+'억 < '+swingMinTV+'억'});
+    return r;
   }
+  r.decision_path.push({gate:'G2 거래대금',status:'pass',note: tv_m>0 ? tv_m+'억 ≥ '+swingMinTV+'억' : '데이터 없음 (스킵)'});
+
   // G3. 최소 R:R
   if(r.rr !== null && r.rr < swingMinRR){
     r.blockers.push('[G3] R:R '+r.rr+' — 최소 '+swingMinRR+' 미달');
-    r.action='BLOCK'; return r;
+    r.action='BLOCK';
+    r.decision_path.push({gate:'G3 R:R',status:'block',note:'R:R '+r.rr+' < '+swingMinRR});
+    return r;
   }
+  r.decision_path.push({gate:'G3 R:R',status:'pass',note: r.rr!==null ? 'R:R '+r.rr : '가격 없음 (계산 불가)'});
+
   // G4. 시장 CRASH 수준 (당일 -1.5%+ 폭락)
   var kospiChgSW = G.spyIntraday ? G.spyIntraday.change_pct : null;
   if(kospiChgSW !== null && kospiChgSW <= -1.5){
     r.blockers.push('[G4] KOSPI '+kospiChgSW.toFixed(1)+'% — 시장 충격, 신규 SWING 금지');
-    r.action='BLOCK'; return r;
+    r.action='BLOCK';
+    r.decision_path.push({gate:'G4 시장충격',status:'block',note:'KOSPI '+kospiChgSW.toFixed(1)+'%'});
+    return r;
   }
+  r.decision_path.push({gate:'G4 시장충격',status:'pass',note: kospiChgSW!==null ? 'KOSPI '+(kospiChgSW>=0?'+':'')+kospiChgSW.toFixed(1)+'%' : '데이터 없음'});
 
   // ════════════════════════════════════════
   // Layer A — 시장 점수 (20점)
@@ -5417,6 +5782,20 @@ function swingEngine(ydata, swingData){
     else if(kospiChgSW > -0.8) { mktScore += 3;  r.warnings.push('KOSPI '+kospiChgSW.toFixed(1)+'% — 시장 약세'); }
     else                        { /* -0.8 ~ -1.5%: G4 아래에서 경고, 여기선 0점 */ r.warnings.push('KOSPI '+kospiChgSW.toFixed(1)+'% — 포지션 50% 제한'); }
   } else { mktScore += 7; } // 데이터 없으면 중립 (보합 수준)
+
+  // Layer A breakdown
+  r.layer_breakdown = { market: [], structure: [], pullback: [], trigger: [] };
+  r.layer_breakdown.market.push({
+    label: 'KOSPI 120일선 위',
+    got: G.spyAboveMA200===true?8:0, max:8,
+    ok: G.spyAboveMA200===true
+  });
+  var _kospiPts = kospiChgSW===null?7 : kospiChgSW>0.8?12 : kospiChgSW>0.3?10 : kospiChgSW>-0.3?7 : kospiChgSW>-0.8?3 : 0;
+  r.layer_breakdown.market.push({
+    label: '당일 KOSPI 레짐'+(kospiChgSW===null?' (데이터없음)':' ('+kospiChgSW.toFixed(1)+'%)'),
+    got: _kospiPts, max: 12,
+    ok: _kospiPts >= 7
+  });
 
   // ════════════════════════════════════════
   // Layer B — 구조 점수 (30점)
@@ -5445,12 +5824,49 @@ function swingEngine(ydata, swingData){
     else if(swingData.rs20 < -3) { strScore -= 2; r.warnings.push('RS20 '+swingData.rs20+'%p — 상대 약세'); }
   }
 
+  // Layer B breakdown — A3 데이터 신뢰도 필드 추가
+  // confidence: 'full' = 데이터 있고 조건 평가됨
+  //             'missing' = 데이터 누락으로 평가 불가 (조건 실패와 구분)
+  //             'partial' = 부분 데이터만 사용
+  var _b1 = (ma20&&ma60&&ma20>ma60) ? 8 : 0;
+  var _b2 = (ma60&&price&&price>ma60*1.03) ? 8 : (ma60&&price&&price>ma60 ? 4 : 0);
+  var _b3 = (swingData.ma60_slope!==null&&swingData.ma60_slope>=0) ? 4 : 0;
+  var _b4 = (swingData.ma20_gap_pct!==null&&swingData.ma20_gap_pct>=-5&&swingData.ma20_gap_pct<=swingMa20Max) ? 4 : 0;
+  var _b5 = tv_m>=100 ? 3 : (tv_m>=50 ? 1 : 0);
+  var _b6 = swingData.rs20===null ? 0 : swingData.rs20>=5 ? 3 : swingData.rs20>=0 ? 1 : swingData.rs20<-3 ? -2 : 0;
+  r.layer_breakdown.structure.push({
+    label:'MA20>MA60 정배열', got:_b1, max:8, ok:_b1>0,
+    confidence: (ma20&&ma60) ? 'full' : 'missing'
+  });
+  r.layer_breakdown.structure.push({
+    label:'현재가 MA60 +3% 이상', got:_b2, max:8, ok:_b2===8, partial:_b2===4,
+    confidence: (ma60&&price) ? 'full' : 'missing'
+  });
+  r.layer_breakdown.structure.push({
+    label:'MA60 기울기 우상향', got:_b3, max:4, ok:_b3>0,
+    confidence: swingData.ma60_slope!==null ? 'full' : 'missing'
+  });
+  r.layer_breakdown.structure.push({
+    label:'MA20 이격도 적정(-5%~+'+swingMa20Max+'%)', got:_b4, max:4, ok:_b4>0,
+    confidence: swingData.ma20_gap_pct!==null ? 'full' : 'missing'
+  });
+  r.layer_breakdown.structure.push({
+    label:'거래대금'+(tv_m>0?' '+Math.round(tv_m)+'억':''), got:_b5, max:3, ok:_b5===3, partial:_b5===1,
+    confidence: tv_m>0 ? 'full' : 'missing'
+  });
+  r.layer_breakdown.structure.push({
+    label:'RS20 상대강도'+(swingData.rs20!==null?' '+swingData.rs20+'%p':''), got:_b6, max:3, ok:_b6>=3, partial:_b6>0,
+    confidence: swingData.rs20!==null ? 'full' : 'missing'
+  });
+
   // ════════════════════════════════════════
   // Layer C — 눌림목 품질 (30점)
-  // 실시간 가격 필요 — CLOSED 시간대에는 0점
+  // ════════════════════════════════════════
+  // Layer C — 눌림목 품질 (30점)
+  // 일봉 기반이므로 장 마감 후에도 작동 (hasStructure 필요)
   // ════════════════════════════════════════
   var pbScore = 0;
-  if(hasRealtimePrice){
+  if(hasStructure){
   // C1. 고점 대비 조정폭 — 한국 시장 기준 [연구 기반, 검증 예정]
   // 최적: -3~-7% / 허용: -7~-10% / 얕은눌림: 0~-3% / 과도: <-10%
   var depthPct = swingData.pullback_depth_pct;
@@ -5482,16 +5898,46 @@ function swingEngine(ydata, swingData){
     else if(swingData.rsi14 < 40)  { r.warnings.push('RSI '+swingData.rsi14+' — 과매도, 추가 하락 가능'); }
     else if(swingData.rsi14 > swingRsiMax){ r.warnings.push('RSI '+swingData.rsi14+' — 과매수 (기준 '+swingRsiMax+'), 눌림 기다릴 것'); }
   }
-  } // end hasRealtimePrice (Layer C)
+
+  // Layer C breakdown — 데이터 신뢰도 포함
+  var _c1 = depthPct===null?0 : (depthPct>=-7&&depthPct<=-3)?10 : (depthPct>-3&&depthPct<=0)?6 : (depthPct<-7&&depthPct>=-10)?6 : (depthPct<=-swingPbMax)?2 : 0;
+  var _c2 = gap20===null?0 : (gap20>=0&&gap20<=3)?8 : (gap20>3&&gap20<=7)?5 : (gap20>7&&gap20<=10)?3 : (gap20>=-2&&gap20<0)?3 : (gap20>=-5&&gap20<-2)?1 : 0;
+  var _c3 = swingData.pullback_vol_quiet ? 5 : 0;
+  var _c4 = swingData.no_consecutive_bear ? 4 : 0;
+  var _c5 = (swingData.rsi14!==null&&swingData.rsi14>=40&&swingData.rsi14<=swingRsiMax) ? 3 : 0;
+  r.layer_breakdown.pullback.push({
+    label:'조정폭 적정(-3%~-7%)'+(depthPct!==null?' '+depthPct+'%':''),
+    got:_c1, max:10, ok:_c1===10, partial:_c1>0&&_c1<10,
+    confidence: depthPct!==null ? 'full' : 'missing'
+  });
+  r.layer_breakdown.pullback.push({
+    label:'MA20 위치 최적(0~3%)'+(gap20!==null?' '+gap20.toFixed(1)+'%':''),
+    got:_c2, max:8, ok:_c2===8, partial:_c2>0&&_c2<8,
+    confidence: gap20!==null ? 'full' : 'missing'
+  });
+  r.layer_breakdown.pullback.push({
+    label:'눌림 거래량 수축', got:_c3, max:5, ok:_c3>0,
+    confidence: swingData.pullback_vol_quiet!==undefined ? 'full' : 'missing'
+  });
+  r.layer_breakdown.pullback.push({
+    label:'연속 대형 음봉 없음', got:_c4, max:4, ok:_c4>0,
+    confidence: swingData.no_consecutive_bear!==undefined ? 'full' : 'missing'
+  });
+  r.layer_breakdown.pullback.push({
+    label:'RSI 정상범위(40~'+swingRsiMax+')'+(swingData.rsi14!==null?' '+swingData.rsi14:''),
+    got:_c5, max:3, ok:_c5>0,
+    confidence: swingData.rsi14!==null ? 'full' : 'missing'
+  });
+  } // end hasStructure (Layer C)
 
   // ════════════════════════════════════════
   // Layer D — 트리거 (최대 15pt)
-  // 실시간 가격 필요 — CLOSED 시간대에는 0점
+  // 실시간 가격+거래량 필요 — 장 마감 후·NXT 시간대에는 0점
   // ════════════════════════════════════════
   var trigScore = 0;
   var kisConnected = !!(swingData._kisUpdated);
   var trigCap = 15;
-  if(hasRealtimePrice){
+  if(hasLiveTrigger){
   // D1/D3 통합: 계단형 점수
   if(swingData.bullish_candle && swingData.vol_ratio && swingData.vol_ratio >= 1.3){
     trigScore += 5; r.signals.push('거래량 동반 양봉 ('+swingData.vol_ratio+'x)');
@@ -5506,11 +5952,38 @@ function swingEngine(ydata, swingData){
   if(!kisConnected && trigScore >= 10){
     r.warnings.push('KIS 미연결 — 트리거 판단 야후 일봉 기준 (장중 미완성 캔들 주의)');
   }
-  } // end hasRealtimePrice (Layer D)
 
-  // CLOSED 시간대 안내
-  if(!hasRealtimePrice){
-    r.warnings.push('[PREP] 실시간 가격 없음 — Layer C/D 비활성, 구조 점수만 유효');
+  // Layer D breakdown — 장외시간엔 confidence='unavailable' (시간대 제약)
+  var _d1 = (swingData.bullish_candle&&swingData.vol_ratio&&swingData.vol_ratio>=1.3) ? 5 : (swingData.bullish_candle ? 2 : 0);
+  var _d2 = swingData.broke_prev3d_high ? 5 : 0;
+  var _d3 = swingData.close_upper_40pct ? 5 : 0;
+  r.layer_breakdown.trigger.push({
+    label:'거래량 동반 양봉(1.3x↑)'+(swingData.vol_ratio?' '+swingData.vol_ratio+'x':''),
+    got:_d1, max:5, ok:_d1===5, partial:_d1===2,
+    confidence: 'full'
+  });
+  r.layer_breakdown.trigger.push({
+    label:'최근 3일 고가 돌파', got:_d2, max:5, ok:_d2>0, confidence:'full'
+  });
+  r.layer_breakdown.trigger.push({
+    label:'종가 캔들 상단 40%', got:_d3, max:5, ok:_d3>0, confidence:'full'
+  });
+  } // end hasLiveTrigger (Layer D)
+
+  // hasLiveTrigger = false 일 때도 breakdown 항목 3개 채워줌 (카드에 "장외 시간" 이유 표시)
+  if(!hasLiveTrigger){
+    r.layer_breakdown.trigger.push({ label:'거래량 동반 양봉', got:0, max:5, ok:false, confidence:'unavailable' });
+    r.layer_breakdown.trigger.push({ label:'최근 3일 고가 돌파', got:0, max:5, ok:false, confidence:'unavailable' });
+    r.layer_breakdown.trigger.push({ label:'종가 캔들 상단 40%', got:0, max:5, ok:false, confidence:'unavailable' });
+  }
+
+  // PREP/UNAVAILABLE 시간대 안내 — 사용자에게 투명하게 공개
+  if(!hasLiveTrigger){
+    if(hasStructure){
+      r.warnings.push('[PREP] 장외 시간대 — 구조(A+B+C 80점) 기반 분석, 트리거(D)는 장중 재평가 필요');
+    } else {
+      r.warnings.push('[UNAVAILABLE] 일봉 데이터 부족 — 분석 제한');
+    }
   }
 
   // ════════════════════════════════════════
@@ -5520,8 +5993,8 @@ function swingEngine(ydata, swingData){
   // ════════════════════════════════════════
   var whaleBonus = 0;
   var whaleR = { stage:'NORMAL' };
-  if(hasRealtimePrice && ydata){
-    // TOXIC만 판별 (키워드 기반 — 명확한 신호)
+  if(ydata){
+    // TOXIC만 판별 (뉴스 키워드 기반 — 시간 무관하게 항상 체크)
     var _nwTx = (ydata.newsText || '').toLowerCase();
     if(_nwTx.includes('관리종목') || _nwTx.includes('투자경고') ||
        _nwTx.includes('횡령')     || _nwTx.includes('배임')     ||
@@ -5550,23 +6023,39 @@ function swingEngine(ydata, swingData){
 
   // ════════════════════════════════════════
   // 액션 결정
-  // ENTER_A: 총점 80+ AND 트리거 15+
-  // ENTER_B: 총점 70+ AND 트리거 10+
-  // WAIT:    총점 50+ (트리거 부족 or 구조 미완)
-  // BLOCK:   총점 50 미만
+  // ENTER_A:     총점 80+ AND 트리거 15+                 (장중만, 즉시 진입)
+  // ENTER_B:     총점 70+ AND 트리거 10+                 (장중만, 소량 진입)
+  // WATCH_READY: 구조점수(A+B+C) 55+ + 장외시간          (트리거 확인 대기)
+  // WATCH:       총점 50+ (트리거 부족 or 구조 미완)
+  // BLOCK:       총점 50 미만
   // ════════════════════════════════════════
   var posSize = 'none';
   // 시장 약세 시 포지션 50% 캡
   var mktHalfCap = (kospiChgSW !== null && kospiChgSW <= -0.8 && kospiChgSW > -1.5);
 
-  if(r.score >= 80 && trigScore >= 15){
+  // 구조 점수(A+B+C) — 장외 시간대 판정용 (트리거 D 제외 총 80점 만점)
+  var structureScore = mktScore + strScore + pbScore;
+
+  if(hasLiveTrigger && r.score >= 80 && trigScore >= 15){
+    // 장중 + 고점수 + 강한 트리거 → ENTER A
     r.action = 'ENTER';
     r.swing_grade = 'A';
     posSize = mktHalfCap ? 'quarter(25%)' : 'half(50%)';
-  } else if(r.score >= 70 && trigScore >= 10){
+    r.decision_path.push({gate:'액션',status:'enter',note:'ENTER A · '+r.score+'pt · 트리거 '+trigScore+'/15'});
+  } else if(hasLiveTrigger && r.score >= 70 && trigScore >= 10){
+    // 장중 + 중점수 + 중간 트리거 → ENTER B
     r.action = 'ENTER';
     r.swing_grade = 'B';
     posSize = 'quarter(25%)';
+    r.decision_path.push({gate:'액션',status:'enter',note:'ENTER B · '+r.score+'pt · 트리거 '+trigScore+'/10'});
+  } else if(!hasLiveTrigger && hasStructure && structureScore >= 55){
+    // 장외 + 구조 55+ → READY (다음 장에서 트리거 확인 대상)
+    r.action = 'WATCH';
+    r.swing_grade = null;
+    r.wait_reason = 'market_closed';
+    r.ready_for_next_session = true;
+    r.warnings.push('[READY] 구조 '+structureScore+'/80pt — 다음 장에서 트리거(D) 확인 대기');
+    r.decision_path.push({gate:'액션',status:'ready',note:'READY · 구조 '+structureScore+'/80 · 다음장 트리거 대기'});
   } else if(r.score >= 50){
     r.action = 'WATCH';
     r.swing_grade = null;
@@ -5575,16 +6064,256 @@ function swingEngine(ydata, swingData){
       ? '구조 양호 — 트리거 대기 (양봉/거래량/고가돌파 확인 후 진입)'
       : '종목 후보 — 눌림목/이격 조건 보완 중';
     r.warnings.push('[WAIT] '+waitMsg);
+    r.decision_path.push({gate:'액션',status:'watch',note:'WATCH · '+r.score+'pt · '+r.wait_reason+' 보완 중'});
   } else {
     r.action = 'BLOCK';
     r.blockers.push('[점수] '+r.score+'pt — SWING 기준 미달 (최소 50pt)');
+    r.decision_path.push({gate:'액션',status:'block',note:'BLOCK · '+r.score+'pt < 50'});
   }
 
   r.position_size = posSize;
   return r;
 }
 
-// ── CORE 결정 엔진 ──
+// ═══════════════════════════════════════════════════════════════
+// B2: 엣지 케이스 자동 테스트 (SWING)
+// 콘솔에서 `runSwingEdgeTests()` 호출로 실행
+// 예상 동작 vs 실제 동작 비교 → 회귀 방지
+// ═══════════════════════════════════════════════════════════════
+function runSwingEdgeTests(){
+  var cases = [
+    {
+      name: '거래대금 미달 BLOCK (G2)',
+      ydata: { price: 10000, trading_value_m: 30 },
+      swingData: { ma5:10500, ma20:10300, ma60:9800, ma60_slope:1, ma20_gap_pct:0, rs20:0 },
+      expect: { action: 'BLOCK', includes: '거래대금' }
+    },
+    {
+      name: 'MA60 이탈 BLOCK (G1)',
+      ydata: { price: 9500, trading_value_m: 100 },
+      swingData: { ma5:9800, ma20:9600, ma60:10000, ma60_slope:0 },
+      expect: { action: 'BLOCK', includes: 'MA60' }
+    },
+    {
+      name: '완벽한 ENTER A 조건 (장중)',
+      ydata: { price: 11000, trading_value_m: 200 },
+      swingData: {
+        ma5:10900, ma20:10500, ma60:10000, ma60_slope:3,
+        ma20_gap_pct: 2, rs20: 8, pullback_depth_pct: -4,
+        pullback_vol_quiet: true, no_consecutive_bear: true, rsi14: 55,
+        bullish_candle: true, vol_ratio: 1.8, broke_prev3d_high: true,
+        close_upper_40pct: true, _kisUpdated: true
+      },
+      expect: { scoreMin: 80, trigMin: 15 }  // 장중 조건 안맞을 수 있어 점수만 체크
+    },
+    {
+      name: 'TOXIC 키워드 즉시 BLOCK',
+      ydata: { price: 10000, trading_value_m: 100, newsText: '관리종목 지정' },
+      swingData: { ma5:10500, ma20:10300, ma60:9800, ma60_slope:1, ma20_gap_pct:0 },
+      expect: { action: 'BLOCK', includes: 'TOXIC' }
+    },
+    {
+      name: '일봉 데이터 없을 때',
+      ydata: { price: 10000 },
+      swingData: null,
+      expect: { action: 'BLOCK', includes: '데이터 부족' }
+    },
+    {
+      name: '빈 swingData',
+      ydata: { price: 10000 },
+      swingData: {},
+      expect: { decisionPathMin: 3 }  // 게이트 몇 개 통과 로그 필수
+    },
+  ];
+
+  var results = [];
+  cases.forEach(function(tc){
+    try{
+      var r = swingEngine(tc.ydata, tc.swingData);
+      var pass = true;
+      var reasons = [];
+      var e = tc.expect;
+
+      if(e.action && r.action !== e.action){
+        pass = false;
+        reasons.push('action '+r.action+' (expected '+e.action+')');
+      }
+      if(e.includes){
+        var haystack = (r.blockers||[]).concat(r.warnings||[]).join(' | ');
+        if(!haystack.includes(e.includes)){
+          pass = false;
+          reasons.push("'"+e.includes+"' not in blockers/warnings");
+        }
+      }
+      if(e.scoreMin !== undefined && r.score < e.scoreMin){
+        pass = false;
+        reasons.push('score '+r.score+' < '+e.scoreMin);
+      }
+      if(e.trigMin !== undefined){
+        var tScore = r.swing_score_layers ? (r.swing_score_layers.trigger||0) : 0;
+        if(tScore < e.trigMin){
+          pass = false;
+          reasons.push('trigger '+tScore+' < '+e.trigMin);
+        }
+      }
+      if(e.decisionPathMin !== undefined){
+        var dp = (r.decision_path||[]).length;
+        if(dp < e.decisionPathMin){
+          pass = false;
+          reasons.push('decision_path '+dp+' < '+e.decisionPathMin);
+        }
+      }
+      results.push({ name: tc.name, pass: pass, score: r.score, action: r.action, reasons: reasons });
+    } catch(err){
+      results.push({ name: tc.name, pass: false, reasons: ['THROWN: '+err.message] });
+    }
+  });
+
+  var passCount = results.filter(function(r){ return r.pass; }).length;
+  console.log('═══ SWING Edge Tests: '+passCount+'/'+results.length+' pass ═══');
+  results.forEach(function(r){
+    var icon = r.pass ? '✅' : '❌';
+    console.log(icon, r.name, r.pass?'':'| ' + r.reasons.join(' · '), r.pass?'(score='+r.score+' action='+r.action+')':'');
+  });
+  return results;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// B2: TimeAwareness 자가검증 (시간대 로직이 의도대로 작동하는지)
+// ═══════════════════════════════════════════════════════════════
+function runTimeAwarenessTests(){
+  var phases = ['CLOSED','PRE','ORB','EARLY','PRIME','LATE','NXT_AFTER'];
+  var origPhase = G.marketPhase;
+  var results = [];
+
+  phases.forEach(function(ph){
+    G.marketPhase = ph;
+    var ta = getTimeAwareness();
+    // 불변식:
+    //  - hasLiveTrigger는 항상 hasLivePrice 부분집합
+    //  - allowMomoEntry는 hasLiveTrigger 부분집합 (LATE는 예외 — MOMO는 LATE 진입 금지)
+    //  - allowCoreEntry는 항상 true
+    //  - hasStructure는 항상 true (일봉은 언제나 있음)
+    var invariants = [
+      { name: 'MOMO 진입 → 실시간 트리거 필요', pass: !ta.allowMomoEntry || ta.hasLiveTrigger || ph==='ORB' },
+      { name: 'CORE 진입은 항상 허용', pass: ta.allowCoreEntry === true },
+      { name: '일봉 데이터는 항상 가능', pass: ta.hasDailyData === true },
+      { name: 'PRE/ORB에는 Volume 완성 아님', pass: (ph!=='PRE' && ph!=='ORB') || !ta.hasLiveVolume },
+    ];
+    var fails = invariants.filter(function(i){ return !i.pass; });
+    results.push({ phase: ph, pass: fails.length===0, fails: fails.map(function(i){return i.name;}) });
+  });
+
+  G.marketPhase = origPhase;  // 원상복귀
+
+  var passCount = results.filter(function(r){ return r.pass; }).length;
+  console.log('═══ TimeAwareness Tests: '+passCount+'/'+results.length+' pass ═══');
+  results.forEach(function(r){
+    var icon = r.pass ? '✅' : '❌';
+    console.log(icon, r.phase, r.pass?'':'| fails: '+r.fails.join(', '));
+  });
+  return results;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// B3: CORE 엣지 케이스 테스트
+// ═══════════════════════════════════════════════════════════════
+function runCoreEdgeTests(){
+  var cases = [
+    {
+      name: 'Mode A 물밑 증거 부족 → BLOCK',
+      ydata: { price: 50000 },
+      coreData: { core_mode:'A', conditions_met:1, ad_line_slope:0, rs_13w:2, higher_lows:false, stage:'Stage 2 (상승 추세)' },
+      expect: { action: 'BLOCK', includes: '물밑' }
+    },
+    {
+      name: 'RS+A/D 동시 하락 → BLOCK',
+      ydata: { price: 50000 },
+      coreData: { core_mode:'A', conditions_met:4, rs_declining:true, ad_bullish_div:false, ad_line_slope:-2 },
+      expect: { action: 'BLOCK', includes: 'RS+A/D' }
+    },
+    {
+      name: '베이스 깊이 -40% → BLOCK',
+      ydata: { price: 50000 },
+      coreData: { core_mode:'B', conditions_met:5, base_depth_pct:-40, ad_line_slope:1, rs_13w:3 },
+      expect: { action: 'BLOCK', includes: '베이스 깊이' }
+    },
+    {
+      name: '완벽한 ENTER 조건',
+      ydata: { price: 50000 },
+      coreData: {
+        core_mode:'A', conditions_met:6,
+        ad_line_slope: 2, obv_bullish_div: true,
+        rs_13w: 8, rs_trend: true, rs_declining: false,
+        higher_lows: true, stage: 'Stage 1→2 (전환 초입)',
+        up_down_vol_ratio: 1.5, ma60_slope: 1.2, down_vol_exhaustion: true,
+        base_breakout_ready: true,
+      },
+      expect: { action: 'ENTER', scoreMin: 65 }
+    },
+    {
+      name: 'coreData 자체 없음',
+      ydata: { price: 50000 },
+      coreData: null,
+      expect: { action: 'BLOCK', includes: '물밑 지표' }
+    },
+  ];
+
+  var results = [];
+  cases.forEach(function(tc){
+    try{
+      var r = coreEngine(tc.ydata, tc.coreData);
+      var pass = true;
+      var reasons = [];
+      var e = tc.expect;
+
+      if(e.action && r.action !== e.action){
+        pass = false; reasons.push('action '+r.action+' (expected '+e.action+')');
+      }
+      if(e.includes){
+        var haystack = (r.blockers||[]).concat(r.warnings||[]).join(' | ');
+        if(!haystack.includes(e.includes)){
+          pass = false; reasons.push("'"+e.includes+"' not in blockers/warnings");
+        }
+      }
+      if(e.scoreMin !== undefined && r.score < e.scoreMin){
+        pass = false; reasons.push('score '+r.score+' < '+e.scoreMin);
+      }
+      results.push({ name:tc.name, pass:pass, score:r.score, action:r.action, reasons:reasons });
+    } catch(err){
+      results.push({ name:tc.name, pass:false, reasons:['THROWN: '+err.message] });
+    }
+  });
+
+  var passCount = results.filter(function(r){ return r.pass; }).length;
+  console.log('═══ CORE Edge Tests: '+passCount+'/'+results.length+' pass ═══');
+  results.forEach(function(r){
+    var icon = r.pass ? '✅' : '❌';
+    console.log(icon, r.name, r.pass?'':'| ' + r.reasons.join(' · '), r.pass?'(score='+r.score+' action='+r.action+')':'');
+  });
+  return results;
+}
+
+// 모든 테스트 한 번에
+function runAllEngineTests(){
+  console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('RECONKR 엔진 회귀 테스트');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+  var r1 = runSwingEdgeTests();
+  console.log('');
+  var r2 = runCoreEdgeTests();
+  console.log('');
+  var r3 = runTimeAwarenessTests();
+  var total = r1.length + r2.length + r3.length;
+  var pass  = r1.filter(function(r){return r.pass;}).length +
+              r2.filter(function(r){return r.pass;}).length +
+              r3.filter(function(r){return r.pass;}).length;
+  console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('전체: '+pass+'/'+total+' (' + Math.round(pass/total*100) + '%)');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+  return { swing: r1, core: r2, timeAwareness: r3, passRate: pass/total };
+}
+
 function coreEngine(ydata, coreData){
   var r = {
     action:'WATCH', score:0, position_size:'none',
@@ -5593,6 +6322,15 @@ function coreEngine(ydata, coreData){
     underground_score:0, core_mode:'A', core_detail:[],
   };
   if(!coreData){ r.blockers.push('물밑 지표 데이터 부족'); r.action='BLOCK'; return r; }
+
+  // ── 시간대 기록 (CORE는 일봉/주봉 기반이라 시간 무관하게 작동) ──
+  var _ta = getTimeAwareness();
+  r._timeAwareness = {
+    phase: _ta.phase,
+    livePrice: _ta.hasLivePrice && !!ydata.price,
+    liveTrigger: false,       // CORE는 실시간 트리거 미사용
+    dailyStructure: _ta.hasDailyData,
+  };
 
   r.underground_score = coreData.conditions_met || 0;
   r.core_mode         = coreData.core_mode || 'A';
@@ -5670,18 +6408,83 @@ function coreEngine(ydata, coreData){
   // 축별 점수 저장 (카드 표시 + 최소기준 게이트용)
   r._coreAxes = { supply:_scoreSupply, rs:_scoreRS, struct:_scoreStruct, aux:_scoreAux };
 
+  // B3: CORE 레이어 breakdown (SWING과 동일 구조 — 데이터 신뢰도 포함)
+  r.layer_breakdown = {
+    supply: [
+      { label:'A/D Line 상승' + (coreData.ad_line_slope!==null?' ('+coreData.ad_line_slope+'%)':''),
+        got: coreData.ad_line_slope!==null&&coreData.ad_line_slope>0 ? 15 : coreData.ad_line_slope!==null&&coreData.ad_line_slope>-1 ? 5 : 0,
+        max: 15, ok: coreData.ad_line_slope!==null&&coreData.ad_line_slope>0,
+        confidence: coreData.ad_line_slope!==null ? 'full' : 'missing' },
+      { label:'OBV 불리시 다이버전스',
+        got: coreData.obv_bullish_div===true ? 15 : 0, max: 15, ok: coreData.obv_bullish_div===true,
+        confidence: coreData.obv_bullish_div!==undefined ? 'full' : 'missing' },
+    ],
+    rs: [
+      { label:'RS13w' + (coreData.rs_13w!==null?' '+coreData.rs_13w+'%p':''),
+        got: coreData.rs_13w===null?0 : coreData.rs_13w>5?15 : coreData.rs_13w>0?10 : coreData.rs_13w>-5?3 : -5,
+        max: 15, ok: coreData.rs_13w>5, partial: coreData.rs_13w>0,
+        confidence: coreData.rs_13w!==null ? 'full' : 'missing' },
+      { label:'RS 추세 개선',
+        got: coreData.rs_trend===true ? 10 : coreData.rs_declining===true ? -15 : 0,
+        max: 10, ok: coreData.rs_trend===true,
+        confidence: (coreData.rs_trend!==undefined||coreData.rs_declining!==undefined) ? 'full' : 'missing' },
+    ],
+    struct: [
+      { label:'Higher Lows (12주)',
+        got: coreData.higher_lows===true ? 15 : 0, max: 15, ok: coreData.higher_lows===true,
+        confidence: coreData.higher_lows!==undefined ? 'full' : 'missing' },
+      { label:'Stage' + (coreData.stage ? ' '+coreData.stage.split(' ')[0] : ''),
+        got: coreData.stage==='Stage 1→2 (전환 초입)' ? 10 : coreData.stage==='Stage 2 (상승 추세)' ? 5 : (coreData.stage==='Stage 3→4 (하락 전환)'||coreData.stage==='Stage 4 (하락)') ? -10 : 0,
+        max: 10, ok: coreData.stage==='Stage 1→2 (전환 초입)', partial: coreData.stage==='Stage 2 (상승 추세)',
+        confidence: coreData.stage ? 'full' : 'missing' },
+    ],
+    aux: [
+      { label:'하락일 거래량 고갈',
+        got: coreData.down_vol_exhaustion===true ? 7 : 0, max: 7, ok: coreData.down_vol_exhaustion===true,
+        confidence: coreData.down_vol_exhaustion!==undefined ? 'full' : 'missing' },
+      { label:'Up/Down 거래량' + (coreData.up_down_vol_ratio!==null?' '+coreData.up_down_vol_ratio+'x':''),
+        got: coreData.up_down_vol_ratio===null?0 : coreData.up_down_vol_ratio>=1.2?7 : coreData.up_down_vol_ratio>=1.0?3 : 0,
+        max: 7, ok: coreData.up_down_vol_ratio>=1.2, partial: coreData.up_down_vol_ratio>=1.0,
+        confidence: coreData.up_down_vol_ratio!==null ? 'full' : 'missing' },
+      { label:'MA60 우상향',
+        got: coreData.ma60_slope!==null&&coreData.ma60_slope>0 ? 6 : 0, max: 6, ok: coreData.ma60_slope!==null&&coreData.ma60_slope>0,
+        confidence: coreData.ma60_slope!==null ? 'full' : 'missing' },
+      { label:'베이스 돌파 준비',
+        got: coreData.base_breakout_ready ? 12 : (coreData.base_top_tests>=2 && coreData.base_depth_pct!==null && coreData.base_depth_pct>=-5) ? 5 : (coreData.base_depth_pct!==null && coreData.base_depth_pct>=-10 && coreData.base_weeks>=3) ? 2 : 0,
+        max: 12, ok: coreData.base_breakout_ready, partial: coreData.base_top_tests>=2,
+        confidence: (coreData.base_breakout_ready!==undefined || coreData.base_depth_pct!==null) ? 'full' : 'missing' },
+    ],
+  };
+
+  // B1: CORE decision_path
+  r.decision_path = [
+    { gate:'입력', status:'pass', note:'coreData 확인 (mode='+r.core_mode+', 물밑='+r.underground_score+'/8)' },
+    { gate:'수급축', status: _scoreSupply>=15?'pass':_scoreSupply>=5?'warn':'fail', note:'A/D+OBV '+_scoreSupply+'/30pt' },
+    { gate:'RS축', status: _scoreRS>=15?'pass':_scoreRS>=0?'warn':'fail', note:'RS13w+추세 '+_scoreRS+'/25pt' },
+    { gate:'구조축', status: _scoreStruct>=15?'pass':_scoreStruct>=5?'warn':'fail', note:'HL+Stage '+_scoreStruct+'/25pt' },
+    { gate:'보조축', status: _scoreAux>=10?'pass':'warn', note:'볼륨+베이스 '+_scoreAux+'/20pt' },
+  ];
+
   // ── BLOCK 조건 ──
   if(r.core_mode==='overextended'){
-    r.action='BLOCK'; r.blockers.push('[CORE] 베이스 없이 과확장 — 베이스 형성 후 재진입'); return r;
+    r.action='BLOCK'; r.blockers.push('[CORE] 베이스 없이 과확장 — 베이스 형성 후 재진입');
+    r.decision_path.push({gate:'BLOCK',status:'block',note:'베이스 없이 과확장'});
+    return r;
   }
   if(coreData.rs_declining && coreData.ad_bullish_div===false){
-    r.action='BLOCK'; r.blockers.push('[CORE] RS+A/D 동시 하락 — 기관 분배 구간'); return r;
+    r.action='BLOCK'; r.blockers.push('[CORE] RS+A/D 동시 하락 — 기관 분배 구간');
+    r.decision_path.push({gate:'BLOCK',status:'block',note:'RS+A/D 동시하락 (분배구간)'});
+    return r;
   }
   if(coreData.base_depth_pct!==null && coreData.base_depth_pct < -35){
-    r.action='BLOCK'; r.blockers.push('[CORE] 베이스 깊이 '+coreData.base_depth_pct+'% — 수급 손상'); return r;
+    r.action='BLOCK'; r.blockers.push('[CORE] 베이스 깊이 '+coreData.base_depth_pct+'% — 수급 손상');
+    r.decision_path.push({gate:'BLOCK',status:'block',note:'베이스깊이 '+coreData.base_depth_pct+'%'});
+    return r;
   }
   if(r.core_mode==='A' && r.underground_score<=1){
-    r.action='BLOCK'; r.blockers.push('[CORE] Mode A 물밑 신호 '+r.underground_score+'/8 — 증거 부족'); return r;
+    r.action='BLOCK'; r.blockers.push('[CORE] Mode A 물밑 신호 '+r.underground_score+'/8 — 증거 부족');
+    r.decision_path.push({gate:'BLOCK',status:'block',note:'물밑 '+r.underground_score+'/8 부족'});
+    return r;
   }
 
   // ── 축별 최소기준 게이트 (총점 전에 먼저 체크) ──
@@ -5697,6 +6500,7 @@ function coreEngine(ydata, coreData){
     r.action='ENTER'; r.position_size='quarter(25%)';
     // 베이스 돌파 준비 → 절반 진입 허용
     if(coreData.base_breakout_ready) r.position_size='half(50%)';
+    r.decision_path.push({gate:'액션',status:'enter',note:'ENTER · '+r.score+'pt · 물밑 '+r.underground_score+'/8 · '+r.position_size});
   } else if(r.score >= 45 || r.underground_score >= 3){
     r.action='WATCH';
     if(!_axisGatePass){
@@ -5707,9 +6511,11 @@ function coreEngine(ydata, coreData){
     if(coreData.base_breakout_ready){
       r.signals.push('📦 베이스 돌파 임박 — 거래량 확인 후 진입 고려');
     }
+    r.decision_path.push({gate:'액션',status:'watch',note:'WATCH · '+r.score+'pt · '+(_axisGatePass?'점수 부족':'축 불균형')});
   } else {
     r.action='BLOCK';
     r.blockers.push('[CORE] 점수 '+r.score+'pt/물밑 '+r.underground_score+'/8 — 매집 증거 부족');
+    r.decision_path.push({gate:'액션',status:'block',note:'BLOCK · '+r.score+'pt · 매집 증거 부족'});
   }
 
   return r;
@@ -6229,11 +7035,16 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
         result.swing_grade        = decision.swing_grade        || null;
         result.wait_reason        = decision.wait_reason        || null;
         result.swing_score_layers = decision.swing_score_layers || null;
+        result.swing_layer_breakdown = decision.layer_breakdown  || null;
+        result.swing_decision_path = decision.decision_path || null;
       }
       if(mode==='core' && coreData){
         result.core_stage  = coreData.stage || null;
         result.core_detail = coreData.condition_detail || [];
         result.core_mode   = coreData.core_mode;
+        result.core_layer_breakdown = decision.layer_breakdown || null;
+        result.core_decision_path   = decision.decision_path   || null;
+        result.core_axes            = decision._coreAxes       || null;
       }
     }
     result._ts          = Date.now();
@@ -7184,13 +7995,53 @@ function cardHTML(r, mode){
             var maxPts=[20,30,30,20][i];
             var pct=Math.round(pts/maxPts*100);
             var barColor=pct>=75?'var(--g)':pct>=50?'var(--bl)':pct>=25?'var(--a)':'var(--t3)';
-            return '<div style="display:flex;align-items:center;gap:7px;margin-bottom:5px">'+
+            var layerKey=['market','structure','pullback','trigger'][i];
+            var items = (r.swing_layer_breakdown && r.swing_layer_breakdown[layerKey]) || [];
+            // 데이터 신뢰도 카운트 (A3: missing/unavailable 시각적 구분)
+            var missingCount = items.filter(function(it){ return it.confidence==='missing' || it.confidence==='unavailable'; }).length;
+            var missingBadge = missingCount > 0
+              ? '<span style="font-family:var(--mono);font-size:8px;color:var(--t3);margin-left:4px">· '+missingCount+' 데이터 없음</span>'
+              : '';
+            var itemsHtml = items.length ? '<div style="margin:3px 0 8px 35px;padding:0 0 0 4px;border-left:1px solid var(--b)">'+
+              items.map(function(it){
+                // A3 신뢰도 아이콘:
+                //   unavailable = ⊘ (장외시간 등 시스템 제약)
+                //   missing = ? (데이터 누락)
+                //   ok = ✓
+                //   partial = ◐
+                //   fail = ✗
+                var icon, clr, textClr;
+                if(it.confidence==='unavailable'){
+                  icon='⊘'; clr='var(--t3)'; textClr='var(--t3)';
+                } else if(it.confidence==='missing'){
+                  icon='?'; clr='var(--a)'; textClr='var(--t3)';
+                } else if(it.ok){
+                  icon='✓'; clr='var(--g)'; textClr='var(--t2)';
+                } else if(it.partial){
+                  icon='◐'; clr='var(--a)'; textClr='var(--t2)';
+                } else {
+                  icon='✗'; clr='var(--t3)'; textClr='var(--t3)';
+                }
+                var gotStr = (it.confidence==='unavailable' || it.confidence==='missing') ? '—/'+it.max : it.got+'/'+it.max;
+                return '<div style="display:flex;align-items:baseline;gap:5px;padding:1px 0 1px 6px;font-size:9px" title="'+
+                    (it.confidence==='unavailable'?'장외 시간대 — 평가 불가':
+                     it.confidence==='missing'?'데이터 누락 — 평가 불가':
+                     'confidence: '+(it.confidence||'full'))+'">'+
+                  '<span style="color:'+clr+';flex-shrink:0;width:8px">'+icon+'</span>'+
+                  '<span style="color:'+textClr+';flex:1;line-height:1.35">'+it.label+'</span>'+
+                  '<span style="color:'+clr+';font-family:var(--mono);font-variant-numeric:tabular-nums;margin-left:4px">'+gotStr+'</span>'+
+                '</div>';
+              }).join('')+
+              '</div>' : '';
+            return '<div style="display:flex;align-items:center;gap:7px;margin-bottom:3px">'+
               '<span style="font-family:var(--mono);font-size:9px;color:var(--t2);width:28px">'+lbl+'</span>'+
               '<div style="flex:1;height:4px;background:var(--bg3);border-radius:2px;overflow:hidden">'+
                 '<div style="height:100%;width:'+pct+'%;background:'+barColor+';border-radius:2px;transition:width .5s"></div>'+
               '</div>'+
               '<span style="font-family:var(--mono);font-size:9px;color:'+barColor+';width:30px;text-align:right">'+pts+'/'+maxPts+'</span>'+
-            '</div>';
+              missingBadge+
+            '</div>'+
+            itemsHtml;
           }).join('')+
           // 조건 체크리스트 (있을 때만)
           (r.swing_detail&&r.swing_detail.length?
@@ -7204,6 +8055,33 @@ function cardHTML(r, mode){
               '</div>';
             }).join('')+
             '</div>'
+          : '')+
+          // B1: 결정 경로 (decision_path) — 접기 UI
+          (r.swing_decision_path && r.swing_decision_path.length ?
+            '<details style="margin-top:8px;border-top:1px solid var(--b);padding-top:6px">'+
+            '<summary style="font-family:var(--mono);font-size:9px;color:var(--t3);letter-spacing:.08em;cursor:pointer;list-style:none">▶ 결정 경로 '+r.swing_decision_path.length+'단계</summary>'+
+            '<div style="margin-top:6px">'+
+            r.swing_decision_path.map(function(step, idx){
+              var stClr = step.status==='pass' ? 'var(--g)' :
+                          step.status==='enter' ? 'var(--g)' :
+                          step.status==='ready' ? 'var(--bl)' :
+                          step.status==='watch' ? 'var(--a)' :
+                          step.status==='warn'  ? 'var(--a)' :
+                          step.status==='block' ? 'var(--r)' : 'var(--t3)';
+              var stIcon = step.status==='pass' ? '✓' :
+                           step.status==='enter' ? '→' :
+                           step.status==='ready' ? '◈' :
+                           step.status==='watch' ? '⌖' :
+                           step.status==='warn'  ? '⚠' :
+                           step.status==='block' ? '✗' : '·';
+              return '<div style="display:flex;align-items:baseline;gap:6px;padding:2px 0;font-size:9px">'+
+                '<span style="color:var(--t3);font-family:var(--mono);width:14px;text-align:right">'+(idx+1)+'.</span>'+
+                '<span style="color:'+stClr+';flex-shrink:0;width:10px">'+stIcon+'</span>'+
+                '<span style="color:var(--t2);font-family:var(--mono);min-width:72px;white-space:nowrap">'+step.gate+'</span>'+
+                '<span style="color:var(--t3);flex:1;line-height:1.35">'+step.note+'</span>'+
+              '</div>';
+            }).join('')+
+            '</div></details>'
           : '')+
         '</div>';
       r.swing_detail=null;
