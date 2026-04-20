@@ -2838,6 +2838,13 @@ function checkBlockRisk(s, mode){
   var d      = s._daily || null;
   var price  = s.price  || s.regularMarketPrice || 0;
 
+  // 실시간 tv가 0이면 (KIS 수집 단계에서 종종 누락) 전일 거래대금으로 대체
+  // d.tv_prev는 원 단위, 억 단위로 환산
+  var tvEst = tv;
+  if(tvEst === 0 && d && d.tv_prev){
+    tvEst = d.tv_prev / 100000000;
+  }
+
   if(mode === 'momo'){
     // MOMO 하드 게이트: gap>20, ma20_gap>30
     if(chgPct > 20) risks.push('갭 '+chgPct.toFixed(0)+'% — 추격위험');
@@ -2847,8 +2854,9 @@ function checkBlockRisk(s, mode){
   } else if(mode === 'swing'){
     // SWING 하드 게이트: 거래대금 < 50억, MA60 이탈
     var swingMinTV = parseFloat((document.getElementById('swingMinTV')||{textContent:'50'}).textContent) || 50;
-    if(tv > 0 && tv < swingMinTV){
-      risks.push('거래대금 '+Math.round(tv)+'억 < '+swingMinTV+'억');
+    if(tvEst > 0 && tvEst < swingMinTV){
+      var src = tv > 0 ? '' : '(전일)';
+      risks.push('거래대금 '+Math.round(tvEst)+'억'+src+' < '+swingMinTV+'억');
     }
     if(d && d.ma60 && price && price < d.ma60){
       risks.push('MA60 이탈 — 수급선 깨짐');
@@ -2856,8 +2864,9 @@ function checkBlockRisk(s, mode){
   } else if(mode === 'core'){
     // CORE 하드 게이트는 대부분 물밑 지표 기반이라 리스트 단계에서 예측 불가
     // 다만 거래대금 너무 작으면 (<30억) 물밑 지표 계산 자체가 의미 없음
-    if(tv > 0 && tv < 30){
-      risks.push('거래대금 '+Math.round(tv)+'억 — 물밑 분석 부적합');
+    if(tvEst > 0 && tvEst < 30){
+      var srcC = tv > 0 ? '' : '(전일)';
+      risks.push('거래대금 '+Math.round(tvEst)+'억'+srcC+' — 물밑 분석 부적합');
     }
   }
 
