@@ -894,8 +894,13 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
       <input class="hold-input" id="holdCode" placeholder="종목코드 (예: 005930)" maxlength="6" inputmode="numeric" style="max-width:130px">
       <input class="hold-input" id="holdName" placeholder="종목명">
     </div>
-    <div class="hold-input-row" style="margin-bottom:10px">
+    <div class="hold-input-row">
       <input class="hold-input" id="holdPrice" placeholder="진입가 (원)" inputmode="decimal">
+      <input class="hold-input" id="holdStop"  placeholder="스톱 (원)"  inputmode="decimal">
+    </div>
+    <div class="hold-input-row" style="margin-bottom:10px">
+      <input class="hold-input" id="holdT1"    placeholder="T1 목표 (원)" inputmode="decimal">
+      <input class="hold-input" id="holdT2"    placeholder="T2 목표 (원)" inputmode="decimal">
     </div>
     <button class="hold-add-btn" onclick="holdAdd()">+ 종목 추가</button>
     <div class="hold-section-title">보유 중</div>
@@ -6952,8 +6957,11 @@ function momoCardHTML(r){
     '</div>'+
     // 상세 접기
     detailHtml+
-    // 거래 기록 버튼
-    '<button class="mc-trade-btn" onclick="openTradeLog(\''+r.ticker+'\','+(r.price||0)+')">✓ 거래 기록</button>'+
+    // 거래 기록 + 보유 등록 버튼
+    '<div style="display:flex;gap:6px;margin-top:10px">'+
+      '<button class="mc-trade-btn" style="flex:2;margin-top:0" onclick="openTradeLog(\''+r.ticker+'\','+(r.price||0)+')">✓ 거래 기록</button>'+
+      '<button onclick="holdFromAnalysis(\''+r.ticker+'\')" style="flex:1;background:rgba(255,106,0,.08);border:1px solid rgba(255,106,0,.25);border-radius:10px;padding:10px;font-family:var(--mono);font-size:11px;color:var(--gold);cursor:pointer;letter-spacing:.06em">📌 보유</button>'+
+    '</div>'+
   '</div>';
 }
 
@@ -7489,6 +7497,8 @@ function cardHTML(r, mode){
     '<div style="margin-top:10px;display:flex;gap:6px">'+
       '<button onclick="openTradeLog(\''+r.ticker+'\','+(r.price||0)+')" '+
         'style="flex:2;background:rgba(0,240,122,.08);border:1px solid rgba(0,240,122,.20);border-radius:8px;padding:8px;font-family:var(--mono);font-size:11px;color:var(--g);cursor:pointer">+ 거래 기록</button>'+
+      '<button onclick="holdFromAnalysis(\''+r.ticker+'\')" '+
+        'style="flex:1;background:rgba(255,106,0,.08);border:1px solid rgba(255,106,0,.25);border-radius:8px;padding:8px;font-family:var(--mono);font-size:11px;color:var(--gold);cursor:pointer">📌 보유</button>'+
       (function(){ var _m=mode||r._mode; return _m&&_m!=='recon' ? '<button onclick="rerunCard(\''+r.ticker+'\',\''+_m+'\')" style="flex:1;background:none;border:1px solid var(--b);border-radius:8px;padding:8px;font-family:var(--mono);font-size:11px;color:var(--t2);cursor:pointer">↻ 재분석</button>' : ''; })()+
     '</div>'+
 
@@ -12684,15 +12694,21 @@ function holdRender() {
     list.innerHTML = '<div class="hold-empty">등록된 종목 없음</div>';
     return;
   }
+  var fmt = function(v){ return v ? Number(v).toLocaleString() : '─'; };
   list.innerHTML = holdPositions.map(function(p, i) {
-    return '<div class="hold-item">' +
-      '<div class="hold-item-left">' +
-        '<span class="hold-item-code">' + p.code + '</span>' +
-        '<span class="hold-item-name">' + (p.name || '─') + '</span>' +
+    return '<div class="hold-item" style="display:block;padding:10px 12px">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">' +
+        '<div>' +
+          '<span class="hold-item-code" style="font-family:var(--mono);font-size:13px;color:var(--t);font-weight:700">' + p.code + '</span>' +
+          '<span class="hold-item-name" style="font-size:10px;color:var(--t2);margin-left:6px">' + (p.name || '─') + '</span>' +
+        '</div>' +
+        '<span class="hold-item-del" onclick="holdDelete(' + i + ')" style="cursor:pointer;color:var(--t3);font-size:14px;padding:2px 6px">✕</span>' +
       '</div>' +
-      '<div class="hold-item-right">' +
-        '<span class="hold-item-price">' + (p.entryPrice ? Number(p.entryPrice).toLocaleString() + '원' : '─') + '</span>' +
-        '<span class="hold-item-del" onclick="holdDelete(' + i + ')">✕</span>' +
+      '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;font-family:var(--mono);font-size:10px">' +
+        '<div><div style="color:var(--t3);font-size:9px;letter-spacing:.04em">진입</div><div style="color:var(--t)">' + fmt(p.entryPrice) + '</div></div>' +
+        '<div><div style="color:var(--t3);font-size:9px;letter-spacing:.04em">스톱</div><div style="color:var(--r)">' + fmt(p.stop) + '</div></div>' +
+        '<div><div style="color:var(--t3);font-size:9px;letter-spacing:.04em">T1</div><div style="color:var(--a)">' + fmt(p.t1) + '</div></div>' +
+        '<div><div style="color:var(--t3);font-size:9px;letter-spacing:.04em">T2</div><div style="color:var(--g)">' + fmt(p.t2) + '</div></div>' +
       '</div>' +
     '</div>';
   }).join('');
@@ -12702,15 +12718,73 @@ function holdAdd() {
   var code  = (document.getElementById('holdCode')  || {}).value || '';
   var name  = (document.getElementById('holdName')  || {}).value || '';
   var price = (document.getElementById('holdPrice') || {}).value || '';
+  var stop  = (document.getElementById('holdStop')  || {}).value || '';
+  var t1    = (document.getElementById('holdT1')    || {}).value || '';
+  var t2    = (document.getElementById('holdT2')    || {}).value || '';
   code = code.trim();
   if (!code) { alert('종목코드를 입력하세요'); return; }
   holdLoad();
-  holdPositions.push({ code: code, name: name.trim(), entryPrice: parseFloat(price) || 0 });
+  holdPositions.push({
+    code:       code,
+    name:       name.trim(),
+    entryPrice: parseFloat(price) || 0,
+    stop:       parseFloat(stop)  || 0,
+    t1:         parseFloat(t1)    || 0,
+    t2:         parseFloat(t2)    || 0,
+  });
   localStorage.setItem(holdGetKey(), JSON.stringify(holdPositions));
-  document.getElementById('holdCode').value  = '';
-  document.getElementById('holdName').value  = '';
-  document.getElementById('holdPrice').value = '';
+  ['holdCode','holdName','holdPrice','holdStop','holdT1','holdT2'].forEach(function(id){
+    var el = document.getElementById(id); if(el) el.value='';
+  });
   holdRender();
+}
+
+// ── 분석 카드에서 원클릭 보유 등록 ──
+// r.entry/r.stop + calcSellTargets(r)의 t1/t2 를 자동으로 담아서 저장 + 서버 동기화
+function holdFromAnalysis(ticker){
+  // 모든 모드 결과에서 ticker 찾기 (momo/swing/core + hold)
+  var r = null;
+  var modes = ['momo','swing','core','hold'];
+  for(var i=0;i<modes.length;i++){
+    var arr = (G.screenerResults && G.screenerResults[modes[i]]) || [];
+    r = arr.find(function(x){ return x && x.ticker===ticker; });
+    if(r) break;
+  }
+  if(!r){ showToast && showToast('분석 결과를 찾을 수 없습니다'); return; }
+  // 종목코드: 005930.KS → 005930
+  var code = (r.ticker||'').replace(/\.(KS|KQ)$/i,'');
+  if(!/^\d{6}$/.test(code)){ showToast && showToast('종목코드 형식 오류: '+r.ticker); return; }
+
+  var st = (typeof calcSellTargets === 'function') ? calcSellTargets(r) : null;
+  var entry = r.entry || r.price || 0;
+  var stop  = r.stop  || 0;
+  var t1    = (st && st.t1) || r.target1 || r.t1 || 0;
+  var t2    = (st && st.t2) || r.target2 || r.t2 || 0;
+
+  holdLoad();
+  // 이미 있으면 업데이트, 없으면 추가
+  var idx = holdPositions.findIndex(function(p){ return p.code===code; });
+  var item = {
+    code:       code,
+    name:       r.displayName || r.shortName || r.ticker,
+    entryPrice: Math.round(entry),
+    stop:       Math.round(stop),
+    t1:         Math.round(t1),
+    t2:         Math.round(t2),
+  };
+  if(idx>=0) holdPositions[idx] = item;
+  else       holdPositions.push(item);
+  localStorage.setItem(holdGetKey(), JSON.stringify(holdPositions));
+
+  if(showToast) showToast('📌 보유 등록: '+item.name+' (T1 '+item.t1.toLocaleString()+'/T2 '+item.t2.toLocaleString()+')');
+
+  // 서버 즉시 동기화 (5분 기다릴 필요 없이)
+  if(typeof holdSync === 'function'){
+    try{ holdSync(); }catch(e){}
+  }
+
+  // 보유 패널이 열려있으면 리렌더링
+  if(typeof holdRender === 'function') holdRender();
 }
 
 function holdDelete(i) {
