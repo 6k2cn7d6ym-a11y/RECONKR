@@ -335,6 +335,7 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
 .sc-score-ring.low{background:rgba(90,122,149,.08);border:1.5px solid var(--b);color:var(--t2)}
 .sc-chg{font-family:var(--mono);font-size:11px}
 .sc-next-badge{font-family:var(--mono);font-size:9px;color:var(--t3);padding:2px 6px;border:1px solid var(--b);border-radius:4px}
+.sc-risk-badge{font-family:var(--mono);font-size:9px;padding:2px 5px;border-radius:3px;background:rgba(255,45,78,.10);color:var(--r);border:1px solid rgba(255,45,78,.30);letter-spacing:.02em}
 .sc-last-run{font-family:var(--mono);font-size:9px;color:var(--t3);padding:6px 14px;text-align:right;border-top:1px solid var(--b)}
 
 /* ═══════════════════════════════════════
@@ -2826,6 +2827,44 @@ async function runScreener(mode){
 } // end runScreener
 
 // ─────────────────────────────────────────────────────────────
+// 리스트 단계에서 예상 BLOCK 사유 사전 감지
+// 리스트 점수는 가점 위주라 BLOCK 게이트 반영 안 됨 →
+// 카드 열었을 때 BLOCK 되는 종목을 미리 배지로 표시해서 사용자 혼란 방지
+// ─────────────────────────────────────────────────────────────
+function checkBlockRisk(s, mode){
+  var risks = [];
+  var tv     = s.tv     || 0;
+  var chgPct = s.chgPct || 0;
+  var d      = s._daily || null;
+  var price  = s.price  || s.regularMarketPrice || 0;
+
+  if(mode === 'momo'){
+    // MOMO 하드 게이트: gap>20, ma20_gap>30
+    if(chgPct > 20) risks.push('갭 '+chgPct.toFixed(0)+'% — 추격위험');
+    if(d && d.ma20_gap != null && d.ma20_gap > 30){
+      risks.push('MA20 이격 '+Math.round(d.ma20_gap)+'% — 과확장');
+    }
+  } else if(mode === 'swing'){
+    // SWING 하드 게이트: 거래대금 < 50억, MA60 이탈
+    var swingMinTV = parseFloat((document.getElementById('swingMinTV')||{textContent:'50'}).textContent) || 50;
+    if(tv > 0 && tv < swingMinTV){
+      risks.push('거래대금 '+Math.round(tv)+'억 < '+swingMinTV+'억');
+    }
+    if(d && d.ma60 && price && price < d.ma60){
+      risks.push('MA60 이탈 — 수급선 깨짐');
+    }
+  } else if(mode === 'core'){
+    // CORE 하드 게이트는 대부분 물밑 지표 기반이라 리스트 단계에서 예측 불가
+    // 다만 거래대금 너무 작으면 (<30억) 물밑 지표 계산 자체가 의미 없음
+    if(tv > 0 && tv < 30){
+      risks.push('거래대금 '+Math.round(tv)+'억 — 물밑 분석 부적합');
+    }
+  }
+
+  return risks;
+}
+
+// ─────────────────────────────────────────────────────────────
 // 스크리너 결과 렌더링
 // ─────────────────────────────────────────────────────────────
 function renderScreenerResults(mode){
@@ -2851,25 +2890,40 @@ function renderScreenerResults(mode){
     var ringClass = s._score>=70?'high':s._score>=50?'mid':'low';
     var chgStr    = (s.chgPct>=0?'+':'')+s.chgPct.toFixed(1)+'%';
     var chgColor  = s.chgPct>0?'var(--g)':s.chgPct<0?'var(--r)':'var(--t2)';
-    var hotBadge  = s._score>=minScoreForMode
+
+    // 예상 BLOCK 사유 체크 (하드 게이트 사전 감지)
+    var blockRisks  = checkBlockRisk(s, mode);
+    var isBlockRisk = blockRisks.length > 0;
+    var blockBadge  = isBlockRisk
+      ? '<span class="sc-risk-badge" title="'+blockRisks.join(' · ')+'">⚠ BLOCK 예상</span>'
+      : '';
+
+    var hotBadge  = s._score>=minScoreForMode && !isBlockRisk
       ? '<span style="font-family:var(--mono);font-size:9px;padding:2px 5px;border-radius:3px;background:rgba(255,106,0,.12);color:var(--gold);border:1px solid rgba(255,106,0,.25)">후보</span>'+
         (mode==='swing'?'<span style="font-family:var(--mono);font-size:9px;padding:2px 5px;border-radius:3px;background:rgba(43,159,255,.08);color:var(--t3);border:1px solid var(--b);margin-left:3px">트리거 확인 필요</span>':'')
       : '';
     var tvStr     = s.tv ? s.tv.toFixed(0)+'억' : '--';
     var tvRatStr  = s.tvRatio ? s.tvRatio.toFixed(1)+'x' : '--';
 
+    // BLOCK 예상 시 점수 링을 흐리게 + BLOCK 사유 문구 노출
+    var ringStyle = isBlockRisk ? 'opacity:0.45' : '';
+    var blockReason = isBlockRisk
+      ? '<div style="font-family:var(--mono);font-size:9px;color:var(--r);margin-top:2px;opacity:0.85">⚠ '+blockRisks[0]+'</div>'
+      : '';
+
     html +=
       '<div class="sc-candidate" onclick="scCandidateTap(\''+s.symbol+'\',\''+mode+'\')">'+
         '<div class="sc-cand-left">'+
           '<div class="sc-rank">'+(i+1)+'</div>'+
           '<div class="sc-cand-info">'+
-            '<div style="display:flex;align-items:center;gap:5px">'+
-              '<span class="sc-ticker">'+s.symbol+'</span>'+hotBadge+
+            '<div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">'+
+              '<span class="sc-ticker">'+s.symbol+'</span>'+hotBadge+blockBadge+
             '</div>'+
             '<div class="sc-name">'+s.name.substring(0,20)+'</div>'+
             '<div style="font-family:var(--mono);font-size:9px;color:var(--t3);margin-top:1px">'+
               (s.tvRatio?'거래대금 '+tvRatStr+' · '+tvStr:'--')+
             '</div>'+
+            blockReason+
           '</div>'+
         '</div>'+
         '<div class="sc-cand-right">'+
@@ -2877,7 +2931,7 @@ function renderScreenerResults(mode){
             '<div class="sc-chg" style="color:'+chgColor+'">'+chgStr+'</div>'+
             '<div style="font-family:var(--mono);font-size:10px;color:var(--t2);margin-top:1px">₩'+Math.round(s.price).toLocaleString()+'</div>'+
           '</div>'+
-          '<div class="sc-score-ring '+ringClass+'">'+s._score+'</div>'+
+          '<div class="sc-score-ring '+ringClass+'" style="'+ringStyle+'">'+s._score+'</div>'+
         '</div>'+
       '</div>';
   });
