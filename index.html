@@ -4098,12 +4098,42 @@ async function fetchSwingData(ticker, kisPrice){
     pullback_vol_quiet:false, _kisUpdated:false,
     conditions_met: 0, condition_detail: []
   };
+
+  // ═══════════════════════════════════════════════════════════
+  // RECONKR 원칙: KIS 우선, Yahoo 보조
+  // KIS가 한국 종목 데이터 더 정확·빠름. Yahoo는 RS20 계산(KOSPI 벤치마크) 같은
+  // 보조 지표에만 사용.
+  // ═══════════════════════════════════════════════════════════
+
+  // ── [1] KIS 일봉 우선 시도 ──
+  if(KIS.appKey && KIS.appSecret){
+    try{
+      await _fetchSwingFromKis(ticker, kisPrice, sw);
+      // 성공 조건: MA20 최소 있어야 (20일 데이터 확보)
+      if(sw.ma20){
+        sw._primarySource = 'KIS';
+        // RS20 (상대강도)만 Yahoo 벤치마크 필요 — 선택적 호출
+        await _enrichSwingWithYahooBenchmark(ticker, sw);
+        return sw;
+      }
+      console.warn('[SwingData] KIS 데이터 부족 ('+ (sw.ma20?'MA20 있음':'MA20 없음')+') → Yahoo 시도');
+    }catch(e){
+      console.warn('[SwingData] KIS 우선 호출 실패:', ticker, e.message);
+    }
+  }
+
+  // ── [2] Yahoo 폴백 (KIS 미인증 or 실패 or 데이터 부족 시) ──
   try{
     var dc = await fetchWithProxy(
       'https://query1.finance.yahoo.com/v8/finance/chart/'+ticker+'?interval=1d&range=2y'
     );
     var res = dc?.chart?.result?.[0];
-    if(!res) return sw;
+    if(!res){
+      console.warn('[SwingData] Yahoo 데이터도 없음:', ticker);
+      sw._primarySource = 'NONE';
+      return sw;
+    }
+    sw._primarySource = 'YAHOO';
     var q      = res.indicators?.quote?.[0] || {};
     var closes = [], opens = [], highs = [], lows = [], vols = [];
     var raw_c = q.close||[], raw_o = q.open||[], raw_h = q.high||[], raw_l = q.low||[], raw_v = q.volume||[];
@@ -4324,8 +4354,99 @@ async function fetchSwingData(ticker, kisPrice){
     sw.pullback_to_ma20 = c3;
     sw.bullish_candle   = c4;
 
-  }catch(e){ console.warn('[SwingData]',ticker,e.message); }
+  }catch(e){
+    console.warn('[SwingData] Yahoo 폴백도 실패:',ticker,e.message);
+    sw._primarySource = sw._primarySource || 'NONE';
+  }
   return sw;
+}
+
+// ─────────────────────────────────────────
+// Yahoo 벤치마크 보조 데이터 (RS20 상대강도 계산용)
+// KIS는 KOSPI 지수 조회 API 없음 — Yahoo로만 ^KS11 가져와서 RS 계산
+// ─────────────────────────────────────────
+async function _enrichSwingWithYahooBenchmark(ticker, sw){
+  if(sw.rs20 !== null) return; // 이미 계산됨
+  try{
+    // 종목 2개월 + KOSPI 2개월 병렬
+    var [stockRes, kospiRes] = await Promise.all([
+      fetchWithProxy('https://query1.finance.yahoo.com/v8/finance/chart/'+ticker+'?interval=1d&range=2mo').catch(function(){return null;}),
+      fetchWithProxy('https://query1.finance.yahoo.com/v8/finance/chart/^KS11?interval=1d&range=2mo').catch(function(){return null;})
+    ]);
+    var sc = stockRes?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || [];
+    var kc = kospiRes?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || [];
+    sc = sc.filter(function(v){return v&&v>0;});
+    kc = kc.filter(function(v){return v&&v>0;});
+    if(sc.length >= 21 && kc.length >= 21){
+      var stock20 = (sc[sc.length-1]/sc[sc.length-21] - 1)*100;
+      var kospi20 = (kc[kc.length-1]/kc[kc.length-21] - 1)*100;
+      sw.rs20 = parseFloat((stock20 - kospi20).toFixed(1));
+    }
+  }catch(e){
+    // RS20 계산 실패는 치명적 아님 — 조용히 스킵
+  }
+}
+
+// ─────────────────────────────────────────
+// KIS 일봉 폴백 — Yahoo 실패 시 사용
+// fetchKisDailyChart + calcDailyStats 활용해서
+// 최소한의 MA20/MA60/기울기/이격도/조정폭/RSI 채움
+// ─────────────────────────────────────────
+async function _fetchSwingFromKis(ticker, kisPrice, sw){
+  if(!KIS.appKey || !KIS.appSecret){
+    console.warn('[SwingData-KIS] KIS 미인증 — 폴백 불가:',ticker);
+    return sw;
+  }
+  try{
+    var code = ticker.replace(/\.(KS|KQ|KN)$/i,'');
+    // fetchKisDailyChart는 .KS/.KQ 제거만 하므로 그냥 code 넘겨도 됨
+    var candles = await fetchKisDailyChart(ticker);
+    if(!candles || candles.length < 20){
+      console.warn('[SwingData-KIS] 일봉 데이터 부족:',ticker,candles?.length);
+      return sw;
+    }
+    var price = kisPrice?.price || (candles[0] ? parseFloat(candles[0].stck_clpr) : 0);
+    var stats = calcDailyStats(candles, price);
+    if(!stats){ return sw; }
+
+    // KIS 데이터로 sw 채움 (calcDailyStats가 이미 RSI·조정폭·거래량 전부 계산해줌)
+    sw.ma5         = stats.ma5 || null;
+    sw.ma20        = stats.ma20 || null;
+    sw.ma60        = stats.ma60 || null;
+    sw.high10      = stats.box10_high || null;
+    sw.high20      = stats.high20 || null;
+    sw.ma60_slope  = stats.ma60_slope !== null && stats.ma60_slope !== undefined ? stats.ma60_slope : null;
+    sw.ma20_gap_pct= stats.ma20_gap !== null && stats.ma20_gap !== undefined ? parseFloat(stats.ma20_gap.toFixed(1)) : null;
+    sw.above_ma60  = stats.ma60 && price ? price > stats.ma60 : null;
+    sw.above_ma20  = stats.ma20 && price ? price > stats.ma20 : null;
+    sw.pullback_depth_pct  = stats.pullback_depth_pct !== null && stats.pullback_depth_pct !== undefined ? stats.pullback_depth_pct : null;
+    sw.pullback_vol_quiet  = !!stats.pullback_vol_quiet;
+    sw.no_consecutive_bear = stats.no_consecutive_bear !== false; // 기본 true
+    sw.rsi14               = stats.rsi14 || null;
+    sw.vol_ratio           = stats.vol_trend || null; // vol_trend = 오늘/평균
+
+    // 양봉 여부 (오늘 종가 > 오늘 시가)
+    if(candles[0]){
+      var todayClose = parseFloat(candles[0].stck_clpr) || 0;
+      var todayOpen  = parseFloat(candles[0].stck_oprc) || 0;
+      sw.bullish_candle = todayClose > todayOpen;
+      sw.close_upper_40pct = false; // 간이 계산 스킵
+    }
+
+    // prev3d_high — 전일 이전 3일간 최고가
+    if(candles.length >= 4){
+      sw.prev3d_high = Math.max.apply(null, candles.slice(1, 4).map(function(c){return parseFloat(c.stck_hgpr)||0;}));
+      sw.broke_prev3d_high = price > sw.prev3d_high;
+    }
+
+    sw._kisUpdated = true;
+    sw._fallbackSource = 'KIS';
+    console.log('[SwingData-KIS] ✓ KIS 우선 호출 성공:',ticker,'MA20='+Math.round(sw.ma20 || 0),'MA60='+Math.round(sw.ma60 || 0),'RSI='+sw.rsi14);
+    return sw;
+  }catch(e){
+    console.warn('[SwingData-KIS] KIS 일봉 조회 실패:',ticker,e.message);
+    return sw;
+  }
 }
 
 
@@ -7072,6 +7193,7 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
         result.swing_score_layers = decision.swing_score_layers || null;
         result.swing_layer_breakdown = decision.layer_breakdown  || null;
         result.swing_decision_path = decision.decision_path || null;
+        result._swingFallback     = swingData._fallbackSource || null; // 'KIS' 면 Yahoo 실패
       }
       if(mode==='core' && coreData){
         result.core_stage  = coreData.stage || null;
@@ -8226,6 +8348,10 @@ function cardHTML(r, mode){
     if(r._mode==='swing' && r._swingScoreType){
       var isLive = r._swingScoreType==='LIVE';
       modeBadge += '<span style="font-family:var(--mono);font-size:9px;color:'+(isLive?'var(--g)':'var(--t2)')+';border:1px solid '+(isLive?'rgba(0,240,122,.3)':'var(--b)')+';border-radius:4px;padding:1px 5px;margin-left:3px">'+(isLive?'LIVE':'PREP')+'</span>';
+    }
+    // KIS 폴백 (Yahoo 실패 시) — 데이터 출처 투명화
+    if(r._swingFallback === 'KIS'){
+      modeBadge += '<span style="font-family:var(--mono);font-size:9px;color:var(--gold);background:rgba(255,106,0,.08);border:1px solid rgba(255,106,0,.25);border-radius:4px;padding:1px 5px;margin-left:3px" title="Yahoo Finance 데이터 실패 → KIS 일봉 폴백">KIS</span>';
     }
   }
 
