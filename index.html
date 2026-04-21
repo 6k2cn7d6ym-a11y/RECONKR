@@ -5281,6 +5281,9 @@ function getWhaleStage(r){
 
 // ── 메인 하드 필터 (세력 스테이지 반영) ──
 function hardFilter(r, mode){
+  // 보유 종목은 진입용 하드필터 건너뜀 (매도/관리 분석이 목적)
+  if(r._openTrade) return r.action;
+
   if(mode === 'core') return r.action;
 
   if(mode === 'swing'){
@@ -6719,9 +6722,13 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
   }
 
   // ── 보유 포지션 감지 ──
+  // 보유 포지션은 모드 무관하게 감지 (SWING에서 기록 후 MOMO로 보든, 실제 포지션은 하나)
+  // 단 '완료'(closed) 상태는 제외
   var openTrade = G_journal.find(function(t){
-    return t.ticker === ticker && (t.status === 'open' || t.status === 'partial') && (!t.mode || t.mode === mode);
+    return t.ticker === ticker && (t.status === 'open' || t.status === 'partial');
   });
+  // 기록된 모드와 현재 탭 모드가 다르면 사용자에게 안내만 (동작은 동일)
+  var modeMismatch = openTrade && openTrade.mode && openTrade.mode !== mode;
 
   analyzeEl.innerHTML =
     '<div class="analyzing-card">'+
@@ -6833,7 +6840,8 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
     '<br>Claude AI 분석 중...</div></div></div>';
 
   // ── MOMO 하드 프리필터 ──
-  if(mode === 'momo'){
+  // 보유 종목(openTrade)은 매도/관리 분석이 목적이므로 진입용 하드필터 스킵
+  if(mode === 'momo' && !openTrade){
     var earlyBlock=[];
     var isKoreanTicker = ticker.endsWith('.KS') || ticker.endsWith('.KQ') || ticker.endsWith('.KN');
     if(!isKoreanTicker && ydata.exchange && !['KOSPI','KOSDAQ','KSC','KOE','KSQ','KOQ'].includes((ydata.exchange||'').toUpperCase()))
@@ -7050,6 +7058,7 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
     result._ts          = Date.now();
     result._mode        = mode;
     result._openTrade   = openTrade || null;
+    result._modeMismatch = modeMismatch || false; // 기록된 모드 ≠ 현재 탭 모드
     // 분석 시점 시장 국면 스냅샷 (카드에 표시용)
     if(mode==='momo'){
       result._marketPhase = G.marketPhase || null;
