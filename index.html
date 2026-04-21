@@ -6830,6 +6830,33 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
     }catch(e){}
   }
 
+  // ── [4-b] DART 공시 조회 (API 키 설정 시) ──
+  // ydata에 부착해서 Claude 프롬프트(makePrompt/makeExplainPrompt)에 포함되도록
+  ydata.dartDisclosures = null;
+  ydata.dartQuality = null;
+  if(G.dartApiKey){
+    try{
+      var _rawCode = ticker.replace(/\.(KS|KQ|KN)$/i,'');
+      var _dartList = await fetchDartDisclosures(_rawCode);
+      if(_dartList && _dartList.length){
+        ydata.dartDisclosures = _dartList;
+        var _dartInfo = classifyDartDisclosures(_dartList);
+        ydata.dartQuality = _dartInfo.quality;
+        ydata.dartFactTitles = _dartInfo.factList.map(function(d){ return d.title; }).slice(0,3);
+        ydata.dartNegTitles  = _dartInfo.negList.map(function(d){ return d.title; }).slice(0,3);
+        // newsText에도 병합 (기존 news_quality 판정에도 반영되도록)
+        var _dartSummary = '[DART공시] '+_dartInfo.text;
+        ydata.newsText = ydata.newsText ? _dartSummary+' || [뉴스] '+ydata.newsText : _dartSummary;
+      } else if(_dartList !== null) {
+        ydata.dartQuality = 'none';
+        ydata.newsText = '[DART공시 없음]' + (ydata.newsText ? ' || [뉴스] '+ydata.newsText : '');
+      }
+      // _dartList === null 이면 조회 실패 — 공시 있는지 없는지 모름 (분기 안 탐)
+    }catch(e){
+      console.warn('[DART] 분석 시 공시 조회 실패:', e.message);
+    }
+  }
+
   analyzeEl.innerHTML =
     '<div class="analyzing-card">'+
     '<div class="analyzing-spinner"></div>'+
@@ -7059,6 +7086,12 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
     result._mode        = mode;
     result._openTrade   = openTrade || null;
     result._modeMismatch = modeMismatch || false; // 기록된 모드 ≠ 현재 탭 모드
+    // DART 공시 정보 전달 (카드 UI 배지 정확 반영)
+    result.dartDisclosures  = ydata.dartDisclosures || null;
+    result.dartQuality      = ydata.dartQuality || null;
+    result.dartFactTitles   = ydata.dartFactTitles || null;
+    result.dartNegTitles    = ydata.dartNegTitles || null;
+    result._dartHasDisclosure = !!(ydata.dartDisclosures && ydata.dartDisclosures.length);
     // 분석 시점 시장 국면 스냅샷 (카드에 표시용)
     if(mode==='momo'){
       result._marketPhase = G.marketPhase || null;
@@ -7461,6 +7494,44 @@ function toggleCardDetail(id){
   }
 }
 
+// ═══════════════════════════════════════════════════════════
+// DART 공시 목록 카드 렌더링 — MOMO/SWING/CORE 공통
+// r.dartDisclosures 있으면 상위 3~5건 접기 UI로 표시
+// ═══════════════════════════════════════════════════════════
+function renderDartDisclosures(r){
+  if(!r.dartDisclosures || !r.dartDisclosures.length) return '';
+  var list = r.dartDisclosures.slice(0, 5);
+  var hasFact = r.dartFactTitles && r.dartFactTitles.length;
+  var hasNeg  = r.dartNegTitles  && r.dartNegTitles.length;
+  var summaryColor = hasNeg ? 'var(--r)' : hasFact ? 'var(--g)' : 'var(--t2)';
+  var summaryIcon  = hasNeg ? '⚠'        : hasFact ? '✅'       : '📄';
+  var summaryLabel = hasNeg ? '부정/정정공시 포함' : hasFact ? '팩트공시 포함' : '일반공시';
+  return '<details style="margin-top:8px;padding:8px 10px;background:var(--bg2);border:1px solid var(--b);border-radius:10px">'+
+    '<summary style="font-family:var(--mono);font-size:10px;color:'+summaryColor+';cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center">'+
+      '<span>'+summaryIcon+' DART 공시 '+r.dartDisclosures.length+'건 · '+summaryLabel+'</span>'+
+      '<span style="color:var(--t3);font-size:9px">▾ 펼치기</span>'+
+    '</summary>'+
+    '<div style="margin-top:8px;border-top:1px solid var(--b);padding-top:6px">'+
+      list.map(function(d){
+        var isFact = hasFact && r.dartFactTitles.indexOf(d.title) !== -1;
+        var isNeg  = hasNeg  && r.dartNegTitles.indexOf(d.title)  !== -1;
+        var icon   = isNeg ? '⚠' : isFact ? '✅' : '·';
+        var iconColor = isNeg ? 'var(--r)' : isFact ? 'var(--g)' : 'var(--t3)';
+        var dateFmt = (d.date||'').replace(/(\d{4})(\d{2})(\d{2})/,'$1-$2-$3');
+        return '<div style="display:flex;gap:6px;padding:3px 0;font-size:10px;line-height:1.4">'+
+          '<span style="color:'+iconColor+';flex-shrink:0;width:10px">'+icon+'</span>'+
+          '<span style="color:var(--t3);font-family:var(--mono);flex-shrink:0;width:72px">'+dateFmt+'</span>'+
+          '<a href="'+d.url+'" target="_blank" rel="noopener" style="color:var(--t2);flex:1;text-decoration:none">'+
+            d.title+
+          '</a>'+
+        '</div>';
+      }).join('')+
+      (r.dartDisclosures.length > 5 ?
+        '<div style="text-align:center;padding:4px;font-size:9px;color:var(--t3)">+'+(r.dartDisclosures.length-5)+'건 더 (DART 사이트에서 확인)</div>' : '')+
+    '</div>'+
+  '</details>';
+}
+
 // 태그 우선순위 필터 (최대 4개)
 function buildMomoTags(r){
   var t=[];
@@ -7474,9 +7545,29 @@ function buildMomoTags(r){
   }
   // P2: 체결 지옥
   if(r.slippage_risk==='high') t.push('<span class="mc-tag" style="color:var(--r);background:rgba(255,45,78,.10);border:1px solid rgba(255,45,78,.30)">⚡ 체결지옥</span>');
-  // P3: 공시 품질
-  if(r.news_quality==='factual') t.push('<span class="mc-tag" style="color:var(--g);background:rgba(0,240,122,.08);border:1px solid rgba(0,240,122,.28)">팩트공시</span>');
-  else if(r.news_quality==='none') t.push('<span class="mc-tag" style="color:var(--r);background:rgba(255,45,78,.08);border:1px solid rgba(255,45,78,.25)">공시없음</span>');
+  // P3: 공시 품질 — DART 조회 결과 우선, 없으면 Claude 판단 폴백
+  // DART 실조회 결과가 있으면 Claude의 news_quality보다 정확
+  if(r.dartQuality === 'factual' || r.news_quality === 'factual') {
+    var factBadge = '팩트공시';
+    if(r.dartDisclosures && r.dartDisclosures.length)
+      factBadge = '팩트공시 '+r.dartDisclosures.length+'건';
+    t.push('<span class="mc-tag" style="color:var(--g);background:rgba(0,240,122,.08);border:1px solid rgba(0,240,122,.28)">'+factBadge+'</span>');
+  }
+  else if(r.dartQuality === 'negative') {
+    t.push('<span class="mc-tag" style="color:var(--r);background:rgba(255,45,78,.08);border:1px solid rgba(255,45,78,.25)">⚠ 부정공시</span>');
+  }
+  else if(r.dartQuality === 'vague' && r.dartDisclosures && r.dartDisclosures.length) {
+    // DART에 일반공시는 있는데 팩트성은 약함 — 공시는 있다는 것만 표시
+    t.push('<span class="mc-tag" style="color:var(--t2);background:var(--bg2);border:1px solid var(--b)">공시 '+r.dartDisclosures.length+'건</span>');
+  }
+  else if(r.news_quality === 'none' && r.dartQuality === 'none') {
+    // DART도 none이고 Claude도 none일 때만 빨간 '공시없음' 배지
+    t.push('<span class="mc-tag" style="color:var(--r);background:rgba(255,45,78,.08);border:1px solid rgba(255,45,78,.25)">공시없음</span>');
+  }
+  else if(r.news_quality === 'none' && !r.dartQuality) {
+    // DART 미조회 (API 키 없음 등) + Claude가 none → 회색 표기
+    t.push('<span class="mc-tag" style="color:var(--t3);background:var(--bg2);border:1px solid var(--b)">뉴스없음</span>');
+  }
   // P4: 상한가 임박
   if(r.ulimit_pct!==null&&r.ulimit_pct!==undefined&&r.ulimit_pct<10)
     t.push('<span class="mc-tag" style="color:var(--r);background:rgba(255,45,78,.08);border:1px solid rgba(255,45,78,.25)">⚠ 상한가 '+r.ulimit_pct+'%</span>');
@@ -7841,6 +7932,8 @@ function momoCardHTML(r){
     '</div>'+
     // 상세 접기
     detailHtml+
+    // DART 공시 목록 (있을 때만)
+    renderDartDisclosures(r)+
     // 거래 기록 + 보유 등록 버튼
     '<div style="display:flex;gap:6px;margin-top:10px">'+
       '<button class="mc-trade-btn" style="flex:2;margin-top:0" onclick="openTradeLog(\''+r.ticker+'\','+(r.price||0)+')">✓ 거래 기록</button>'+
@@ -7874,9 +7967,20 @@ function cardHTML(r, mode){
 
   // 태그
   var tags='';
-  // ─── 한국 MOMO 전용 태그 ───
-  if(r.news_quality==='factual')   tags+='<span class="tag tg">팩트공시</span>';
-  if(r.news_quality==='none')      tags+='<span class="tag tr">공시없음</span>';
+  // ─── 공시 태그 — DART 실조회 우선 ───
+  if(r.dartQuality==='factual' || r.news_quality==='factual'){
+    var _fctTxt = (r.dartDisclosures && r.dartDisclosures.length)
+      ? '팩트공시 '+r.dartDisclosures.length+'건'
+      : '팩트공시';
+    tags+='<span class="tag tg">'+_fctTxt+'</span>';
+  }
+  else if(r.dartQuality==='negative') tags+='<span class="tag tr">⚠ 부정공시</span>';
+  else if(r.dartQuality==='vague' && r.dartDisclosures && r.dartDisclosures.length)
+    tags+='<span class="tag" style="color:var(--t2);background:var(--bg2);border:1px solid var(--b)">공시 '+r.dartDisclosures.length+'건</span>';
+  else if(r.news_quality==='none' && r.dartQuality==='none')
+    tags+='<span class="tag tr">공시없음</span>';
+  else if(r.news_quality==='none' && !r.dartQuality)
+    tags+='<span class="tag" style="color:var(--t3);background:var(--bg2);border:1px solid var(--b)">뉴스없음</span>';
   // 거래대금 태그
   if(r.trading_value_m&&r.trading_value_m>=500) tags+='<span class="tag tg">거래대금 '+Math.round(r.trading_value_m)+'억</span>';
   else if(r.trading_value_m&&r.trading_value_m>=100) tags+='<span class="tag tb">'+Math.round(r.trading_value_m)+'억</span>';
@@ -8444,6 +8548,9 @@ function cardHTML(r, mode){
     })()+
 
     '<div style="font-size:11px;color:var(--t2);margin-top:8px">'+(r.summary||'')+'</div>'+
+
+    // DART 공시 목록 (있을 때만)
+    renderDartDisclosures(r)+
 
     '<div style="margin-top:10px;display:flex;gap:6px">'+
       '<button onclick="openTradeLog(\''+r.ticker+'\','+(r.price||0)+')" '+
