@@ -3675,6 +3675,98 @@ function saveDart(){
   updateDartStatus();
 }
 
+// ─────────────────────────────────────────
+// DART 재무제표 API (단일회사 주요계정)
+// 경로: /api/fnlttSinglAcnt.json
+// 용도: 매출·영업이익·당기순이익 → 매출증가율(YoY) + PSR 계산
+// 파라미터: corp_code(8자리), bsns_year(YYYY), reprt_code
+//   '11013'=1분기, '11012'=반기, '11014'=3분기, '11011'=사업보고서
+// fs_div: 'CFS'(연결) 우선, 실패시 'OFS'(별도)
+// 반환: 매출·영업이익·당기순이익 + YoY 증가율 + 보고서 정보
+//   null = 조회 실패 (신규상장/데이터없음)
+// ─────────────────────────────────────────
+async function fetchDartFinancials(stockCode){
+  if(!G.dartApiKey) return null;
+  try{
+    var corpCode = await fetchDartCorpCode(stockCode);
+    if(!corpCode) return null;
+
+    // 보고서 우선순위: 최신 분기 → 직전 분기 → 사업보고서
+    // 공시 시점: 3Q (11월), 반기 (8월), 1Q (5월), 사업 (3월 말~)
+    var now = new Date();
+    var yr = now.getFullYear();
+    var mo = now.getMonth()+1; // 1-12
+    var candidates = [];
+    // 현재 분기에 따른 최신 공시 추정
+    if(mo >= 11)       candidates.push([yr,   '11014']);       // 3Q (11월~다음해 3월)
+    else if(mo >= 8)   candidates.push([yr,   '11012']);       // 반기 (8월~11월)
+    else if(mo >= 5)   candidates.push([yr,   '11013']);       // 1Q (5월~8월)
+    else               candidates.push([yr-1, '11011']);       // 사업 (3월말~5월)
+    // 폴백: 직전 연도 사업보고서
+    candidates.push([yr-1, '11011']);
+    candidates.push([yr-1, '11014']);
+    candidates.push([yr-2, '11011']);
+
+    for(var i=0; i<candidates.length; i++){
+      var year = candidates[i][0], rpt = candidates[i][1];
+      // CFS(연결) 먼저, 없으면 OFS(별도)
+      for(var fs=0; fs<2; fs++){
+        try{
+          var data = await fetchDart('/api/fnlttSinglAcnt.json', {
+            corp_code:  corpCode,
+            bsns_year:  String(year),
+            reprt_code: rpt,
+            fs_div:     fs===0 ? 'CFS' : 'OFS',
+          });
+          if(data.status !== '000' || !data.list || !data.list.length) continue;
+
+          // 매출·영업이익·당기순이익 추출
+          // account_nm 표기 편차 크니 광범위 매칭
+          var revenue=null, opIncome=null, netIncome=null, revenuePrev=null;
+          data.list.forEach(function(row){
+            var acct = (row.account_nm||'').replace(/\s/g,'');
+            var thstrm = parseFloat((row.thstrm_amount||'').replace(/,/g,''))||null;
+            var frmtrm = parseFloat((row.frmtrm_amount||'').replace(/,/g,''))||null;
+            if(acct.indexOf('매출액') >= 0 || acct === '수익' || acct.indexOf('영업수익') >= 0){
+              if(revenue===null) { revenue=thstrm; revenuePrev=frmtrm; }
+            } else if(acct.indexOf('영업이익') >= 0){
+              if(opIncome===null) opIncome=thstrm;
+            } else if(acct.indexOf('당기순이익') >= 0 || acct === '순이익'){
+              if(netIncome===null) netIncome=thstrm;
+            }
+          });
+
+          if(revenue === null) continue;
+
+          // YoY 매출증가율 (동일 누적기간 대비)
+          var revenueYoY = (revenuePrev !== null && revenuePrev !== 0)
+            ? parseFloat(((revenue - revenuePrev) / Math.abs(revenuePrev) * 100).toFixed(1))
+            : null;
+
+          var rptLabel = rpt==='11013'?'1분기':rpt==='11012'?'반기':rpt==='11014'?'3분기':'사업';
+          return {
+            revenue: revenue,             // 원 단위
+            revenue_prev: revenuePrev,
+            revenue_yoy: revenueYoY,      // %
+            op_income: opIncome,
+            net_income: netIncome,
+            report_year: year,
+            report_label: rptLabel,
+            fs_div: fs===0 ? 'CFS' : 'OFS',
+          };
+        }catch(e){
+          // 이 (year, rpt, fs) 조합 실패 → 다음 시도
+          continue;
+        }
+      }
+    }
+    return null;
+  }catch(e){
+    console.warn('[DART-재무] 실패:', stockCode, e.message);
+    return null;
+  }
+}
+
 function updateDartStatus(){
   var el = document.getElementById('dartConnStatus');
   if(!el) return;
@@ -5105,6 +5197,14 @@ async function _fetchCoreFromKis(ticker, cd){
     console.warn('[CoreData-KIS] 시세(섹터명) 실패:',ticker,e.message);
     return null;
   });
+  // 재무제표(DART) 병렬 호출 — 옵션 A: 표시/AI용, 엔진 게이트 영향 없음
+  // DART 키 없으면 즉시 null → 조용히 스킵
+  var finP = G.dartApiKey
+    ? fetchDartFinancials(ticker.replace(/\.(KS|KQ|KN)$/i,'')).catch(function(e){
+        console.warn('[CoreData-KIS] DART 재무 실패:',ticker,e.message);
+        return null;
+      })
+    : Promise.resolve(null);
   var candles = await candlesP;
   var investorData = await investorP;
   var priceInfo = await priceP;
@@ -5171,12 +5271,51 @@ async function _fetchCoreFromKis(ticker, cd){
 
   await _computeCoreRSFromKospi(valid, cd);
   _computeCore8Conditions(cd);
+
+  // ── 밸류에이션/성장 지표 (옵션 A: 표시+AI용, 엔진 게이트/점수 영향 없음) ──
+  // KIS: per, pbr, market_cap  /  DART: revenue_yoy, revenue_latest, op_margin
+  if(priceInfo){
+    cd.per = priceInfo.per || null;
+    cd.pbr = priceInfo.pbr || null;
+    cd.market_cap_100m = priceInfo.marketCap || null; // 억원
+  }
+  try{
+    var fin = await finP;
+    if(fin){
+      cd.revenue_yoy    = fin.revenue_yoy;          // %
+      cd.revenue_latest = fin.revenue;              // 원
+      cd.fin_report_label = fin.report_year + ' ' + fin.report_label;
+      cd.fin_confidence = 'full';
+      // 영업이익률 계산
+      if(fin.op_income !== null && fin.revenue && fin.revenue !== 0){
+        cd.op_margin = parseFloat((fin.op_income / fin.revenue * 100).toFixed(1));
+      }
+      // PSR 계산: 시가총액(억원) × 1e8 / 최근 연환산 매출
+      //   - 누적 보고서(1Q/반기/3Q)는 연환산 보정: revenue × (12/경과월수)
+      //   - 사업보고서는 그대로 사용
+      // TTM은 복잡하므로 단순 연환산으로 근사 — 검증 예정
+      if(cd.market_cap_100m && fin.revenue && fin.revenue > 0){
+        var monthsAccrued = fin.report_label==='1분기' ? 3
+                          : fin.report_label==='반기'  ? 6
+                          : fin.report_label==='3분기' ? 9 : 12;
+        var annualizedRev = fin.revenue * (12 / monthsAccrued);
+        cd.psr = parseFloat((cd.market_cap_100m * 1e8 / annualizedRev).toFixed(2));
+      }
+    } else {
+      cd.fin_confidence = G.dartApiKey ? 'fetch_failed' : 'missing';
+    }
+  }catch(e){
+    cd.fin_confidence = 'fetch_failed';
+    console.warn('[CoreData-KIS] 재무 파싱 실패:',ticker,e.message);
+  }
+
   cd._primarySource = 'KIS';
   console.log('[CoreData-KIS] ✓',ticker,'candles='+valid.length,
     'MA120='+(cd.ma120?Math.round(cd.ma120):'--'),
     'flow='+cd.flow_confidence,
     'foreign_20d='+cd.foreign_net_20d,
-    'sector='+(cd.sector_name||'--')+(cd.rs_sector_13w!==null?' rs_sec='+cd.rs_sector_13w+'%p':''));
+    'sector='+(cd.sector_name||'--')+(cd.rs_sector_13w!==null?' rs_sec='+cd.rs_sector_13w+'%p':''),
+    'PER='+(cd.per||'--')+' PBR='+(cd.pbr||'--')+' PSR='+(cd.psr||'--')+' 매출YoY='+(cd.revenue_yoy!==null?cd.revenue_yoy+'%':'--'));
   return true;
 }
 
@@ -5254,6 +5393,15 @@ async function fetchCoreData(ticker){
     rs_sector_13w:null,          // 섹터 대비 초과수익률 %p (양수 = 섹터 내 아웃퍼폼)
     sector_13w_return:null,      // 섹터 자체의 13주 수익률 %
     sector_rs_confidence:'none', // 'full' | 'mapping_missing' | 'fetch_failed' | 'none'
+    // ── 밸류에이션/성장 지표 (옵션 A: 표시용, 엔진 게이트/점수 영향 없음) ──
+    per:null, pbr:null,          // KIS 제공
+    market_cap_100m:null,        // 시가총액 (억원)
+    revenue_yoy:null,            // 매출증가율 YoY % (DART 누적 기준)
+    revenue_latest:null,         // 최신 매출 (원)
+    psr:null,                    // 시총/매출 — 섹터 대비 상대값이 의미있음
+    op_margin:null,              // 영업이익률 % = 영업이익/매출
+    fin_report_label:null,       // '2025 3분기' 등 참조용
+    fin_confidence:'none',       // 'full' | 'missing' | 'fetch_failed'
     _primarySource:null
   };
 
@@ -5708,7 +5856,29 @@ function makePrompt(mode, ticker, ydata, swingData, openTrade, coreData){
             (coreData.both_accumulating?'동반 매집: ★ 외국인+기관 20일 동반 순매수\n':'')
           : '── 수급 직접 관찰: 데이터 없음 (proxy 지표만)\n')+
         '물밑 신호 충족: '+coreData.conditions_met+'/8\n'+
-        '조건 상세:\n'+(coreData.condition_detail||[]).map(function(d){return '  '+d;}).join('\n')+'\n';
+        '조건 상세:\n'+(coreData.condition_detail||[]).map(function(d){return '  '+d;}).join('\n')+'\n'+
+        // ── 밸류에이션/성장 (옵션 A: AI 해석용, 엔진 게이트 영향 없음) ──
+        (function(){
+          var hasAny = coreData.per || coreData.pbr || coreData.psr || coreData.revenue_yoy!==null;
+          if(!hasAny) return '';
+          var s = '\n── 밸류에이션 / 성장 (참고) ──\n';
+          s += 'PER '+(coreData.per||'--')+' · PBR '+(coreData.pbr||'--')+' · PSR '+(coreData.psr||'--')+'\n';
+          if(coreData.market_cap_100m) s += '시가총액: '+Math.round(coreData.market_cap_100m).toLocaleString()+'억원\n';
+          if(coreData.revenue_yoy !== null && coreData.revenue_yoy !== undefined){
+            s += '매출 YoY: '+(coreData.revenue_yoy>=0?'+':'')+coreData.revenue_yoy+'% ('+coreData.fin_report_label+')';
+            if(coreData.revenue_yoy >= 20) s += ' [✓ 고성장]';
+            else if(coreData.revenue_yoy < 0) s += ' [⚠ 역성장]';
+            s += '\n';
+          }
+          if(coreData.op_margin !== null && coreData.op_margin !== undefined){
+            s += '영업이익률: '+(coreData.op_margin>=0?'+':'')+coreData.op_margin+'%';
+            if(coreData.op_margin < 0) s += ' [⚠ 적자]';
+            s += '\n';
+          }
+          s += '※ 밸류지표는 절대값보다 섹터 내 상대값이 중요. PSR은 성장주 평가에 유용.\n';
+          s += '※ 매출 YoY와 PSR의 조합 관점에서 한 줄 평가 부탁 (예: "고성장 대비 PSR 과열" 또는 "성장 대비 저평가").\n';
+          return s;
+        })();
     }
 
     return '당신은 한국 주식 CORE(중장기) 물밑 포착 전문 AI입니다. 코리아 디스카운트와 수급 중심으로 판단합니다.\n\n'+
@@ -6401,17 +6571,28 @@ function swingEngine(ydata, swingData){
     var sStop = Math.max.apply(null, stopCandidates.filter(function(s){return s < sEntry;}));
     if(!sStop||isNaN(sStop)||sStop>=sEntry) sStop = parseFloat((sEntry*0.965).toFixed(0));
     var sRisk = sEntry - sStop;
-    // T1 = 2R 고정 (10일 고점 기반은 너무 낮을 수 있음)
-    // 단, 2R이 5% 미만이면 최소 5% 보장
-    var t1_2r = parseFloat((sEntry + sRisk*2).toFixed(0));
+    // ── T1 재설계 (2026-04-24): 10일 고점 돌파 확증 우선 ──
+    // 이전: max(2R, 5%) → 대부분 +3~5% 수준, 수수료·세금 감안 시 실익 미미
+    // 신규: max(10일 고점×1.02, 2R, entry+5%)
+    //   · 10일 고점 × 1.02 = 직전 저항 돌파 확증 지점 (눌림목 SWING 본질)
+    //   · 2R = 리스크 대비 최소 보상
+    //   · entry + 5% = 절대 최소 수익 보장
+    var t1_2r      = parseFloat((sEntry + sRisk*2).toFixed(0));
     var t1_min5pct = parseFloat((sEntry * 1.05).toFixed(0));
-    var sT1 = Math.max(t1_2r, t1_min5pct);
-    // T2: 저항선 기반 (20일 고점 or 52주 고점 or 4R)
-    var fw = ydata.fiftyTwoWeekHigh;
-    var sT2 = swingData.high20 && swingData.high20>sT1*1.02
-      ? parseFloat((swingData.high20*0.99).toFixed(0))
-      : fw && fw>sEntry*1.10 ? parseFloat(fw.toFixed(0))
-      : parseFloat((sEntry+sRisk*4).toFixed(0));
+    var t1_highBreak = (swingData.high10 && swingData.high10 > sEntry)
+      ? parseFloat((swingData.high10 * 1.02).toFixed(0)) : 0;
+    var sT1 = Math.max(t1_2r, t1_min5pct, t1_highBreak);
+    // ── T2 재설계: T1×1.10, 4R, 25% cap ──
+    // 한국 SWING 2-4주 현실: +25% 가 상한. 더 큰 타깃은 CORE 모드에서 포착
+    //   · T1×1.10 = T1 돌파 후 +10% (T1에서 50% 익절 후 잔량 익절 타깃)
+    //   · 4R = 리스크 대비 보상 4배
+    //   · entry×1.25 = 한국 SWING 현실적 상한
+    var t2_fromT1 = parseFloat((sT1 * 1.10).toFixed(0));
+    var t2_from4R = parseFloat((sEntry + sRisk*4).toFixed(0));
+    var t2Cap     = parseFloat((sEntry * 1.25).toFixed(0));
+    var sT2       = Math.min(Math.max(t2_fromT1, t2_from4R), t2Cap);
+    // 안전장치: T2 >= T1 * 1.05 (최소 5% 이상 간격)
+    if(sT2 < sT1 * 1.05) sT2 = parseFloat((sT1 * 1.05).toFixed(0));
     var sRR  = sRisk>0 ? parseFloat(((sT1-sEntry)/sRisk).toFixed(1)) : null;
     var sRR2 = sRisk>0 ? parseFloat(((sT2-sEntry)/sRisk).toFixed(1)) : null;
     r.entry=sEntry; r.stop=sStop; r.target1=sT1; r.target2=sT2; r.rr=sRR; r.rr2=sRR2;
@@ -7201,6 +7382,14 @@ function coreEngine(ydata, coreData){
   r.underground_score = coreData.conditions_met || 0;
   r.core_mode         = coreData.core_mode || 'A';
   r.core_detail       = coreData.condition_detail || [];
+  // 밸류에이션/성장 (표시+AI용, 엔진 영향 없음)
+  r.per              = coreData.per;
+  r.pbr              = coreData.pbr;
+  r.psr              = coreData.psr;
+  r.revenue_yoy      = coreData.revenue_yoy;
+  r.op_margin        = coreData.op_margin;
+  r.fin_report_label = coreData.fin_report_label;
+  r.fin_confidence   = coreData.fin_confidence;
 
   // ── 진입각 계산 ──
   if(ydata.price){
@@ -8478,6 +8667,19 @@ function calcSellTargets(r){
   if(!entry||!stop) return null;
   var risk=entry-stop;
   if(risk<=0) return null;
+  // ── SWING: 엔진 계산값 (r.target1/r.target2) 우선 사용 ──
+  // swingEngine 이 10일 고점+2R+5% 기반 T1, 25% cap T2 계산함
+  // calcSellTargets 가 별도 로직 쓰면 UI와 R:R 불일치 (2026-04-24 bug fix)
+  if(r._mode==='swing' && r.target1 && r.target2){
+    return {
+      t1: r.target1,
+      t2: r.target2,
+      risk: parseFloat(risk.toFixed(2)),
+      parabolic: r.price && r.price > entry * 1.30,
+      overextended: false,
+    };
+  }
+  // ── 기본 경로 (MOMO / CORE / fallback) ──
   var t1=parseFloat((entry+risk).toFixed(2));
   var t2base=parseFloat((entry+risk*2).toFixed(2));
   var t2=t2base;
@@ -9132,6 +9334,45 @@ function cardHTML(r, mode){
       '</div>';
   }
 
+  // CORE 전용 — 밸류에이션/성장 (옵션 A: 표시만, 엔진 영향 없음)
+  // 점수 연동 없이 AI 해석과 사용자 판단 지원
+  var coreValuationHtml='';
+  if(r._mode==='core' && (r.per||r.pbr||r.psr||r.revenue_yoy!==null&&r.revenue_yoy!==undefined)){
+    var hasRev = r.revenue_yoy !== null && r.revenue_yoy !== undefined;
+    var hasFin = r.fin_confidence === 'full';
+    // 색상: 매출 YoY — +20% 이상 양호(녹), 0~20% 중립, 음수 경고(빨)
+    var yoyColor = hasRev
+      ? (r.revenue_yoy >= 20 ? 'var(--g)' : r.revenue_yoy >= 0 ? 'var(--t2)' : 'var(--r)')
+      : 'var(--t3)';
+    var yoyTxt = hasRev
+      ? (r.revenue_yoy >= 0 ? '+' : '') + r.revenue_yoy + '%'
+      : '--';
+    // 영업이익률
+    var marginTxt = (r.op_margin !== null && r.op_margin !== undefined)
+      ? (r.op_margin >= 0 ? '+' : '') + r.op_margin + '%' : '--';
+    coreValuationHtml=
+      '<div style="margin:6px 0 6px;padding:8px 10px;background:var(--bg2);border:1px solid var(--b);border-radius:10px">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'+
+          '<span style="font-family:var(--mono);font-size:9px;color:var(--t2);letter-spacing:.08em">밸류에이션 / 성장</span>'+
+          (hasFin && r.fin_report_label
+            ? '<span style="font-family:var(--mono);font-size:9px;color:var(--t3)">'+r.fin_report_label+'</span>'
+            : r.fin_confidence==='fetch_failed'
+              ? '<span style="font-family:var(--mono);font-size:9px;color:var(--t3)">재무 조회실패</span>'
+              : '<span style="font-family:var(--mono);font-size:9px;color:var(--t3)">DART 미연결</span>'
+          )+
+        '</div>'+
+        '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px">'+
+          '<div style="text-align:center"><div style="font-family:var(--mono);font-size:8px;color:var(--t3);letter-spacing:.06em">PER</div><div style="font-family:var(--mono);font-size:12px;color:var(--t1);margin-top:2px">'+(r.per?r.per:'--')+'</div></div>'+
+          '<div style="text-align:center"><div style="font-family:var(--mono);font-size:8px;color:var(--t3);letter-spacing:.06em">PBR</div><div style="font-family:var(--mono);font-size:12px;color:var(--t1);margin-top:2px">'+(r.pbr?r.pbr:'--')+'</div></div>'+
+          '<div style="text-align:center"><div style="font-family:var(--mono);font-size:8px;color:var(--t3);letter-spacing:.06em">PSR</div><div style="font-family:var(--mono);font-size:12px;color:var(--t1);margin-top:2px">'+(r.psr?r.psr:'--')+'</div></div>'+
+          '<div style="text-align:center"><div style="font-family:var(--mono);font-size:8px;color:var(--t3);letter-spacing:.06em">매출 YoY</div><div style="font-family:var(--mono);font-size:12px;color:'+yoyColor+';margin-top:2px;font-weight:600">'+yoyTxt+'</div></div>'+
+        '</div>'+
+        (r.op_margin !== null && r.op_margin !== undefined
+          ? '<div style="font-family:var(--mono);font-size:9px;color:var(--t3);margin-top:6px;text-align:center">영업이익률 '+marginTxt+'</div>'
+          : '')+
+      '</div>';
+  }
+
   // SWING 전용 조건 스코어 + 4레이어 바
   var swingChecklistHtml='';
   if(r._mode==='swing'){
@@ -9507,6 +9748,7 @@ function cardHTML(r, mode){
     (r.news?'<div class="news-line">'+r.news+'</div>':'')+
 
     coreScoreHtml+
+    coreValuationHtml+
     swingChecklistHtml+
 
     ((r.entry||r.stop||r.target1||r.rr)&&ac!=='BLOCK'?
@@ -9523,7 +9765,10 @@ function cardHTML(r, mode){
         '<div class="lv lv-entry"><div class="lv-label">진입</div><div class="lv-val">'+(r.entry?'₩'+Math.round(r.entry).toLocaleString():'--')+'</div></div>'+
         '<div class="lv lv-stop"><div class="lv-label">'+(r._mode==='core'?'손절(-7%)':'손절')+'</div><div class="lv-val">'+(r.stop?'₩'+Math.round(r.stop).toLocaleString():'--')+'</div></div>'+
         '<div class="lv lv-t1"><div class="lv-label">'+(r._mode==='core'?'T1(30%)':'T1(50%)')+'</div><div class="lv-val">'+(st?'₩'+Math.round(st.t1).toLocaleString():r.target1?'₩'+Math.round(r.target1).toLocaleString():'--')+'</div></div>'+
-        '<div class="lv lv-rr"><div class="lv-label">손익비</div><div class="lv-val">'+(r.rr?r.rr+'R':'--')+'</div></div>'+
+        (r._mode==='core'
+          ? '<div class="lv lv-rr"><div class="lv-label">목표 수익</div><div class="lv-val">'+(r.entry&&r.target1?'+'+Math.round((r.target1-r.entry)/r.entry*100)+'%':'--')+'</div></div>'
+          : '<div class="lv lv-rr"><div class="lv-label">손익비</div><div class="lv-val">'+(r.rr?r.rr+'R':'--')+'</div></div>'
+        )+
       '</div>'+
       (r._mode==='swing'&&r.target2?
         '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:5px;padding:6px 10px;background:rgba(43,159,255,.06);border:1px solid rgba(43,159,255,.15);border-radius:8px">'+
