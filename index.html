@@ -1431,6 +1431,7 @@ async function fetchKisPrice(stockCode){
     ulimit:      parseFloat(o.stck_mxpr)   || 0,   // 상한가
     llimit:      parseFloat(o.stck_llam)   || 0,   // 하한가
     name:        o.hts_kor_isnm || stockCode,
+    sectorName:  o.bstp_kor_isnm || null,          // 업종 한글명 (CORE 섹터 RS용)
     ts:          Date.now(),   // KIS 수신 시각
   };
 }
@@ -1677,6 +1678,368 @@ async function fetchKisDailyChart(symbol){
   }, headers);
   if(data.rt_cd !== '0') throw new Error('일봉오류:'+data.msg1);
   return data.output2 || [];  // 최신 날짜가 index 0
+}
+
+// ─────────────────────────────────────────
+// 긴-범위 일봉 — CORE 전용 (MA120 기울기, 52주 고점 계산용)
+// inquire-daily-itemchartprice는 호출당 최대 100개 반환 →
+// 3회 페이지네이션으로 ~260일 확보
+// TR: FHKST03010100
+// ─────────────────────────────────────────
+async function fetchKisDailyChartLong(symbol, targetDays){
+  var code  = symbol.replace(/\.(KS|KQ|KN)$/i,'');
+  var want  = targetDays || 260;
+  var today = new Date();
+  function fmt(d){ return d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0'); }
+
+  var headers = await kisAuthHeaders('FHKST03010100');
+  var allCandles = [];
+  var seen = {};
+  var endDate = new Date(today);
+  // 각 호출 100일 window, 최대 4회 (~400일) — 주말/공휴일 감안하여 260 영업일 확보
+  for(var page=0; page<4; page++){
+    var startDate = new Date(endDate); startDate.setDate(startDate.getDate()-100);
+    try{
+      var data = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice',{
+        FID_COND_MRKT_DIV_CODE: 'J',
+        FID_INPUT_ISCD:          code,
+        FID_INPUT_DATE_1:        fmt(startDate),
+        FID_INPUT_DATE_2:        fmt(endDate),
+        FID_PERIOD_DIV_CODE:    'D',
+        FID_ORG_ADJ_PRC:        '0',
+      }, headers);
+      if(data.rt_cd !== '0'){
+        console.warn('[KIS-DailyLong] page',page,'실패:',data.msg1);
+        break;
+      }
+      var page_candles = data.output2 || [];
+      if(!page_candles.length) break;
+      // 중복 제거 (stck_bsop_date 기준)
+      for(var i=0;i<page_candles.length;i++){
+        var d = page_candles[i].stck_bsop_date;
+        if(d && !seen[d] && parseFloat(page_candles[i].stck_clpr)>0){
+          seen[d] = true;
+          allCandles.push(page_candles[i]);
+        }
+      }
+      if(allCandles.length >= want) break;
+      // 다음 window: 가장 오래된 날짜 하루 전부터
+      endDate = new Date(startDate); endDate.setDate(endDate.getDate()-1);
+    }catch(e){
+      console.warn('[KIS-DailyLong] page',page,'예외:',e.message);
+      break;
+    }
+  }
+  // 최신 index 0 유지 (날짜 내림차순)
+  allCandles.sort(function(a,b){ return b.stck_bsop_date.localeCompare(a.stck_bsop_date); });
+  return allCandles;
+}
+
+// ─────────────────────────────────────────
+// KIS 업종 코드 매핑 — 동적 자동 구축
+// 용도: CORE 섹터 RS 계산 — 종목이 속한 업종 지수 대비 초과수익률
+// 접근: KIS 업종 랭킹 API 호출 → 응답에서 {이름: 코드} 추출 → localStorage 24h 캐시
+// 원칙: "데이터 기반" — 정적 테이블 대신 KIS 응답을 source of truth로
+// ─────────────────────────────────────────
+var KR_SECTOR_MAP_CACHE_KEY = 'kisSectorMap_v1';
+var KR_SECTOR_MAP_TTL       = 24 * 60 * 60 * 1000; // 24시간
+
+// 전역 캐시 — 세션 중에는 G.sectorMap 재사용
+// 구조: { name2code: {'전기.전자':'0013', ...}, code2name: {...}, builtAt: timestamp }
+if(typeof G !== 'undefined' && !G.sectorMap) G.sectorMap = null;
+
+// localStorage → G.sectorMap 로드 (있으면)
+function _loadSectorMapCache(){
+  try{
+    var raw = localStorage.getItem(KR_SECTOR_MAP_CACHE_KEY);
+    if(!raw) return null;
+    var data = JSON.parse(raw);
+    if(!data || !data.builtAt || !data.name2code) return null;
+    if(Date.now() - data.builtAt > KR_SECTOR_MAP_TTL) return null; // stale
+    return data;
+  }catch(e){ return null; }
+}
+
+// KIS 업종 랭킹 API 호출 → 업종 이름+코드 리스트 추출
+// fluctuation 랭킹 API (fid_cond_mrkt_div_code='U', fid_input_iscd=0001/1001) 사용
+// 응답 각 entry 에서 업종 코드 필드를 방어적으로 검색 (bstp_cls_code 1순위)
+async function buildSectorMap(forceRefresh){
+  // 캐시 우선
+  if(!forceRefresh){
+    var cached = _loadSectorMapCache();
+    if(cached){
+      if(typeof G !== 'undefined') G.sectorMap = cached;
+      return cached;
+    }
+  }
+  if(!KIS.appKey || !KIS.appSecret){
+    console.warn('[SectorMap] KIS 미인증 — 매핑 빌드 불가');
+    return null;
+  }
+
+  var name2code = {};
+  var code2name = {};
+
+  try{
+    var headers = await kisAuthHeaders('FHPST02300000');
+    var markets = ['0001', '1001']; // 코스피, 코스닥
+    for(var mi=0; mi<markets.length; mi++){
+      try{
+        var data = await kisGet('/uapi/domestic-stock/v1/ranking/fluctuation', {
+          fid_cond_mrkt_div_code:'U',
+          fid_cond_scr_div_code:'208',
+          fid_input_iscd:        markets[mi],
+          fid_div_cls_code:      '0',
+          fid_blng_cls_code:     '0',
+          fid_trgt_cls_code:     '0',
+          fid_trgt_exls_cls_code:'0',
+          fid_input_price_1:     '',
+          fid_input_price_2:     '',
+          fid_vol_cnt:           '',
+          fid_input_date_1:      ''
+        }, Object.assign({}, headers, {'tr_id':'FHPST02300000'}));
+
+        var out = (data && data.output) || [];
+        out.forEach(function(s){
+          var name = s.hts_kor_isnm || '';
+          // 업종 코드 후보 필드 (방어적)
+          var code = s.bstp_cls_code || s.mksc_shrn_iscd || s.stck_shrn_iscd || '';
+          if(name && code && /^\d{4}$/.test(code)){
+            name2code[name] = code;
+            code2name[code] = name;
+          }
+        });
+      }catch(e){
+        console.warn('[SectorMap] market '+markets[mi]+' 실패:', e.message);
+      }
+    }
+  }catch(e){
+    console.warn('[SectorMap] 인증 헤더 실패:', e.message);
+    return null;
+  }
+
+  var count = Object.keys(name2code).length;
+  if(count < 5){
+    console.warn('[SectorMap] 추출 업종 수 부족 ('+count+') — 응답 필드 확인 필요');
+    return null;
+  }
+
+  var result = { name2code: name2code, code2name: code2name, builtAt: Date.now() };
+  try{ localStorage.setItem(KR_SECTOR_MAP_CACHE_KEY, JSON.stringify(result)); }catch(e){}
+  if(typeof G !== 'undefined') G.sectorMap = result;
+  console.log('[SectorMap] ✓ 빌드 완료 '+count+' 업종 (예: '+Object.keys(name2code).slice(0,3).map(function(k){return k+'='+name2code[k];}).join(', ')+')');
+  return result;
+}
+
+// bstp_kor_isnm (KIS 업종 한글명) → 섹터 코드 변환
+// 매핑이 없으면 null — 호출측에서 buildSectorMap 으로 lazy load 하거나 graceful fallback
+function kisSectorCodeFromName(sectorName){
+  if(!sectorName) return null;
+  var map = (typeof G !== 'undefined' && G.sectorMap && G.sectorMap.name2code) || null;
+  if(!map){
+    // 메모리 없으면 localStorage 한 번 더 체크
+    var cached = _loadSectorMapCache();
+    if(cached){
+      if(typeof G !== 'undefined') G.sectorMap = cached;
+      map = cached.name2code;
+    }
+  }
+  if(!map) return null;
+
+  var direct = map[sectorName];
+  if(direct) return direct;
+  // 폴백: 공백·점·쉼표 제거 후 재시도
+  var normalized = sectorName.replace(/[\s.,·]/g,'');
+  for(var k in map){
+    if(k.replace(/[\s.,·]/g,'') === normalized) return map[k];
+  }
+  return null;
+}
+
+// ── 디버그 헬퍼: 콘솔에서 확인용 ──
+// showSectorMap() : 현재 매핑 출력
+// rebuildSectorMap() : 캐시 삭제 + 재빌드 (강제)
+async function showSectorMap(){
+  if(!G.sectorMap){
+    var cached = _loadSectorMapCache();
+    if(cached) G.sectorMap = cached;
+  }
+  if(!G.sectorMap){
+    console.log('[SectorMap] 비어있음 — buildSectorMap() 또는 rebuildSectorMap() 실행');
+    return null;
+  }
+  var m = G.sectorMap;
+  console.log('━━ KIS 업종 매핑 ('+Object.keys(m.name2code).length+' 업종, '+new Date(m.builtAt).toLocaleString()+' 빌드) ━━');
+  var names = Object.keys(m.name2code).sort();
+  names.forEach(function(n){ console.log('  '+m.name2code[n]+' '+n); });
+  return m;
+}
+async function rebuildSectorMap(){
+  localStorage.removeItem(KR_SECTOR_MAP_CACHE_KEY);
+  if(typeof G !== 'undefined') G.sectorMap = null;
+  var r = await buildSectorMap(true);
+  if(r) return showSectorMap();
+  return null;
+}
+
+// ─────────────────────────────────────────
+// 업종 지수 일봉 시계열 — 섹터 RS 계산용
+// URL: /uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice
+// TR:  FHKUP03500100
+// Params: FID_COND_MRKT_DIV_CODE='U' (업종), FID_INPUT_ISCD=4자리 업종코드
+// 최대 50건/호출, 65영업일(13주) 필요 → 2회 호출로 충분
+// output2 필드:
+//   stck_bsop_date, bstp_nmix_prpr (종가), bstp_nmix_oprc/hgpr/lwpr, acml_vol, acml_tr_pbmn
+// 최신 index 0 반환 (KIS 일봉과 동일)
+// ─────────────────────────────────────────
+async function fetchKisSectorDailyChart(sectorCode, targetDays){
+  if(!sectorCode) return [];
+  var want  = targetDays || 70;
+  var today = new Date();
+  function fmt(d){ return d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0'); }
+
+  var headers = await kisAuthHeaders('FHKUP03500100');
+  var allCandles = [];
+  var seen = {};
+  var endDate = new Date(today);
+  // 각 호출 ~50 영업일, 최대 2회로 ~100 영업일 확보 (13주 RS 충분)
+  for(var page=0; page<2; page++){
+    var startDate = new Date(endDate); startDate.setDate(startDate.getDate()-80); // 80 캘린더일 ≈ 55 영업일
+    try{
+      var data = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice', {
+        FID_COND_MRKT_DIV_CODE: 'U',
+        FID_INPUT_ISCD:          sectorCode,
+        FID_INPUT_DATE_1:        fmt(startDate),
+        FID_INPUT_DATE_2:        fmt(endDate),
+        FID_PERIOD_DIV_CODE:    'D',
+      }, headers);
+      if(data.rt_cd !== '0'){
+        console.warn('[KIS-Sector] page',page,'실패:',data.msg1);
+        break;
+      }
+      var page_candles = data.output2 || [];
+      if(!page_candles.length) break;
+      for(var i=0;i<page_candles.length;i++){
+        var d = page_candles[i].stck_bsop_date;
+        if(d && !seen[d] && parseFloat(page_candles[i].bstp_nmix_prpr)>0){
+          seen[d] = true;
+          allCandles.push(page_candles[i]);
+        }
+      }
+      if(allCandles.length >= want) break;
+      endDate = new Date(startDate); endDate.setDate(endDate.getDate()-1);
+    }catch(e){
+      console.warn('[KIS-Sector] page',page,'예외:',e.message);
+      break;
+    }
+  }
+  allCandles.sort(function(a,b){ return b.stck_bsop_date.localeCompare(a.stck_bsop_date); });
+  return allCandles;
+}
+
+// ─────────────────────────────────────────
+// 종목별 투자자 매매 이력 — 외국인/기관 30일 일별 순매수
+// HTS [0778] 주식현재가 투자자 화면과 동일
+// TR: FHKST01010900
+// output: 최대 30일 (최신 index 0)
+//   stck_bsop_date  : 영업일 YYYYMMDD
+//   stck_clpr       : 종가
+//   acml_vol        : 누적 거래량
+//   prsn_ntby_qty   : 개인 순매수 수량 (+매수 / -매도)
+//   frgn_ntby_qty   : 외국인 순매수 수량
+//   orgn_ntby_qty   : 기관 순매수 수량
+// ─────────────────────────────────────────
+async function fetchKisInvestorHistory(symbol){
+  var code = symbol.replace(/\.(KS|KQ|KN)$/i,'');
+  var headers = await kisAuthHeaders('FHKST01010900');
+  var data = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-investor',{
+    FID_COND_MRKT_DIV_CODE: 'J',
+    FID_INPUT_ISCD:          code,
+  }, headers);
+  if(data.rt_cd !== '0') throw new Error('투자자이력오류:'+data.msg1);
+  return data.output || [];
+}
+
+// ─────────────────────────────────────────
+// 투자자 매매 이력 → CORE용 누적/추세 지표 계산
+// 입력: fetchKisInvestorHistory 결과 (최신 index 0)
+// 출력:
+//   foreign_net_20d, foreign_net_30d          (누적 수량)
+//   inst_net_20d,    inst_net_30d
+//   foreign_days_positive_20d                 (양수 일수 / 20)
+//   inst_days_positive_20d
+//   foreign_net_trend  : +1 가속 / 0 유지 / -1 둔화
+//   inst_net_trend
+//   both_accumulating  : 외+기관 20일 동반 순매수
+//   flow_confidence    : 'full'|'partial'|'none'
+// ─────────────────────────────────────────
+function calcInvestorFlow(investorData){
+  var flow = {
+    foreign_net_20d: null, foreign_net_30d: null,
+    inst_net_20d:    null, inst_net_30d:    null,
+    foreign_days_positive_20d: null,
+    inst_days_positive_20d:    null,
+    foreign_net_trend: null, inst_net_trend: null,
+    both_accumulating: null,
+    flow_confidence:  'none',
+  };
+  if(!investorData || !investorData.length) return flow;
+
+  // 유효 레코드만 (날짜+수량 존재)
+  var rows = investorData.filter(function(r){
+    return r.stck_bsop_date && (r.frgn_ntby_qty !== undefined || r.orgn_ntby_qty !== undefined);
+  });
+  if(rows.length < 5){
+    flow.flow_confidence = 'none';
+    return flow;
+  }
+
+  function sumField(arr, field){
+    return arr.reduce(function(s,r){ return s + (parseFloat(r[field]) || 0); }, 0);
+  }
+  function countPositive(arr, field){
+    return arr.filter(function(r){ return (parseFloat(r[field])||0) > 0; }).length;
+  }
+
+  var last20 = rows.slice(0, 20);
+  var last30 = rows.slice(0, 30);
+  var last10 = rows.slice(0, 10);
+  var prev10 = rows.slice(10, 20);  // 11~20일 전
+
+  flow.foreign_net_20d = Math.round(sumField(last20, 'frgn_ntby_qty'));
+  flow.inst_net_20d    = Math.round(sumField(last20, 'orgn_ntby_qty'));
+  flow.foreign_net_30d = Math.round(sumField(last30, 'frgn_ntby_qty'));
+  flow.inst_net_30d    = Math.round(sumField(last30, 'orgn_ntby_qty'));
+
+  flow.foreign_days_positive_20d = countPositive(last20, 'frgn_ntby_qty');
+  flow.inst_days_positive_20d    = countPositive(last20, 'orgn_ntby_qty');
+
+  // 추세 (최근 10일 vs 이전 10일) — 가속/둔화 판정
+  // 방향(부호) 변화를 우선 확인
+  if(prev10.length >= 5){
+    var f_recent = sumField(last10, 'frgn_ntby_qty');
+    var f_prev   = sumField(prev10, 'frgn_ntby_qty');
+    var i_recent = sumField(last10, 'orgn_ntby_qty');
+    var i_prev   = sumField(prev10, 'orgn_ntby_qty');
+
+    // 가속: 같은 부호에서 절댓값 확대, 또는 음→양 전환
+    if(f_recent > 0 && f_prev <= 0)                flow.foreign_net_trend = 1;     // 전환 (매도→매수)
+    else if(f_recent > 0 && f_recent > f_prev*1.2) flow.foreign_net_trend = 1;     // 매수 가속
+    else if(f_recent < 0 && f_prev >= 0)           flow.foreign_net_trend = -1;    // 전환 (매수→매도)
+    else                                            flow.foreign_net_trend = 0;     // 유지
+
+    if(i_recent > 0 && i_prev <= 0)                flow.inst_net_trend = 1;
+    else if(i_recent > 0 && i_recent > i_prev*1.2) flow.inst_net_trend = 1;
+    else if(i_recent < 0 && i_prev >= 0)           flow.inst_net_trend = -1;
+    else                                            flow.inst_net_trend = 0;
+  }
+
+  flow.both_accumulating = flow.foreign_net_20d > 0 && flow.inst_net_20d > 0;
+
+  // 신뢰도 — 20일 full, 10~19일 partial, 그 외 none
+  flow.flow_confidence = last20.length >= 20 ? 'full' :
+                         last20.length >= 10 ? 'partial' : 'none';
+  return flow;
 }
 
 // ─────────────────────────────────────────
@@ -4451,7 +4814,411 @@ async function _fetchSwingFromKis(ticker, kisPrice, sw){
 
 
 
-// ── CORE 전용: 한국 중장기 물밑 포착 (5/20/60/120일 기준) ──
+// ═══════════════════════════════════════════════════════════
+// CORE 지표 계산 — 정규화된 일봉 배열 기반 (KIS·Yahoo 공용)
+// valid: [{c,h,l,o,v}, ...] oldest→newest
+// KIS·Yahoo 어느 경로로 들어와도 동일 math 보장
+// ═══════════════════════════════════════════════════════════
+function _computeCoreIndicatorsFromValid(valid, cd){
+  if(!valid || valid.length < 50) return false;
+  var n = valid.length;
+  cd.price = valid[n-1].c;
+
+  function sma(arr,p){ if(arr.length<p) return null; var s=arr.slice(-p); return s.reduce(function(a,d){return a+d.c;},0)/p; }
+
+  // ── 한국 표준: 5/20/60/120일 ──
+  cd.ma5   = valid.length>=5   ? sma(valid,5)   : null;
+  cd.ma20  = valid.length>=20  ? sma(valid,20)  : null;
+  cd.ma60  = valid.length>=60  ? sma(valid,60)  : null;
+  cd.ma120 = valid.length>=120 ? sma(valid,120) : null;
+
+  // MA 기울기 (10일 전 대비)
+  if(valid.length>=30 && cd.ma20){
+    var m20ago=sma(valid.slice(0,-10),20);
+    if(m20ago) cd.ma20_slope=parseFloat(((cd.ma20-m20ago)/m20ago*100).toFixed(3));
+  }
+  if(valid.length>=70 && cd.ma60){
+    var m60ago=sma(valid.slice(0,-10),60);
+    if(m60ago) cd.ma60_slope=parseFloat(((cd.ma60-m60ago)/m60ago*100).toFixed(3));
+  }
+  if(valid.length>=130 && cd.ma120){
+    var m120ago=sma(valid.slice(0,-10),120);
+    if(m120ago) cd.ma120_slope=parseFloat(((cd.ma120-m120ago)/m120ago*100).toFixed(3));
+  }
+
+  if(cd.ma120){
+    cd.above_ma120=cd.price>cd.ma120;
+    cd.price_vs_ma120_pct=parseFloat(((cd.price-cd.ma120)/cd.ma120*100).toFixed(1));
+  }
+  if(cd.ma60) cd.above_ma60=cd.price>cd.ma60;
+
+  if(cd.ma5 && cd.ma20)
+    cd.golden_cross_forming = cd.ma5 < cd.ma20 && cd.ma5 > cd.ma20*0.99;
+
+  // 52주 고점/저점
+  var hi52=Math.max.apply(null,valid.slice(-252).map(function(d){return d.h;}));
+  var lo52=Math.min.apply(null,valid.slice(-252).map(function(d){return d.l;}));
+  if(hi52>0) cd.price_vs_52wk_high_pct=parseFloat(((cd.price-hi52)/hi52*100).toFixed(1));
+  if(lo52>0) cd.price_vs_52wk_low_pct =parseFloat(((cd.price-lo52)/lo52*100).toFixed(1));
+
+  // OBV
+  var obv=0, obvArr=[0];
+  for(var i=1;i<n;i++){
+    obv+=(valid[i].c>valid[i-1].c?valid[i].v:valid[i].c<valid[i-1].c?-valid[i].v:0);
+    obvArr.push(obv);
+  }
+  if(n>=60){
+    var rc=valid.slice(-60), ro=obvArr.slice(-60), mid=30;
+    var pL1=Math.min.apply(null,rc.slice(0,mid).map(function(d){return d.l;}));
+    var pL2=Math.min.apply(null,rc.slice(mid).map(function(d){return d.l;}));
+    var oI1=rc.slice(0,mid).reduce(function(mi,d,i){return d.l<rc[mi].l?i:mi;},0);
+    var oI2=rc.slice(mid).reduce(function(mi,d,i){return d.l<rc[mid+mi].l?i:mi;},0);
+    cd.obv_bullish_div = pL2<pL1 && ro[oI2+mid]>ro[oI1];
+  }
+
+  // A/D Line
+  var ad=0, adArr=[];
+  for(var i=0;i<n;i++){
+    var d=valid[i], rng=d.h-d.l;
+    ad+=(rng>0?((d.c-d.l)-(d.h-d.c))/rng*d.v:0);
+    adArr.push(ad);
+  }
+  if(adArr.length>=40){
+    var adS=adArr.slice(-40);
+    // 선형 회귀 기울기 — 노이즈 강인
+    var _n=adS.length,_mx=(_n-1)/2,_my=adS.reduce(function(a,b){return a+b;},0)/_n;
+    var _num=0,_den=0;
+    for(var _i=0;_i<_n;_i++){_num+=(_i-_mx)*(adS[_i]-_my);_den+=(_i-_mx)*(_i-_mx);}
+    var _std=Math.sqrt(adS.reduce(function(a,v){return a+(v-_my)*(v-_my);},0)/_n)||1;
+    cd.ad_line_slope=_den>0 ? parseFloat((_num/_den/_std*100).toFixed(2)) : 0;
+    cd.ad_bullish_div=cd.ad_line_slope>0;
+  }
+
+  // Higher Lows (5일 단위, 60일=12주 기준) — CORE는 수주 보유, 20일은 너무 짧음
+  var wkLows=[];
+  for(var i=0;i<n-4;i+=5)
+    wkLows.push(Math.min.apply(null,valid.slice(i,i+5).map(function(d){return d.l;})));
+  if(wkLows.length>=12){
+    // 최근 12주(60일) Higher Lows: 4주 단위 3구간 비교
+    var w12=wkLows.slice(-12);
+    var q1Low=Math.min.apply(null,w12.slice(0,4));   // 9~12주 전 저점
+    var q2Low=Math.min.apply(null,w12.slice(4,8));   // 5~8주 전 저점
+    var q3Low=Math.min.apply(null,w12.slice(8,12));  // 최근 4주 저점
+    cd.higher_lows = q2Low>q1Low && q3Low>q2Low;
+  } else if(wkLows.length>=4){
+    // 데이터 부족 시 4주 폴백
+    var w=wkLows.slice(-4);
+    cd.higher_lows=w[1]>w[0]&&w[2]>w[1]&&w[3]>w[2];
+  }
+
+  // 하락일 거래량 고갈 — c<prev_c (전일 대비 실제 하락일) 기준
+  // Phase 2 수정: c<o (당일 음봉) 은 intraday 변동만 반영, 매도세 소진은 전일 대비 비교가 정석
+  // Gap-up 후 음봉 같은 케이스는 실제로는 상승일이므로 과거 기준에서 오탐 발생
+  if(n>=30){
+    var _dvSum1=0, _dvCnt1=0, _dvSum2=0, _dvCnt2=0;
+    // 이전 15일 (n-30 ~ n-16) — valid[i-1] 참조 위해 i>=1 가드
+    for(var _i=Math.max(n-30,1); _i<n-15; _i++){
+      if(valid[_i].c < valid[_i-1].c){ _dvSum1+=valid[_i].v; _dvCnt1++; }
+    }
+    // 최근 15일 (n-15 ~ n-1)
+    for(var _i=n-15; _i<n; _i++){
+      if(valid[_i].c < valid[_i-1].c){ _dvSum2+=valid[_i].v; _dvCnt2++; }
+    }
+    var avg1 = _dvCnt1>0 ? _dvSum1/_dvCnt1 : 0;
+    var avg2 = _dvCnt2>0 ? _dvSum2/_dvCnt2 : 0;
+    cd.down_vol_exhaustion = avg1>0 && avg2<avg1*0.65;
+  }
+
+  // Up/Down Volume Ratio 65일 — c>prev_c / c<prev_c (전일 대비) 기준
+  // Phase 2 수정: 음/양봉(c<o,c>o)이 아니라 전일 대비 상승/하락일로 거래량 구분
+  if(n>=65){
+    var _uv=0, _dv=0;
+    for(var _i=Math.max(n-65,1); _i<n; _i++){
+      if(valid[_i].c > valid[_i-1].c)      _uv += valid[_i].v;
+      else if(valid[_i].c < valid[_i-1].c) _dv += valid[_i].v;
+      // c == prev_c (보합) 은 양쪽 모두에서 제외
+    }
+    if(_dv>0) cd.up_down_vol_ratio = parseFloat((_uv/_dv).toFixed(2));
+  }
+
+  // ── 베이스 분석 ──
+  var recent30h=valid.slice(-30).map(function(d){return d.h;});
+  cd.recent6wHigh=recent30h.length>0?Math.max.apply(null,recent30h):null;
+  cd.base_depth_pct=cd.recent6wHigh&&cd.recent6wHigh>0
+    ?parseFloat(((cd.price-cd.recent6wHigh)/cd.recent6wHigh*100).toFixed(1)):null;
+
+  var baseWeeks=0;
+  if(cd.recent6wHigh){
+    for(var i=valid.length-1;i>=Math.max(0,valid.length-20);i--){
+      if(Math.abs((valid[i].c-cd.recent6wHigh)/cd.recent6wHigh)<=0.15) baseWeeks++;
+      else break;
+    }
+    cd.base_weeks=Math.round(baseWeeks/5);
+  }
+
+  if(valid.length>=30){
+    var low6w=Math.min.apply(null,valid.slice(-30).map(function(d){return d.l;}));
+    cd.overextended=low6w>0&&((cd.price-low6w)/low6w)>0.30&&(cd.base_depth_pct===null||cd.base_depth_pct>-5);
+  }
+
+  // 베이스 품질
+  if(cd.recent6wHigh){
+    if(n>=40){
+      var _bVrecent=valid.slice(-20).reduce(function(s,d){return s+d.v;},0)/20;
+      var _bVprev  =valid.slice(-40,-20).reduce(function(s,d){return s+d.v;},0)/20;
+      cd.base_vol_contracting = _bVprev>0 && _bVrecent<_bVprev*0.80;
+    }
+    cd.base_top_tests = valid.slice(-30).filter(function(d){
+      return d.h>=cd.recent6wHigh*0.98;
+    }).length;
+    cd.base_breakout_ready =
+      cd.base_depth_pct!==null &&
+      cd.base_depth_pct>=-3   &&
+      cd.base_vol_contracting &&
+      cd.base_top_tests>=2;
+  }
+
+  // ── 한국 스테이지 판단 (120일선 기준) ──
+  var pct120=cd.price_vs_ma120_pct||0;
+  var ma120U=cd.ma120_slope!==null&&cd.ma120_slope>0;
+  if(pct120<-20&&!ma120U)             cd.stage='Stage 1 (바닥 횡보)';
+  else if(pct120<5&&ma120U)           cd.stage='Stage 1→2 (전환 초입)';
+  else if(pct120>=0&&pct120<30&&ma120U) cd.stage='Stage 2 (상승 추세)';
+  else if(pct120>=30)                 cd.stage='Stage 2→3 (과확장 주의)';
+  else if(pct120<0&&ma120U===false)   cd.stage='Stage 3→4 (하락 전환)';
+  else                                cd.stage='Stage 4 (하락)';
+
+  // Mode A: 물밑 포착 / Mode B: 추세 지속 / overextended
+  var isNearHigh=cd.price_vs_52wk_high_pct!==null&&cd.price_vs_52wk_high_pct>-20;
+  var hasValidBase=cd.base_weeks>=3&&cd.base_depth_pct!==null&&cd.base_depth_pct>-25&&cd.base_depth_pct<=0;
+  cd.core_mode=isNearHigh?(hasValidBase?'B':'overextended'):'A';
+
+  return true;
+}
+
+// ─────────────────────────────────────────
+// KOSPI 대비 RS 계산 (벤치마크 = Yahoo ^KS11, 캐시 재사용)
+// 초과수익률 방식 (stock_return - market_return)
+// ─────────────────────────────────────────
+async function _computeCoreRSFromKospi(valid, cd){
+  try{
+    var _now2=Date.now();
+    if(!G.kospiCloses20||(_now2-G.kospiClosesCachedAt)>3600000){
+      var kospiD=await fetchWithProxy('https://query1.finance.yahoo.com/v8/finance/chart/^KS11?interval=1d&range=6mo');
+      var _kc=(kospiD?.chart?.result?.[0]?.indicators?.quote?.[0]?.close||[]).filter(function(v){return v&&v>0;});
+      if(_kc.length>=65){G.kospiCloses20=_kc;G.kospiClosesCachedAt=_now2;}
+    }
+    var kospiC=G.kospiCloses20||[];
+    var n=valid.length;
+    if(kospiC.length>=65&&n>=65){
+      var stkR13=(cd.price-valid[n-65].c)/valid[n-65].c*100;
+      var mktR13=(kospiC[kospiC.length-1]-kospiC[Math.max(0,kospiC.length-65)])/kospiC[Math.max(0,kospiC.length-65)]*100;
+      cd.rs_13w=parseFloat((stkR13-mktR13).toFixed(1));
+      if(n>=130&&kospiC.length>=130){
+        var stkR_prev=(valid[n-65].c-valid[n-130].c)/valid[n-130].c*100;
+        var mktR_prev=(kospiC[Math.max(0,kospiC.length-65)]-kospiC[Math.max(0,kospiC.length-130)])/kospiC[Math.max(0,kospiC.length-130)]*100;
+        var rs_prev=parseFloat((stkR_prev-mktR_prev).toFixed(1));
+        cd.rs_trend=cd.rs_13w>rs_prev;
+      }
+      if(n>=40&&kospiC.length>=40){
+        var stkR4w=(valid[n-1].c-valid[n-20].c)/valid[n-20].c*100;
+        var mktR4w=(kospiC[kospiC.length-1]-kospiC[Math.max(0,kospiC.length-20)])/kospiC[Math.max(0,kospiC.length-20)]*100;
+        var stkR8w=(valid[n-20].c-valid[Math.max(0,n-40)].c)/valid[Math.max(0,n-40)].c*100;
+        var mktR8w=(kospiC[Math.max(0,kospiC.length-20)]-kospiC[Math.max(0,kospiC.length-40)])/kospiC[Math.max(0,kospiC.length-40)]*100;
+        var rs4=(stkR4w-mktR4w), rs8=(stkR8w-mktR8w);
+        cd.rs_declining=rs4<rs8&&rs4<0;
+      }
+    }
+  }catch(e2){ console.warn('[Core-RS]',e2.message); }
+}
+
+// ─────────────────────────────────────────
+// 8조건 계산 + condition_detail 생성
+// 공용 (KIS·Yahoo 경로 동일)
+// ─────────────────────────────────────────
+function _computeCore8Conditions(cd){
+  var c1=cd.ad_line_slope!==null&&cd.ad_line_slope>0;          // A/D Line 상승
+  var c2=cd.obv_bullish_div===true;                             // OBV 불리시 다이버전스
+  var c3=cd.rs_trend===true;                                    // KOSPI 대비 RS 개선
+  var c4=cd.higher_lows===true;                                 // Higher Lows 패턴
+  var c5=cd.down_vol_exhaustion===true;                         // 하락일 거래량 고갈
+  var c6=cd.ma60_slope!==null&&cd.ma60_slope>-0.3;             // 수급선(60일) 기울기 회복
+  var c7=cd.price_vs_ma120_pct!==null&&Math.abs(cd.price_vs_ma120_pct)<=20; // 경기선 ±20%
+  var c8=cd.up_down_vol_ratio!==null&&cd.up_down_vol_ratio>=1.0;
+
+  cd.conditions_met=[c1,c2,c3,c4,c5,c6,c7,c8].filter(Boolean).length;
+  cd.condition_detail=[
+    (c1?'✓':'✗')+' A/D Line 상승'+(cd.ad_line_slope!==null?' ('+cd.ad_line_slope+'%)':' (데이터부족)'),
+    (c2?'✓':'✗')+' OBV 불리시 다이버전스',
+    (c3?'✓':'✗')+' KOSPI 대비 RS 개선'+(cd.rs_13w!==null?' ('+cd.rs_13w+'%p)':' (데이터부족)'),
+    (c4?'✓':'✗')+' Higher Lows 패턴',
+    (c5?'✓':'✗')+' 하락일 거래량 고갈',
+    (c6?'✓':'✗')+' 수급선(60일) 기울기 회복'+(cd.ma60_slope!==null?' ('+cd.ma60_slope+'%)':' (데이터부족)'),
+    (c7?'✓':'✗')+' 경기선(120일) ±20% 구간'+(cd.price_vs_ma120_pct!==null?' ('+(cd.price_vs_ma120_pct>=0?'+':'')+cd.price_vs_ma120_pct+'%)':' (데이터부족)'),
+    (c8?'✓':'✗')+' Up/Down Volume ≥1.0'+(cd.up_down_vol_ratio!==null?' ('+cd.up_down_vol_ratio+'x)':' (데이터부족)'),
+    '── 베이스: 깊이 '+(cd.base_depth_pct!==null?cd.base_depth_pct+'%':'--')+' / 기간 '+(cd.base_weeks!==null?cd.base_weeks+'주':'--'),
+    '── Mode: '+(cd.core_mode==='A'?'A (물밑 포착)':cd.core_mode==='B'?'B (추세 지속)':'과확장')+' / RS하락: '+(cd.rs_declining?'⚠ 감지':'없음'),
+    '── 베이스: 상단 테스트 '+cd.base_top_tests+'회'+
+      (cd.base_vol_contracting?' · 거래량 수축 ✓':' · 거래량 수축 없음')+
+      (cd.base_breakout_ready?' [📦 돌파 준비 완료]':''),
+  ];
+
+  // ── 수급 직접 데이터 (KIS 전용 — flow_confidence != 'none' 일 때만) ──
+  if(cd.flow_confidence && cd.flow_confidence !== 'none' && cd.foreign_net_20d !== null){
+    var fStr = (cd.foreign_net_20d>=0?'+':'')+cd.foreign_net_20d.toLocaleString();
+    var iStr = (cd.inst_net_20d>=0?'+':'')+cd.inst_net_20d.toLocaleString();
+    var trendStr = function(t){ return t===1?'↑가속':t===-1?'↓둔화':'→유지'; };
+    cd.condition_detail.push('── 수급(외국인) 20일 '+fStr+'주 · '+cd.foreign_days_positive_20d+'/20일 매수 · '+trendStr(cd.foreign_net_trend));
+    cd.condition_detail.push('── 수급(기관)   20일 '+iStr+'주 · '+cd.inst_days_positive_20d+'/20일 매수 · '+trendStr(cd.inst_net_trend));
+    if(cd.both_accumulating) cd.condition_detail.push('── 수급: 외국인+기관 동반 매집 ★');
+  } else {
+    cd.condition_detail.push('── 수급 직접 데이터 결측 (proxy 지표 A/D·OBV만 사용)');
+  }
+}
+
+// ─────────────────────────────────────────
+// KIS 일봉 candles (newest-first) → valid[] (oldest-first)
+// ─────────────────────────────────────────
+function _kisCandlesToValid(candles){
+  var valid=[];
+  for(var i=candles.length-1;i>=0;i--){
+    var c=candles[i];
+    var cl=parseFloat(c.stck_clpr), h=parseFloat(c.stck_hgpr), l=parseFloat(c.stck_lwpr),
+        o=parseFloat(c.stck_oprc), v=parseFloat(c.acml_vol);
+    if(cl>0 && v>0)
+      valid.push({c:cl, h:h||cl, l:l||cl, o:o||cl, v:v});
+  }
+  return valid;
+}
+
+// ─────────────────────────────────────────
+// KIS 경로: 일봉 + 투자자 이력 + 업종 정보 병렬 호출 후 지표 계산
+// ─────────────────────────────────────────
+async function _fetchCoreFromKis(ticker, cd){
+  var candlesP  = fetchKisDailyChartLong(ticker, 260);
+  var investorP = fetchKisInvestorHistory(ticker).catch(function(e){
+    console.warn('[CoreData-KIS] 투자자이력 실패:',ticker,e.message);
+    return [];
+  });
+  // 섹터 정보: 종목의 bstp_kor_isnm 얻기 위해 fetchKisPrice 병렬 호출
+  var priceP = fetchKisPrice(ticker.replace(/\.(KS|KQ|KN)$/i,'')).catch(function(e){
+    console.warn('[CoreData-KIS] 시세(섹터명) 실패:',ticker,e.message);
+    return null;
+  });
+  var candles = await candlesP;
+  var investorData = await investorP;
+  var priceInfo = await priceP;
+
+  if(!candles || candles.length < 50){
+    console.warn('[CoreData-KIS] 일봉 부족:',ticker, candles ? candles.length : 0);
+    return false;
+  }
+  var valid = _kisCandlesToValid(candles);
+  if(valid.length < 50) return false;
+
+  var ok = _computeCoreIndicatorsFromValid(valid, cd);
+  if(!ok) return false;
+
+  if(investorData && investorData.length){
+    var flow = calcInvestorFlow(investorData);
+    Object.assign(cd, flow);
+  } else {
+    cd.flow_confidence = 'none';
+  }
+
+  // ── 섹터 RS 계산 (KIS 업종 지수 기반) ──
+  if(priceInfo && priceInfo.sectorName){
+    cd.sector_name = priceInfo.sectorName;
+    // 섹터 매핑 lazy load (24h 캐시)
+    if(!G.sectorMap){
+      try{ await buildSectorMap(); }catch(e){ console.warn('[CoreData-KIS] 섹터맵 빌드 실패:',e.message); }
+    }
+    cd.sector_code = kisSectorCodeFromName(priceInfo.sectorName);
+    if(!cd.sector_code){
+      cd.sector_rs_confidence = 'mapping_missing';
+    } else {
+      try{
+        var sectorCandles = await fetchKisSectorDailyChart(cd.sector_code, 70);
+        if(sectorCandles && sectorCandles.length >= 65){
+          // 섹터 13주(65영업일) 수익률 계산
+          // sectorCandles[0] = 오늘, sectorCandles[64] = 65영업일 전
+          var sectorNow  = parseFloat(sectorCandles[0].bstp_nmix_prpr);
+          var sectorThen = parseFloat(sectorCandles[64].bstp_nmix_prpr);
+          if(sectorNow>0 && sectorThen>0){
+            var sectorR13 = (sectorNow - sectorThen) / sectorThen * 100;
+            cd.sector_13w_return = parseFloat(sectorR13.toFixed(1));
+            // 종목 13주 수익률 (valid 는 oldest-first → n-65 가 65영업일 전)
+            if(valid.length >= 65){
+              var stkNow  = valid[valid.length-1].c;
+              var stkThen = valid[valid.length-65].c;
+              if(stkThen>0){
+                var stkR13 = (stkNow - stkThen) / stkThen * 100;
+                cd.rs_sector_13w = parseFloat((stkR13 - sectorR13).toFixed(1));
+                cd.sector_rs_confidence = 'full';
+              }
+            }
+          }
+        } else {
+          cd.sector_rs_confidence = 'fetch_failed';
+          console.warn('[CoreData-KIS] 섹터 일봉 부족:',cd.sector_code, sectorCandles ? sectorCandles.length : 0);
+        }
+      }catch(e){
+        cd.sector_rs_confidence = 'fetch_failed';
+        console.warn('[CoreData-KIS] 섹터 RS 계산 실패:',cd.sector_code,e.message);
+      }
+    }
+  }
+
+  await _computeCoreRSFromKospi(valid, cd);
+  _computeCore8Conditions(cd);
+  cd._primarySource = 'KIS';
+  console.log('[CoreData-KIS] ✓',ticker,'candles='+valid.length,
+    'MA120='+(cd.ma120?Math.round(cd.ma120):'--'),
+    'flow='+cd.flow_confidence,
+    'foreign_20d='+cd.foreign_net_20d,
+    'sector='+(cd.sector_name||'--')+(cd.rs_sector_13w!==null?' rs_sec='+cd.rs_sector_13w+'%p':''));
+  return true;
+}
+
+// ─────────────────────────────────────────
+// Yahoo 폴백 경로
+// ─────────────────────────────────────────
+async function _fetchCoreFromYahoo(ticker, cd){
+  try{
+    var dc = await fetchWithProxy(
+      'https://query1.finance.yahoo.com/v8/finance/chart/'+ticker+'?interval=1d&range=1y'
+    );
+    var res = dc && dc.chart && dc.chart.result && dc.chart.result[0];
+    if(!res) return false;
+    var q = (res.indicators && res.indicators.quote && res.indicators.quote[0]) || {};
+    var raw_c=q.close||[], raw_h=q.high||[], raw_l=q.low||[], raw_v=q.volume||[], raw_o=q.open||[];
+    var valid=[];
+    for(var i=0;i<raw_c.length;i++){
+      if(raw_c[i]&&raw_c[i]>0&&raw_v[i]&&raw_v[i]>0)
+        valid.push({c:raw_c[i],h:raw_h[i]||raw_c[i],l:raw_l[i]||raw_c[i],v:raw_v[i],o:raw_o[i]||raw_c[i]});
+    }
+    if(valid.length < 50) return false;
+
+    var ok = _computeCoreIndicatorsFromValid(valid, cd);
+    if(!ok) return false;
+
+    cd.flow_confidence = 'none'; // Yahoo는 수급 직접 데이터 없음
+    await _computeCoreRSFromKospi(valid, cd);
+    _computeCore8Conditions(cd);
+    cd._primarySource = 'YAHOO';
+    console.log('[CoreData-Yahoo] ✓',ticker,'candles='+valid.length);
+    return true;
+  }catch(e){
+    console.warn('[CoreData-Yahoo]',ticker,e.message);
+    return false;
+  }
+}
+
+// ─────────────────────────────────────────
+// CORE 데이터 수집 오케스트레이터 — KIS 우선, Yahoo 폴백
+// RECONKR 원칙: 한국 종목 데이터는 KIS가 정확·빠름
+// 외국인/기관 실제 순매수는 KIS 전용 (Yahoo 불가)
+// ─────────────────────────────────────────
 async function fetchCoreData(ticker){
   var cd={
     price:null,
@@ -4468,260 +5235,45 @@ async function fetchCoreData(ticker){
     golden_cross_forming:null,
     stage:null,
     base_weeks:null, base_depth_pct:null, overextended:null,
-    base_vol_contracting:false,  // 베이스 내 거래량 수축 중
-    base_top_tests:0,            // 베이스 상단 근접 횟수 (압력 테스트)
-    base_breakout_ready:false,   // 베이스 돌파 직전 조건 충족
+    base_vol_contracting:false,
+    base_top_tests:0,
+    base_breakout_ready:false,
     core_mode:null,
     conditions_met:0, condition_detail:[],
-    recent6wHigh:null
+    recent6wHigh:null,
+    // ── 수급 직접 데이터 (KIS 전용) ──
+    foreign_net_20d:null, foreign_net_30d:null,
+    inst_net_20d:null,    inst_net_30d:null,
+    foreign_days_positive_20d:null, inst_days_positive_20d:null,
+    foreign_net_trend:null, inst_net_trend:null,
+    both_accumulating:null,
+    flow_confidence:'none',
+    // ── 섹터 RS (KIS 업종 지수 기반) ──
+    sector_name:null,            // 업종 한글명 (예: "전기.전자")
+    sector_code:null,            // KIS 업종 코드 (4자리)
+    rs_sector_13w:null,          // 섹터 대비 초과수익률 %p (양수 = 섹터 내 아웃퍼폼)
+    sector_13w_return:null,      // 섹터 자체의 13주 수익률 %
+    sector_rs_confidence:'none', // 'full' | 'mapping_missing' | 'fetch_failed' | 'none'
+    _primarySource:null
   };
-  try{
-    var dc = await fetchWithProxy(
-      'https://query1.finance.yahoo.com/v8/finance/chart/'+ticker+'?interval=1d&range=1y'
-    );
-    var res = dc?.chart?.result?.[0];
-    if(!res) return cd;
-    var q = res.indicators?.quote?.[0]||{};
-    var raw_c=q.close||[], raw_h=q.high||[], raw_l=q.low||[], raw_v=q.volume||[], raw_o=q.open||[];
-    var valid=[];
-    for(var i=0;i<raw_c.length;i++){
-      if(raw_c[i]&&raw_c[i]>0&&raw_v[i]&&raw_v[i]>0)
-        valid.push({c:raw_c[i],h:raw_h[i]||raw_c[i],l:raw_l[i]||raw_c[i],v:raw_v[i],o:raw_o[i]||raw_c[i]});
-    }
-    if(valid.length<50) return cd;
-    var n=valid.length;
-    cd.price=valid[n-1].c;
 
-    function sma(arr,p){ if(arr.length<p) return null; var s=arr.slice(-p); return s.reduce(function(a,d){return a+d.c;},0)/p; }
-    // ── 한국 표준: 5/20/60/120일 ──
-    cd.ma5   = valid.length>=5   ? sma(valid,5)   : null;
-    cd.ma20  = valid.length>=20  ? sma(valid,20)  : null;
-    cd.ma60  = valid.length>=60  ? sma(valid,60)  : null;
-    cd.ma120 = valid.length>=120 ? sma(valid,120) : null;
-
-    // MA 기울기 (10일 전 대비)
-    if(valid.length>=30 && cd.ma20){
-      var m20ago=sma(valid.slice(0,-10),20);
-      if(m20ago) cd.ma20_slope=parseFloat(((cd.ma20-m20ago)/m20ago*100).toFixed(3));
-    }
-    if(valid.length>=70 && cd.ma60){
-      var m60ago=sma(valid.slice(0,-10),60);
-      if(m60ago) cd.ma60_slope=parseFloat(((cd.ma60-m60ago)/m60ago*100).toFixed(3));
-    }
-    if(valid.length>=130 && cd.ma120){
-      var m120ago=sma(valid.slice(0,-10),120);
-      if(m120ago) cd.ma120_slope=parseFloat(((cd.ma120-m120ago)/m120ago*100).toFixed(3));
-    }
-
-    if(cd.ma120){
-      cd.above_ma120=cd.price>cd.ma120;
-      cd.price_vs_ma120_pct=parseFloat(((cd.price-cd.ma120)/cd.ma120*100).toFixed(1));
-    }
-    if(cd.ma60) cd.above_ma60=cd.price>cd.ma60;
-
-    // 골든크로스 임박 (5일선이 20일선 ±1% 내 접근)
-    if(cd.ma5&&cd.ma20)
-      cd.golden_cross_forming = cd.ma5 < cd.ma20 && cd.ma5 > cd.ma20*0.99;
-
-    // 52주 고점/저점 대비
-    var hi52=Math.max.apply(null,valid.slice(-252).map(function(d){return d.h;}));
-    var lo52=Math.min.apply(null,valid.slice(-252).map(function(d){return d.l;}));
-    if(hi52>0) cd.price_vs_52wk_high_pct=parseFloat(((cd.price-hi52)/hi52*100).toFixed(1));
-    if(lo52>0) cd.price_vs_52wk_low_pct =parseFloat(((cd.price-lo52)/lo52*100).toFixed(1));
-
-    // OBV
-    var obv=0, obvArr=[0];
-    for(var i=1;i<n;i++){
-      obv+=(valid[i].c>valid[i-1].c?valid[i].v:valid[i].c<valid[i-1].c?-valid[i].v:0);
-      obvArr.push(obv);
-    }
-    if(n>=60){
-      var rc=valid.slice(-60), ro=obvArr.slice(-60), mid=30;
-      var pL1=Math.min.apply(null,rc.slice(0,mid).map(function(d){return d.l;}));
-      var pL2=Math.min.apply(null,rc.slice(mid).map(function(d){return d.l;}));
-      var oI1=rc.slice(0,mid).reduce(function(mi,d,i){return d.l<rc[mi].l?i:mi;},0);
-      var oI2=rc.slice(mid).reduce(function(mi,d,i){return d.l<rc[mid+mi].l?i:mi;},0);
-      cd.obv_bullish_div = pL2<pL1 && ro[oI2+mid]>ro[oI1];
-    }
-
-    // A/D Line
-    var ad=0, adArr=[];
-    for(var i=0;i<n;i++){
-      var d=valid[i], rng=d.h-d.l;
-      ad+=(rng>0?((d.c-d.l)-(d.h-d.c))/rng*d.v:0);
-      adArr.push(ad);
-    }
-    if(adArr.length>=40){
-      var adS=adArr.slice(-40);
-      // 선형 회귀 기울기 — 노이즈 강인, 분모 0 버그 없음
-      var _n=adS.length,_mx=(_n-1)/2,_my=adS.reduce(function(a,b){return a+b;},0)/_n;
-      var _num=0,_den=0;
-      for(var _i=0;_i<_n;_i++){_num+=(_i-_mx)*(adS[_i]-_my);_den+=(_i-_mx)*(_i-_mx);}
-      var _std=Math.sqrt(adS.reduce(function(a,v){return a+(v-_my)*(v-_my);},0)/_n)||1;
-      cd.ad_line_slope=_den>0 ? parseFloat((_num/_den/_std*100).toFixed(2)) : 0;
-      cd.ad_bullish_div=cd.ad_line_slope>0;
-    }
-
-    // Higher Lows (5일 단위, 60일=12주 기준) — CORE는 수주 보유, 20일은 너무 짧음
-    var wkLows=[];
-    for(var i=0;i<n-4;i+=5)
-      wkLows.push(Math.min.apply(null,valid.slice(i,i+5).map(function(d){return d.l;})));
-    if(wkLows.length>=12){
-      // 최근 12주(60일) Higher Lows: 4주 단위 3구간 비교
-      var w12=wkLows.slice(-12);
-      var q1Low=Math.min.apply(null,w12.slice(0,4));   // 9~12주 전 저점
-      var q2Low=Math.min.apply(null,w12.slice(4,8));   // 5~8주 전 저점
-      var q3Low=Math.min.apply(null,w12.slice(8,12));  // 최근 4주 저점
-      cd.higher_lows = q2Low>q1Low && q3Low>q2Low;
-    } else if(wkLows.length>=4){
-      // 데이터 부족 시 4주 폴백 (단기 신호로 표시)
-      var w=wkLows.slice(-4);
-      cd.higher_lows=w[1]>w[0]&&w[2]>w[1]&&w[3]>w[2];
-    }
-
-    // 하락일 거래량 고갈
-    if(n>=30){
-      var dv1=valid.slice(-30,-15).filter(function(d){return d.c<d.o;});
-      var dv2=valid.slice(-15).filter(function(d){return d.c<d.o;});
-      var avg1=dv1.length>0?dv1.reduce(function(s,d){return s+d.v;},0)/dv1.length:0;
-      var avg2=dv2.length>0?dv2.reduce(function(s,d){return s+d.v;},0)/dv2.length:0;
-      cd.down_vol_exhaustion=avg1>0&&avg2<avg1*0.65;
-    }
-
-    // Up/Down Volume Ratio 65일
-    if(n>=65){
-      var sl=valid.slice(-65);
-      var uv=sl.filter(function(d){return d.c>d.o;}).reduce(function(s,d){return s+d.v;},0);
-      var dv=sl.filter(function(d){return d.c<d.o;}).reduce(function(s,d){return s+d.v;},0);
-      if(dv>0) cd.up_down_vol_ratio=parseFloat((uv/dv).toFixed(2));
-    }
-
-    // ── RS 계산 — 캐시 재사용 + 초과수익률 방식 (비율 방식 버그 수정) ──
-    // rs = stock_return - market_return (arithmetic excess return)
-    // 비율(stkR/kospiR) 방식은 KOSPI 하락기에 역방향 왜곡 발생
+  // [1] KIS 우선 시도
+  if(KIS.appKey && KIS.appSecret){
     try{
-      var _now2=Date.now();
-      if(!G.kospiCloses20||(_now2-G.kospiClosesCachedAt)>3600000){
-        var kospiD=await fetchWithProxy('https://query1.finance.yahoo.com/v8/finance/chart/^KS11?interval=1d&range=6mo');
-        var _kc=(kospiD?.chart?.result?.[0]?.indicators?.quote?.[0]?.close||[]).filter(function(v){return v&&v>0;});
-        if(_kc.length>=65){G.kospiCloses20=_kc;G.kospiClosesCachedAt=_now2;}
-      }
-      var kospiC=G.kospiCloses20||[];
-      if(kospiC.length>=65&&n>=65){
-        // RS13w: 13주(65일) 초과수익률 (단위: %p)
-        var stkR13=(cd.price-valid[n-65].c)/valid[n-65].c*100;
-        var mktR13=(kospiC[kospiC.length-1]-kospiC[Math.max(0,kospiC.length-65)])/kospiC[Math.max(0,kospiC.length-65)]*100;
-        cd.rs_13w=parseFloat((stkR13-mktR13).toFixed(1)); // %p 초과수익률
-        // RS 추세: 최근 13w vs 이전 13w 초과수익률 비교
-        if(n>=130&&kospiC.length>=130){
-          var stkR_prev=(valid[n-65].c-valid[n-130].c)/valid[n-130].c*100;
-          var mktR_prev=(kospiC[Math.max(0,kospiC.length-65)]-kospiC[Math.max(0,kospiC.length-130)])/kospiC[Math.max(0,kospiC.length-130)]*100;
-          var rs_prev=parseFloat((stkR_prev-mktR_prev).toFixed(1));
-          cd.rs_trend=cd.rs_13w>rs_prev; // 최근 초과수익률 > 이전 초과수익률
-        }
-        // RS 하락: 4주 초과수익률 < 8주 초과수익률 AND 절대 음수
-        if(n>=40&&kospiC.length>=40){
-          var stkR4w=(valid[n-1].c-valid[n-20].c)/valid[n-20].c*100;
-          var mktR4w=(kospiC[kospiC.length-1]-kospiC[Math.max(0,kospiC.length-20)])/kospiC[Math.max(0,kospiC.length-20)]*100;
-          var stkR8w=(valid[n-20].c-valid[Math.max(0,n-40)].c)/valid[Math.max(0,n-40)].c*100;
-          var mktR8w=(kospiC[Math.max(0,kospiC.length-20)]-kospiC[Math.max(0,kospiC.length-40)])/kospiC[Math.max(0,kospiC.length-40)]*100;
-          var rs4=(stkR4w-mktR4w), rs8=(stkR8w-mktR8w);
-          cd.rs_declining=rs4<rs8&&rs4<0; // 최근 RS 더 나쁘고 절대적으로도 음수
-        }
-      }
-    }catch(e2){}
-
-    // ── 베이스 분석 ──
-    var recent30h=valid.slice(-30).map(function(d){return d.h;});
-    cd.recent6wHigh=recent30h.length>0?Math.max.apply(null,recent30h):null;
-    cd.base_depth_pct=cd.recent6wHigh&&cd.recent6wHigh>0
-      ?parseFloat(((cd.price-cd.recent6wHigh)/cd.recent6wHigh*100).toFixed(1)):null;
-
-    // 베이스 기간: 최근 30일 고점 대비 ±15% 이내 횡보
-    var baseWeeks=0;
-    if(cd.recent6wHigh){
-      for(var i=valid.length-1;i>=Math.max(0,valid.length-20);i--){
-        if(Math.abs((valid[i].c-cd.recent6wHigh)/cd.recent6wHigh)<=0.15) baseWeeks++;
-        else break;
-      }
-      cd.base_weeks=Math.round(baseWeeks/5);
+      var ok = await _fetchCoreFromKis(ticker, cd);
+      if(ok) return cd;
+      console.warn('[CoreData] KIS 데이터 부족 → Yahoo 폴백:', ticker);
+    }catch(e){
+      console.warn('[CoreData] KIS 우선 호출 실패:', ticker, e.message);
     }
+  }
 
-    // 과확장 감지: 6주 베이스 없이 +30% 이상 상승
-    if(valid.length>=30){
-      var low6w=Math.min.apply(null,valid.slice(-30).map(function(d){return d.l;}));
-      cd.overextended=low6w>0&&((cd.price-low6w)/low6w)>0.30&&(cd.base_depth_pct===null||cd.base_depth_pct>-5);
-    }
-
-    // ── 베이스 품질 지표 ──
-    if(cd.recent6wHigh){
-      // 1. 베이스 내 거래량 수축: 최근 20일 vs 이전 20일 평균 비교
-      if(n>=40){
-        var _bVrecent=valid.slice(-20).reduce(function(s,d){return s+d.v;},0)/20;
-        var _bVprev  =valid.slice(-40,-20).reduce(function(s,d){return s+d.v;},0)/20;
-        cd.base_vol_contracting = _bVprev>0 && _bVrecent<_bVprev*0.80;
-      }
-      // 2. 베이스 상단 압력 테스트 횟수: 최근 30일 중 고가가 베이스 상단 98% 이상 접근 횟수
-      cd.base_top_tests = valid.slice(-30).filter(function(d){
-        return d.h>=cd.recent6wHigh*0.98;
-      }).length;
-      // 3. 베이스 돌파 준비 완료: 3가지 조건 동시 충족
-      //    - 베이스 상단 3% 이내 (depth_pct >= -3)
-      //    - 거래량 수축 (에너지 압축)
-      //    - 최소 2회 상단 테스트 (저항 인식 + 재시도)
-      cd.base_breakout_ready =
-        cd.base_depth_pct!==null &&
-        cd.base_depth_pct>=-3   &&
-        cd.base_vol_contracting &&
-        cd.base_top_tests>=2;
-    }
-
-    // ── 한국 스테이지 판단 (120일선 기준) ──
-    var pct120=cd.price_vs_ma120_pct||0;
-    var ma120U=cd.ma120_slope!==null&&cd.ma120_slope>0;
-    if(pct120<-20&&!ma120U)             cd.stage='Stage 1 (바닥 횡보)';
-    else if(pct120<5&&ma120U)           cd.stage='Stage 1→2 (전환 초입)';
-    else if(pct120>=0&&pct120<30&&ma120U) cd.stage='Stage 2 (상승 추세)';
-    else if(pct120>=30)                 cd.stage='Stage 2→3 (과확장 주의)';
-    else if(pct120<0&&ma120U===false)   cd.stage='Stage 3→4 (하락 전환)';
-    else                                cd.stage='Stage 4 (하락)';
-
-    // Mode A: 물밑 포착 (52주 고점 -20% 이상 아래)
-    // Mode B: 추세 지속 (신고가 근처 + 유효 베이스)
-    var isNearHigh=cd.price_vs_52wk_high_pct!==null&&cd.price_vs_52wk_high_pct>-20;
-    var hasValidBase=cd.base_weeks>=3&&cd.base_depth_pct!==null&&cd.base_depth_pct>-25&&cd.base_depth_pct<=0;
-    cd.core_mode=isNearHigh?(hasValidBase?'B':'overextended'):'A';
-
-    // ─────────────────────────────────────────
-    // 한국 CORE 8조건 (120일선 기준)
-    // ─────────────────────────────────────────
-    var c1=cd.ad_line_slope!==null&&cd.ad_line_slope>0;          // A/D Line 상승
-    var c2=cd.obv_bullish_div===true;                             // OBV 불리시 다이버전스
-    var c3=cd.rs_trend===true;                                    // KOSPI 대비 RS 개선
-    var c4=cd.higher_lows===true;                                 // Higher Lows 패턴
-    var c5=cd.down_vol_exhaustion===true;                         // 하락일 거래량 고갈
-    var c6=cd.ma60_slope!==null&&cd.ma60_slope>-0.3;             // 수급선(60일) 기울기 회복
-    var c7=cd.price_vs_ma120_pct!==null&&Math.abs(cd.price_vs_ma120_pct)<=20; // 경기선(120일) ±20%
-    var c8=cd.up_down_vol_ratio!==null&&cd.up_down_vol_ratio>=1.0; // Up/Down Volume ≥1.0
-
-    cd.conditions_met=[c1,c2,c3,c4,c5,c6,c7,c8].filter(Boolean).length;
-    cd.condition_detail=[
-      (c1?'✓':'✗')+' A/D Line 상승'+(cd.ad_line_slope!==null?' ('+cd.ad_line_slope+'%)':' (데이터부족)'),
-      (c2?'✓':'✗')+' OBV 불리시 다이버전스',
-      (c3?'✓':'✗')+' KOSPI 대비 RS 개선'+(cd.rs_13w!==null?' ('+cd.rs_13w+'x)':' (데이터부족)'),
-      (c4?'✓':'✗')+' Higher Lows 패턴',
-      (c5?'✓':'✗')+' 하락일 거래량 고갈',
-      (c6?'✓':'✗')+' 수급선(60일) 기울기 회복'+(cd.ma60_slope!==null?' ('+cd.ma60_slope+'%)':' (데이터부족)'),
-      (c7?'✓':'✗')+' 경기선(120일) ±20% 구간'+(cd.price_vs_ma120_pct!==null?' ('+(cd.price_vs_ma120_pct>=0?'+':'')+cd.price_vs_ma120_pct+'%)':' (데이터부족)'),
-      (c8?'✓':'✗')+' Up/Down Volume ≥1.0'+(cd.up_down_vol_ratio!==null?' ('+cd.up_down_vol_ratio+'x)':' (데이터부족)'),
-      '── 베이스: 깊이 '+(cd.base_depth_pct!==null?cd.base_depth_pct+'%':'--')+' / 기간 '+(cd.base_weeks!==null?cd.base_weeks+'주':'--'),
-      '── Mode: '+(cd.core_mode==='A'?'A (물밑 포착)':cd.core_mode==='B'?'B (추세 지속)':'과확장')+' / RS하락: '+(cd.rs_declining?'⚠ 감지':'없음'),
-      '── 베이스: 상단 테스트 '+cd.base_top_tests+'회'+
-        (cd.base_vol_contracting?' · 거래량 수축 ✓':' · 거래량 수축 없음')+
-        (cd.base_breakout_ready?' [📦 돌파 준비 완료]':''),
-    ];
-
-  }catch(e){ console.warn('[CoreData]',ticker,e.message); }
+  // [2] Yahoo 폴백
+  var okY = await _fetchCoreFromYahoo(ticker, cd);
+  if(!okY){
+    cd._primarySource = 'NONE';
+    console.warn('[CoreData] 모든 소스 실패:', ticker);
+  }
   return cd;
 }
 
@@ -5128,18 +5680,33 @@ function makePrompt(mode, ticker, ydata, swingData, openTrade, coreData){
           'B — 추세 지속 (신고가 근처 유효 베이스)':
           '과확장 (베이스 없이 +30%+ 상승)')+'\n'+
         '추정 스테이지: '+(coreData.stage||'--')+'\n'+
-        '── 수급 지표 ──\n'+
+        '── 수급 지표 (proxy) ──\n'+
         'A/D Line 기울기: '+(coreData.ad_line_slope!=null?coreData.ad_line_slope+'%':'--')+
           ' → '+(coreData.ad_bullish_div?'✓ A/D 상승 (매집 흔적)':'✗ A/D 하락 (분배 주의)')+'\n'+
         'OBV 불리시 다이버전스: '+(coreData.obv_bullish_div?'✓ 확인 (가격↓ 거래량↑ = 저점 매집)':'✗ 미확인')+'\n'+
-        'KOSPI 대비 RS(13주): '+(coreData.rs_13w!=null?coreData.rs_13w+'x':'--')+
+        'KOSPI 대비 RS(13주): '+(coreData.rs_13w!=null?coreData.rs_13w+'%p':'--')+
           (coreData.rs_trend?' [✓ RS 개선 중]':'')+
           (coreData.rs_declining?' [⚠ RS 하락 중]':'')+'\n'+
+        (coreData.sector_rs_confidence==='full' && coreData.rs_sector_13w!==null
+          ? '섹터 대비 RS(13주): '+(coreData.rs_sector_13w>=0?'+':'')+coreData.rs_sector_13w+'%p'+
+            ' (업종: '+coreData.sector_name+', 섹터 13주 '+(coreData.sector_13w_return>=0?'+':'')+coreData.sector_13w_return+'%)'+
+            (coreData.rs_sector_13w>5 ? ' [✓ 업종 내 리더십]' : coreData.rs_sector_13w<-5 ? ' [⚠ 업종 내 약세]' : '')+'\n'
+          : coreData.sector_name
+            ? '섹터 대비 RS: '+coreData.sector_name+' — '+(coreData.sector_rs_confidence==='mapping_missing'?'매핑 미지정':'조회 실패')+' (KOSPI RS만 사용)\n'
+            : '')+
         'Higher Lows 패턴: '+(coreData.higher_lows?'✓ 5주 단위 저점 상승 확인':'✗ 미확인')+'\n'+
         '하락일 거래량 고갈: '+(coreData.down_vol_exhaustion?'✓ 매도세 약화 확인':'✗ 미감지')+'\n'+
         'Up/Down Volume Ratio: '+(coreData.up_down_vol_ratio!=null?coreData.up_down_vol_ratio+'x'+
           (coreData.up_down_vol_ratio>=1.5?' [✓ 매수 우위]':coreData.up_down_vol_ratio>=1.0?' [균형]':' [✗ 매도 우위]')
           :'--')+'\n'+
+        ((coreData.flow_confidence && coreData.flow_confidence !== 'none' && coreData.foreign_net_20d !== null)
+          ? '── 수급 직접 관찰 (KIS 일별 투자자) ──\n'+
+            '외국인 20일 누적: '+(coreData.foreign_net_20d>=0?'+':'')+coreData.foreign_net_20d.toLocaleString()+'주 · '+(coreData.foreign_days_positive_20d||0)+'/20일 매수'+
+            (coreData.foreign_net_trend===1?' [↑ 가속]':coreData.foreign_net_trend===-1?' [↓ 둔화]':'')+'\n'+
+            '기관 20일 누적:   '+(coreData.inst_net_20d>=0?'+':'')+coreData.inst_net_20d.toLocaleString()+'주 · '+(coreData.inst_days_positive_20d||0)+'/20일 매수'+
+            (coreData.inst_net_trend===1?' [↑ 가속]':coreData.inst_net_trend===-1?' [↓ 둔화]':'')+'\n'+
+            (coreData.both_accumulating?'동반 매집: ★ 외국인+기관 20일 동반 순매수\n':'')
+          : '── 수급 직접 관찰: 데이터 없음 (proxy 지표만)\n')+
         '물밑 신호 충족: '+coreData.conditions_met+'/8\n'+
         '조건 상세:\n'+(coreData.condition_detail||[]).map(function(d){return '  '+d;}).join('\n')+'\n';
     }
@@ -6146,12 +6713,15 @@ function swingEngine(ydata, swingData){
   }
 
   // ════════════════════════════════════════
-  // 액션 결정
-  // ENTER_A:     총점 80+ AND 트리거 15+                 (장중만, 즉시 진입)
-  // ENTER_B:     총점 70+ AND 트리거 10+                 (장중만, 소량 진입)
-  // WATCH_READY: 구조점수(A+B+C) 55+ + 장외시간          (트리거 확인 대기)
-  // WATCH:       총점 50+ (트리거 부족 or 구조 미완)
-  // BLOCK:       총점 50 미만
+  // 액션 결정 (C 하이브리드)
+  // [0] TOXIC         → BLOCK (이미 위에서 처리)
+  // [1] 명시적 위험   → BLOCK (이유 명확: 과확장/과열/연속음봉)
+  // [2] 점수 < 40     → BLOCK (심각한 구조 손상)
+  // [3] ENTER_A:      총점 80+ AND 트리거 15+   (장중만, 즉시 진입)
+  // [4] ENTER_B:      총점 70+ AND 트리거 10+   (장중만, 소량 진입)
+  // [5] READY:        구조점수(A+B+C) 55+ + 장외시간 (트리거 확인 대기)
+  // [6] WATCH:        총점 40+ (낮은 점수 관찰 or 트리거 부족)
+  // [7] BLOCK:        그 외
   // ════════════════════════════════════════
   var posSize = 'none';
   // 시장 약세 시 포지션 50% 캡
@@ -6160,6 +6730,44 @@ function swingEngine(ydata, swingData){
   // 구조 점수(A+B+C) — 장외 시간대 판정용 (트리거 D 제외 총 80점 만점)
   var structureScore = mktScore + strScore + pbScore;
 
+  // ── [1] 명시적 위험 조건 검사 (점수와 무관하게 BLOCK) ──
+  // 임계값 근거:
+  //   MA20 이격 > swingMa20Max + 5 : 허용폭보다 크게 벗어난 "과확장" (기존 L6506 경고를 BLOCK으로 승격)
+  //   RSI14 > swingRsiMax + 10     : 사용자 기준보다 크게 과열 (기본 설정 시 80 초과)
+  //   연속 대형 음봉                  : 하락 지속 구간 (눌림목 SWING 부적합)
+  var criticalRisks = [];
+  if(swingData.ma20_gap_pct !== null && swingData.ma20_gap_pct > swingMa20Max + 5){
+    criticalRisks.push('MA20 이격 +'+swingData.ma20_gap_pct+'% — 과확장 (허용 '+swingMa20Max+'% 초과)');
+  }
+  if(swingData.rsi14 !== null && swingData.rsi14 > swingRsiMax + 10){
+    criticalRisks.push('RSI '+swingData.rsi14+' — 심각한 과열 (기준 '+swingRsiMax+' 초과)');
+  }
+  if(swingData.no_consecutive_bear === false){
+    criticalRisks.push('연속 대형 음봉 감지 — 하락 지속 구간');
+  }
+
+  if(criticalRisks.length > 0){
+    r.action = 'BLOCK';
+    r.swing_grade = null;
+    criticalRisks.forEach(function(reason){
+      r.blockers.push('[과확장/과열] '+reason);
+    });
+    r.decision_path.push({gate:'액션',status:'block',note:'BLOCK · 명시적 위험 '+criticalRisks.length+'건 · '+r.score+'pt'});
+    r.position_size = posSize;
+    return r;
+  }
+
+  // ── [2] 점수 < 40 (심각한 구조 손상) → BLOCK ──
+  if(r.score < 40){
+    r.action = 'BLOCK';
+    r.swing_grade = null;
+    r.blockers.push('[점수] '+r.score+'pt — 구조 손상 심각 (최소 40pt)');
+    r.decision_path.push({gate:'액션',status:'block',note:'BLOCK · '+r.score+'pt < 40 (심각)'});
+    r.position_size = posSize;
+    return r;
+  }
+
+  // ── [3]~[6] 기존 액션 로직 (임계값 50 → 40 완화) ──
   if(hasLiveTrigger && r.score >= 80 && trigScore >= 15){
     // 장중 + 고점수 + 강한 트리거 → ENTER A
     r.action = 'ENTER';
@@ -6180,19 +6788,27 @@ function swingEngine(ydata, swingData){
     r.ready_for_next_session = true;
     r.warnings.push('[READY] 구조 '+structureScore+'/80pt — 다음 장에서 트리거(D) 확인 대기');
     r.decision_path.push({gate:'액션',status:'ready',note:'READY · 구조 '+structureScore+'/80 · 다음장 트리거 대기'});
-  } else if(r.score >= 50){
+  } else if(r.score >= 40){
+    // 40+ → WATCH (낮은 점수는 관찰, 과확장·과열 없음)
     r.action = 'WATCH';
     r.swing_grade = null;
     r.wait_reason = trigScore < 10 ? 'trigger' : 'structure';
-    var waitMsg = r.wait_reason === 'trigger'
-      ? '구조 양호 — 트리거 대기 (양봉/거래량/고가돌파 확인 후 진입)'
-      : '종목 후보 — 눌림목/이격 조건 보완 중';
-    r.warnings.push('[WAIT] '+waitMsg);
+    var waitMsg;
+    if(r.score < 50){
+      waitMsg = '낮은 점수 ('+r.score+'pt) — 구조·눌림 조건 보완 관찰';
+      r.warnings.push('[LOW_SCORE] '+waitMsg);
+    } else {
+      waitMsg = r.wait_reason === 'trigger'
+        ? '구조 양호 — 트리거 대기 (양봉/거래량/고가돌파 확인 후 진입)'
+        : '종목 후보 — 눌림목/이격 조건 보완 중';
+      r.warnings.push('[WAIT] '+waitMsg);
+    }
     r.decision_path.push({gate:'액션',status:'watch',note:'WATCH · '+r.score+'pt · '+r.wait_reason+' 보완 중'});
   } else {
+    // (도달 불가 — 위 [2]에서 처리됨, 방어적 fallback)
     r.action = 'BLOCK';
-    r.blockers.push('[점수] '+r.score+'pt — SWING 기준 미달 (최소 50pt)');
-    r.decision_path.push({gate:'액션',status:'block',note:'BLOCK · '+r.score+'pt < 50'});
+    r.blockers.push('[점수] '+r.score+'pt — SWING 기준 미달');
+    r.decision_path.push({gate:'액션',status:'block',note:'BLOCK · '+r.score+'pt'});
   }
 
   r.position_size = posSize;
@@ -6363,7 +6979,7 @@ function runCoreEdgeTests(){
       expect: { action: 'BLOCK', includes: '베이스 깊이' }
     },
     {
-      name: '완벽한 ENTER 조건',
+      name: '완벽한 ENTER 조건 (proxy 폴백 모드)',
       ydata: { price: 50000 },
       coreData: {
         core_mode:'A', conditions_met:6,
@@ -6372,6 +6988,7 @@ function runCoreEdgeTests(){
         higher_lows: true, stage: 'Stage 1→2 (전환 초입)',
         up_down_vol_ratio: 1.5, ma60_slope: 1.2, down_vol_exhaustion: true,
         base_breakout_ready: true,
+        flow_confidence: 'none',  // 수급 직접 데이터 없음 → proxy 경로
       },
       expect: { action: 'ENTER', scoreMin: 65 }
     },
@@ -6380,6 +6997,125 @@ function runCoreEdgeTests(){
       ydata: { price: 50000 },
       coreData: null,
       expect: { action: 'BLOCK', includes: '물밑 지표' }
+    },
+    // ── 신규: 수급 직접 데이터 시나리오 ──
+    {
+      name: '외국인+기관 동반 강한 매집 → ENTER 수급 만점',
+      ydata: { price: 50000 },
+      coreData: {
+        core_mode:'A', conditions_met:5,
+        flow_confidence: 'full',
+        foreign_net_20d: 500000, foreign_days_positive_20d: 15, foreign_net_trend: 1,
+        inst_net_20d:    200000, inst_days_positive_20d:    13, inst_net_trend:    1,
+        both_accumulating: true,
+        ad_line_slope: 1.5, obv_bullish_div: true,  // proxy도 동의
+        rs_13w: 6, rs_trend: true, rs_declining: false,
+        higher_lows: true, stage: 'Stage 1→2 (전환 초입)',
+        up_down_vol_ratio: 1.3, ma60_slope: 0.8, down_vol_exhaustion: true,
+        base_breakout_ready: false, base_depth_pct: -8, base_weeks: 4,
+      },
+      expect: { action: 'ENTER', scoreMin: 65 }
+    },
+    {
+      name: '외국인+기관 동반 매도 + RS 하락 → BLOCK (직접 관찰)',
+      ydata: { price: 50000 },
+      coreData: {
+        core_mode:'A', conditions_met:3,
+        flow_confidence: 'full',
+        foreign_net_20d: -800000, foreign_days_positive_20d: 4, foreign_net_trend: -1,
+        inst_net_20d:    -300000, inst_days_positive_20d:    5, inst_net_trend:    -1,
+        both_accumulating: false,
+        ad_line_slope: 0.5, ad_bullish_div: true,  // proxy는 다른 방향
+        rs_13w: -3, rs_trend: false, rs_declining: true,
+        higher_lows: false, stage: 'Stage 3→4 (하락 전환)',
+      },
+      expect: { action: 'BLOCK', includes: '외국인+기관' }
+    },
+    {
+      name: '수급 proxy vs direct 불일치 → WARNING',
+      ydata: { price: 50000 },
+      coreData: {
+        core_mode:'A', conditions_met:4,
+        flow_confidence: 'full',
+        foreign_net_20d: 300000, foreign_days_positive_20d: 13, foreign_net_trend: 0,
+        inst_net_20d:    50000,  inst_days_positive_20d:    10, inst_net_trend:    0,
+        both_accumulating: true,
+        ad_line_slope: -1.2, ad_bullish_div: false,  // proxy는 반대 방향
+        obv_bullish_div: false,
+        rs_13w: 2, rs_trend: true, rs_declining: false,
+        higher_lows: true, stage: 'Stage 1→2 (전환 초입)',
+        up_down_vol_ratio: 0.9, ma60_slope: 0.3,
+      },
+      expect: { includesWarning: 'proxy 불일치' }
+    },
+    {
+      name: '외국인 약한 매도 (5/20일) + 기관 중립 → 감점 but WATCH',
+      ydata: { price: 50000 },
+      coreData: {
+        core_mode:'A', conditions_met:3,
+        flow_confidence: 'full',
+        foreign_net_20d: -100000, foreign_days_positive_20d: 3, foreign_net_trend: 0,
+        inst_net_20d:    50000,   inst_days_positive_20d:    9, inst_net_trend:    0,
+        both_accumulating: false,
+        ad_line_slope: 0.3, obv_bullish_div: false,
+        rs_13w: 1, rs_trend: true, rs_declining: false,
+        higher_lows: true, stage: 'Stage 1→2 (전환 초입)',
+        up_down_vol_ratio: 1.0, ma60_slope: 0.1,
+      },
+      expect: { action: 'WATCH', includesWarning: '외국인 20일 누적 순매도' }
+    },
+    // ── 신규: 섹터 RS (업종 지수 기반) 시나리오 ──
+    {
+      name: '섹터 RS 듀얼 leadership (KOSPI+섹터 모두 강세) → ENTER 만점',
+      ydata: { price: 50000 },
+      coreData: {
+        core_mode:'A', conditions_met:5,
+        ad_line_slope:2, obv_bullish_div:true,
+        rs_13w:6, rs_trend:true, rs_declining:false,
+        sector_name:'전기.전자', sector_code:'1013', rs_sector_13w:8, sector_rs_confidence:'full',
+        higher_lows:true, stage:'Stage 1→2 (전환 초입)',
+        ma60_slope:1.0, up_down_vol_ratio:1.3, down_vol_exhaustion:true,
+      },
+      expect: { action:'ENTER', scoreMin:85 }
+    },
+    {
+      name: '코리아 착시 (KOSPI RS+ but 섹터 RS-) → 경고 표시',
+      ydata: { price: 50000 },
+      coreData: {
+        core_mode:'A', conditions_met:4,
+        ad_line_slope:1.5, obv_bullish_div:true,
+        rs_13w:8, rs_trend:true, rs_declining:false,
+        sector_name:'화학', sector_code:'1008', rs_sector_13w:-5, sector_rs_confidence:'full',
+        higher_lows:true, stage:'Stage 1→2 (전환 초입)',
+        ma60_slope:0.5, up_down_vol_ratio:1.0, down_vol_exhaustion:false,
+      },
+      expect: { includesWarning: '착시' }
+    },
+    {
+      name: '섹터 매핑 결측 → 폴백 경로 (KOSPI RS만 + warning)',
+      ydata: { price: 50000 },
+      coreData: {
+        core_mode:'A', conditions_met:5,
+        ad_line_slope:2, obv_bullish_div:true,
+        rs_13w:6, rs_trend:true, rs_declining:false,
+        sector_name:'전기.전자', sector_code:null, rs_sector_13w:null, sector_rs_confidence:'mapping_missing',
+        higher_lows:true, stage:'Stage 1→2 (전환 초입)',
+        ma60_slope:1.0, up_down_vol_ratio:1.3, down_vol_exhaustion:true,
+      },
+      expect: { action:'ENTER', includesWarning: '매핑 미지정' }
+    },
+    {
+      name: '섹터 내 심각 약세 (-12%p) → BLOCK 유도',
+      ydata: { price: 50000 },
+      coreData: {
+        core_mode:'A', conditions_met:2,
+        ad_line_slope:0.5, obv_bullish_div:false,
+        rs_13w:1, rs_trend:false, rs_declining:false,
+        sector_name:'제약', sector_code:'1009', rs_sector_13w:-12, sector_rs_confidence:'full',
+        higher_lows:false, stage:'Stage 2 (상승 추세)',
+        ma60_slope:0.2, up_down_vol_ratio:0.9, down_vol_exhaustion:false,
+      },
+      expect: { action:'BLOCK', includesWarning: '업종 내 약세' }
     },
   ];
 
@@ -6398,6 +7134,12 @@ function runCoreEdgeTests(){
         var haystack = (r.blockers||[]).concat(r.warnings||[]).join(' | ');
         if(!haystack.includes(e.includes)){
           pass = false; reasons.push("'"+e.includes+"' not in blockers/warnings");
+        }
+      }
+      if(e.includesWarning){
+        var warnHay = (r.warnings||[]).join(' | ');
+        if(!warnHay.includes(e.includesWarning)){
+          pass = false; reasons.push("'"+e.includesWarning+"' not in warnings");
         }
       }
       if(e.scoreMin !== undefined && r.score < e.scoreMin){
@@ -6479,28 +7221,152 @@ function coreEngine(ydata, coreData){
   }
 
   // ── 점수 계산 — 축별 점수 추적 (최소기준 게이트용) ──
-  var _scoreSupply = 0;  // 수급축 (A/D+OBV): max 30
+  var _scoreSupply = 0;  // 수급축 max 30
   var _scoreRS     = 0;  // RS축: max 25
   var _scoreStruct = 0;  // 구조축 (HL+Stage): max 25
   var _scoreAux    = 0;  // 보조축 (vol+MA): max 20
 
-  // ① 수급 지표 (30pt)
-  if(coreData.ad_line_slope!==null&&coreData.ad_line_slope>0){
-    _scoreSupply+=15; r.signals.push('A/D Line 상승 ('+coreData.ad_line_slope+'%)');
-  } else if(coreData.ad_line_slope!==null&&coreData.ad_line_slope>-1){
-    _scoreSupply+=5;
-  }
-  if(coreData.obv_bullish_div===true){ _scoreSupply+=15; r.signals.push('OBV 불리시 다이버전스'); }
+  // ① 수급 지표 (30pt) — 한국 시장: 외국인/기관 직접 관찰값 우선, A/D·OBV는 proxy로 보조
+  var _hasFlow   = coreData.flow_confidence && coreData.flow_confidence !== 'none'
+                   && coreData.foreign_net_20d !== null;
+  var _supplyBreakdown = { src: _hasFlow ? 'direct' : 'proxy' };
 
-  // ② RS 지표 (25pt)
-  if(coreData.rs_13w!==null){
-    if(coreData.rs_13w>5)        { _scoreRS+=15; r.signals.push('RS13w +'+coreData.rs_13w+'%p — 강한 아웃퍼폼'); }
-    else if(coreData.rs_13w>0)   { _scoreRS+=10; r.signals.push('RS13w +'+coreData.rs_13w+'%p'); }
-    else if(coreData.rs_13w>-5)  { _scoreRS+=3; }
-    else                         { _scoreRS-=5;  r.warnings.push('RS13w '+coreData.rs_13w+'%p — 상대약세'); }
+  if(_hasFlow){
+    // ── [A] 외국인 누적 순매수 (max 12pt) ──
+    var fDays = coreData.foreign_days_positive_20d || 0;
+    var fNet  = coreData.foreign_net_20d;
+    var _fPts = 0;
+    if(fNet > 0){
+      if(fDays >= 12)      { _fPts=12; r.signals.push('외국인 20일 누적 순매수 ('+fDays+'/20일 매수)'); }
+      else if(fDays >= 8)  { _fPts=8;  r.signals.push('외국인 누적 순매수 중 ('+fDays+'/20일)'); }
+      else                 { _fPts=4;  }
+    } else if(fNet < 0 && fDays < 5){
+      _fPts = -5;
+      r.warnings.push('외국인 20일 누적 순매도 ('+fDays+'/20일만 매수)');
+    }
+    _supplyBreakdown.foreign_pts = _fPts;
+    _scoreSupply += _fPts;
+
+    // ── [B] 기관 누적 순매수 (max 8pt) ──
+    var iDays = coreData.inst_days_positive_20d || 0;
+    var iNet  = coreData.inst_net_20d;
+    var _iPts = 0;
+    if(iNet > 0){
+      if(iDays >= 12)      { _iPts=8; r.signals.push('기관 20일 누적 순매수 ('+iDays+'/20일)'); }
+      else if(iDays >= 8)  { _iPts=5; }
+      else                 { _iPts=2; }
+    } else if(iNet < 0 && iDays < 5){
+      _iPts = -3;
+      r.warnings.push('기관 20일 누적 순매도 ('+iDays+'/20일만 매수)');
+    }
+    _supplyBreakdown.inst_pts = _iPts;
+    _scoreSupply += _iPts;
+
+    // ── [C] 동반 매집 + 추세 가속 보너스 (max 5pt) ──
+    var _bPts = 0;
+    if(coreData.both_accumulating && coreData.foreign_net_trend === 1){
+      _bPts = 5; r.signals.push('외국인+기관 동반 매집 + 매수 가속 ★');
+    } else if(coreData.both_accumulating){
+      _bPts = 3; r.signals.push('외국인+기관 동반 매집');
+    }
+    _supplyBreakdown.both_pts = _bPts;
+    _scoreSupply += _bPts;
+
+    // ── [D] A/D + OBV proxy 교차 검증 (max 5pt) ──
+    var adUp  = coreData.ad_line_slope !== null && coreData.ad_line_slope > 0;
+    var obvOk = coreData.obv_bullish_div === true;
+    var _proxyPts = 0;
+    if(fNet > 0 && adUp && obvOk){
+      _proxyPts = 5; r.signals.push('A/D+OBV proxy 동반 확인 (수급 교차검증)');
+    } else if(adUp || obvOk){
+      _proxyPts = 2;
+    }
+    // 불일치 경고: 직접 매수 but proxy 하락 → 대형 매도호가 지속 의심
+    if(fNet > 0 && !adUp && coreData.ad_line_slope !== null && coreData.ad_line_slope < -0.5){
+      r.warnings.push('외국인 매수 but A/D Line 하락 — proxy 불일치 (대형 매도호가/분배 의심)');
+    }
+    _supplyBreakdown.proxy_pts = _proxyPts;
+    _scoreSupply += _proxyPts;
+
+  } else {
+    // ── 폴백: 수급 직접 데이터 결측 → A/D + OBV proxy 만으로 (기존 로직) ──
+    var _adPts = 0;
+    if(coreData.ad_line_slope!==null && coreData.ad_line_slope > 0){
+      _adPts = 15; r.signals.push('A/D Line 상승 ('+coreData.ad_line_slope+'%) [proxy]');
+    } else if(coreData.ad_line_slope!==null && coreData.ad_line_slope > -1){
+      _adPts = 5;
+    }
+    var _obvPts = coreData.obv_bullish_div === true ? 15 : 0;
+    if(_obvPts) r.signals.push('OBV 불리시 다이버전스 [proxy]');
+
+    _supplyBreakdown.ad_pts  = _adPts;
+    _supplyBreakdown.obv_pts = _obvPts;
+    _scoreSupply += _adPts + _obvPts;
+
+    r.warnings.push('수급 직접 데이터 결측 (Yahoo 폴백 모드) — A/D·OBV proxy만으로 판단, 신뢰도 하락');
   }
-  if(coreData.rs_trend===true)   { _scoreRS+=10; r.signals.push('RS 추세 개선 중'); }
-  if(coreData.rs_declining===true){ _scoreRS-=15; r.warnings.push('RS 하락 중 — 상대강도 약화'); }
+  r._supplyBreakdown = _supplyBreakdown;
+
+  // ② RS 지표 (25pt) — KOSPI RS + 섹터 RS 이중 벤치마크
+  // 한국 시장은 업종 로테이션이 지배적 → 업종 내 leadership 이 중요
+  // 섹터 RS 있음: KOSPI 8 + 섹터 12 + 추세 5 = 25
+  // 섹터 RS 없음(매핑 결측 or fetch 실패): 기존 방식 15 + 10 = 25 (폴백)
+  var _hasSectorRS = coreData.sector_rs_confidence === 'full' && coreData.rs_sector_13w !== null;
+  var _rsBreakdown = { src: _hasSectorRS ? 'dual' : 'kospi_only' };
+
+  if(_hasSectorRS){
+    // KOSPI RS (max 8pt)
+    var _rsKospiPts = 0;
+    if(coreData.rs_13w!==null){
+      if(coreData.rs_13w>5)        { _rsKospiPts = 8; r.signals.push('KOSPI RS +'+coreData.rs_13w+'%p — 시장 대비 강세'); }
+      else if(coreData.rs_13w>0)   { _rsKospiPts = 5; r.signals.push('KOSPI RS +'+coreData.rs_13w+'%p'); }
+      else if(coreData.rs_13w>-5)  { _rsKospiPts = 2; }
+      else                         { _rsKospiPts = -3; r.warnings.push('KOSPI RS '+coreData.rs_13w+'%p — 시장 대비 약세'); }
+    }
+    _scoreRS += _rsKospiPts;
+    _rsBreakdown.kospi_pts = _rsKospiPts;
+
+    // 섹터 RS (max 12pt) — 한국 시장 핵심: 업종 내 leadership
+    var _rsSectorPts = 0;
+    var secRS = coreData.rs_sector_13w;
+    if(secRS > 5)         { _rsSectorPts = 12; r.signals.push('섹터 RS +'+secRS+'%p — 업종 내 리더십 ('+coreData.sector_name+')'); }
+    else if(secRS > 0)    { _rsSectorPts = 7;  r.signals.push('섹터 RS +'+secRS+'%p ('+coreData.sector_name+')'); }
+    else if(secRS > -5)   { _rsSectorPts = 2; }
+    else                  { _rsSectorPts = -8; r.warnings.push('섹터 RS '+secRS+'%p — 업종 내 약세 ('+coreData.sector_name+')'); }
+    _scoreRS += _rsSectorPts;
+    _rsBreakdown.sector_pts = _rsSectorPts;
+
+    // 일치/불일치 메타 경고 — 코리아 착시 체크
+    if(coreData.rs_13w > 3 && secRS < -3){
+      r.warnings.push('KOSPI RS 상승 but 섹터 RS 하락 — 업종 내 약세 (시장 대비 착시 가능)');
+    }
+
+  } else {
+    // 섹터 RS 폴백: 기존 KOSPI 단일 RS
+    if(coreData.rs_13w!==null){
+      if(coreData.rs_13w>5)        { _scoreRS+=15; r.signals.push('RS13w +'+coreData.rs_13w+'%p — 강한 아웃퍼폼'); }
+      else if(coreData.rs_13w>0)   { _scoreRS+=10; r.signals.push('RS13w +'+coreData.rs_13w+'%p'); }
+      else if(coreData.rs_13w>-5)  { _scoreRS+=3; }
+      else                         { _scoreRS-=5;  r.warnings.push('RS13w '+coreData.rs_13w+'%p — 상대약세'); }
+    }
+    _rsBreakdown.kospi_pts = _scoreRS;
+    if(coreData.sector_rs_confidence === 'mapping_missing' && coreData.sector_name){
+      r.warnings.push('[섹터 RS] "'+coreData.sector_name+'" 매핑 미지정 — KOSPI RS만 사용 (업종 로테이션 반영 불가)');
+    } else if(coreData.sector_rs_confidence === 'fetch_failed'){
+      r.warnings.push('[섹터 RS] 업종 지수 조회 실패 — KOSPI RS만 사용');
+    }
+  }
+
+  // RS 추세 (듀얼 경로: +5pt, 폴백 경로: +10pt — 전체 25pt 유지) — 경로 관계 없이 rs_declining 은 동일한 -15pt
+  var _trendPts = 0;
+  if(coreData.rs_trend===true){
+    _trendPts = _hasSectorRS ? 5 : 10;
+    _scoreRS += _trendPts;
+    r.signals.push('RS 추세 개선 중');
+  }
+  if(coreData.rs_declining===true){ _scoreRS-=15; r.warnings.push('RS 하락 중 — 상대강도 약화'); _trendPts -= 15; }
+  _rsBreakdown.trend_pts = _trendPts;
+  r._rsBreakdown = _rsBreakdown;
 
   // ③ 구조 지표 (25pt)
   if(coreData.higher_lows===true){ _scoreStruct+=15; r.signals.push('Higher Lows (12주 확인)'); }
@@ -6533,18 +7399,63 @@ function coreEngine(ydata, coreData){
   r._coreAxes = { supply:_scoreSupply, rs:_scoreRS, struct:_scoreStruct, aux:_scoreAux };
 
   // B3: CORE 레이어 breakdown (SWING과 동일 구조 — 데이터 신뢰도 포함)
+  // 수급축은 flow_confidence에 따라 direct/proxy 두 가지 breakdown 제공
+  var _supplyLayer;
+  if(_hasFlow){
+    _supplyLayer = [
+      { label:'외국인 20일 누적' + (coreData.foreign_net_20d!==null?' ('+(coreData.foreign_days_positive_20d||0)+'/20일 매수)':''),
+        got: _supplyBreakdown.foreign_pts||0, max: 12,
+        ok: (coreData.foreign_net_20d>0 && coreData.foreign_days_positive_20d>=12),
+        partial: (coreData.foreign_net_20d>0),
+        confidence: 'full' },
+      { label:'기관 20일 누적' + (coreData.inst_net_20d!==null?' ('+(coreData.inst_days_positive_20d||0)+'/20일 매수)':''),
+        got: _supplyBreakdown.inst_pts||0, max: 8,
+        ok: (coreData.inst_net_20d>0 && coreData.inst_days_positive_20d>=12),
+        partial: (coreData.inst_net_20d>0),
+        confidence: 'full' },
+      { label:'동반 매집 + 가속',
+        got: _supplyBreakdown.both_pts||0, max: 5,
+        ok: (coreData.both_accumulating && coreData.foreign_net_trend===1),
+        partial: coreData.both_accumulating,
+        confidence: 'full' },
+      { label:'A/D+OBV proxy 교차검증',
+        got: _supplyBreakdown.proxy_pts||0, max: 5,
+        ok: (_supplyBreakdown.proxy_pts===5),
+        partial: (_supplyBreakdown.proxy_pts>=2),
+        confidence: (coreData.ad_line_slope!==null || coreData.obv_bullish_div!==undefined) ? 'full' : 'missing' },
+    ];
+  } else {
+    _supplyLayer = [
+      { label:'A/D Line 상승 [proxy]' + (coreData.ad_line_slope!==null?' ('+coreData.ad_line_slope+'%)':''),
+        got: _supplyBreakdown.ad_pts||0, max: 15,
+        ok: coreData.ad_line_slope!==null&&coreData.ad_line_slope>0,
+        confidence: coreData.ad_line_slope!==null ? 'partial' : 'missing' },
+      { label:'OBV 불리시 다이버전스 [proxy]',
+        got: _supplyBreakdown.obv_pts||0, max: 15,
+        ok: coreData.obv_bullish_div===true,
+        confidence: coreData.obv_bullish_div!==undefined ? 'partial' : 'missing' },
+      { label:'외국인/기관 직접값',
+        got: 0, max: 0, ok: false, confidence: 'missing' },
+    ];
+  }
+
   r.layer_breakdown = {
-    supply: [
-      { label:'A/D Line 상승' + (coreData.ad_line_slope!==null?' ('+coreData.ad_line_slope+'%)':''),
-        got: coreData.ad_line_slope!==null&&coreData.ad_line_slope>0 ? 15 : coreData.ad_line_slope!==null&&coreData.ad_line_slope>-1 ? 5 : 0,
-        max: 15, ok: coreData.ad_line_slope!==null&&coreData.ad_line_slope>0,
-        confidence: coreData.ad_line_slope!==null ? 'full' : 'missing' },
-      { label:'OBV 불리시 다이버전스',
-        got: coreData.obv_bullish_div===true ? 15 : 0, max: 15, ok: coreData.obv_bullish_div===true,
-        confidence: coreData.obv_bullish_div!==undefined ? 'full' : 'missing' },
-    ],
-    rs: [
-      { label:'RS13w' + (coreData.rs_13w!==null?' '+coreData.rs_13w+'%p':''),
+    supply: _supplyLayer,
+    rs: _hasSectorRS ? [
+      { label:'KOSPI RS13w' + (coreData.rs_13w!==null?' '+coreData.rs_13w+'%p':''),
+        got: _rsBreakdown.kospi_pts||0, max: 8,
+        ok: coreData.rs_13w>5, partial: coreData.rs_13w>0,
+        confidence: coreData.rs_13w!==null ? 'full' : 'missing' },
+      { label:'섹터 RS13w' + (coreData.sector_name?' ('+coreData.sector_name+')':'') + (coreData.rs_sector_13w!==null?' '+coreData.rs_sector_13w+'%p':''),
+        got: _rsBreakdown.sector_pts||0, max: 12,
+        ok: coreData.rs_sector_13w>5, partial: coreData.rs_sector_13w>0,
+        confidence: 'full' },
+      { label:'RS 추세',
+        got: _rsBreakdown.trend_pts||0, max: 5,
+        ok: coreData.rs_trend===true,
+        confidence: (coreData.rs_trend!==undefined||coreData.rs_declining!==undefined) ? 'full' : 'missing' },
+    ] : [
+      { label:'RS13w (KOSPI only)' + (coreData.rs_13w!==null?' '+coreData.rs_13w+'%p':''),
         got: coreData.rs_13w===null?0 : coreData.rs_13w>5?15 : coreData.rs_13w>0?10 : coreData.rs_13w>-5?3 : -5,
         max: 15, ok: coreData.rs_13w>5, partial: coreData.rs_13w>0,
         confidence: coreData.rs_13w!==null ? 'full' : 'missing' },
@@ -6552,6 +7463,9 @@ function coreEngine(ydata, coreData){
         got: coreData.rs_trend===true ? 10 : coreData.rs_declining===true ? -15 : 0,
         max: 10, ok: coreData.rs_trend===true,
         confidence: (coreData.rs_trend!==undefined||coreData.rs_declining!==undefined) ? 'full' : 'missing' },
+      { label:'섹터 RS',
+        got: 0, max: 0, ok: false,
+        confidence: coreData.sector_rs_confidence || 'missing' },
     ],
     struct: [
       { label:'Higher Lows (12주)',
@@ -6582,9 +7496,11 @@ function coreEngine(ydata, coreData){
 
   // B1: CORE decision_path
   r.decision_path = [
-    { gate:'입력', status:'pass', note:'coreData 확인 (mode='+r.core_mode+', 물밑='+r.underground_score+'/8)' },
-    { gate:'수급축', status: _scoreSupply>=15?'pass':_scoreSupply>=5?'warn':'fail', note:'A/D+OBV '+_scoreSupply+'/30pt' },
-    { gate:'RS축', status: _scoreRS>=15?'pass':_scoreRS>=0?'warn':'fail', note:'RS13w+추세 '+_scoreRS+'/25pt' },
+    { gate:'입력', status:'pass', note:'coreData 확인 (mode='+r.core_mode+', 물밑='+r.underground_score+'/8, 수급='+(_hasFlow?'직접':'proxy')+')' },
+    { gate:'수급축', status: _scoreSupply>=15?'pass':_scoreSupply>=5?'warn':'fail',
+      note: (_hasFlow ? '외국인+기관 직접 ' : 'A/D+OBV proxy ')+_scoreSupply+'/30pt' },
+    { gate:'RS축', status: _scoreRS>=15?'pass':_scoreRS>=0?'warn':'fail',
+      note: (_hasSectorRS ? 'KOSPI+섹터('+coreData.sector_name+') ' : 'KOSPI only ')+_scoreRS+'/25pt' },
     { gate:'구조축', status: _scoreStruct>=15?'pass':_scoreStruct>=5?'warn':'fail', note:'HL+Stage '+_scoreStruct+'/25pt' },
     { gate:'보조축', status: _scoreAux>=10?'pass':'warn', note:'볼륨+베이스 '+_scoreAux+'/20pt' },
   ];
@@ -6595,9 +7511,18 @@ function coreEngine(ydata, coreData){
     r.decision_path.push({gate:'BLOCK',status:'block',note:'베이스 없이 과확장'});
     return r;
   }
+  // NEW: 외국인+기관 동반 20일 순매도 + RS 하락 → 직접 관찰 분배 구간
+  // (proxy A/D 기반 기존 조건보다 강한 증거)
+  if(_hasFlow && coreData.foreign_net_20d < 0 && coreData.inst_net_20d < 0
+     && coreData.foreign_days_positive_20d < 8 && coreData.rs_declining){
+    r.action='BLOCK';
+    r.blockers.push('[CORE] 외국인+기관 동반 20일 순매도 + RS 하락 — 분배 구간 (직접 관찰)');
+    r.decision_path.push({gate:'BLOCK',status:'block',note:'외인+기관 동반 매도 + RS하락'});
+    return r;
+  }
   if(coreData.rs_declining && coreData.ad_bullish_div===false){
-    r.action='BLOCK'; r.blockers.push('[CORE] RS+A/D 동시 하락 — 기관 분배 구간');
-    r.decision_path.push({gate:'BLOCK',status:'block',note:'RS+A/D 동시하락 (분배구간)'});
+    r.action='BLOCK'; r.blockers.push('[CORE] RS+A/D 동시 하락 — 기관 분배 구간 (proxy)');
+    r.decision_path.push({gate:'BLOCK',status:'block',note:'RS+A/D 동시하락 (proxy 분배)'});
     return r;
   }
   if(coreData.base_depth_pct!==null && coreData.base_depth_pct < -35){
@@ -6615,7 +7540,7 @@ function coreEngine(ydata, coreData){
   // 한 축이 완전히 비어있으면 "균형 없는 CORE" — ENTER 불가
   var _axisGatePass = true;
   var _axisGateFail = [];
-  if(_scoreSupply < 5)  { _axisGatePass=false; _axisGateFail.push('수급(A/D+OBV) '+_scoreSupply+'pt < 5pt 최소'); }
+  if(_scoreSupply < 5)  { _axisGatePass=false; _axisGateFail.push('수급 '+_scoreSupply+'pt < 5pt 최소'); }
   if(_scoreRS < 0)      { _axisGatePass=false; _axisGateFail.push('RS '+_scoreRS+'pt — 음수'); }
   if(_scoreStruct < 5)  { _axisGatePass=false; _axisGateFail.push('구조(HL+Stage) '+_scoreStruct+'pt < 5pt 최소'); }
 
@@ -13929,10 +14854,21 @@ function holdFromAnalysis(ticker){
   // 모든 모드 결과에서 ticker 찾기 (momo/swing/core + hold)
   var r = null;
   var modes = ['momo','swing','core','hold'];
+  // [1] 스크리너 결과 (screener 카드에서 누른 경우)
   for(var i=0;i<modes.length;i++){
     var arr = (G.screenerResults && G.screenerResults[modes[i]]) || [];
     r = arr.find(function(x){ return x && x.ticker===ticker; });
     if(r) break;
+  }
+  // [2] 분석 히스토리 (분석탭에서 단일 분석 후 누른 경우)
+  //     saveToHistory가 momoHistory/swingHistory/coreHistory 에 최신 unshift
+  if(!r){
+    var histKeys = ['momoHistory','swingHistory','coreHistory'];
+    for(var i=0;i<histKeys.length;i++){
+      var arr = G[histKeys[i]] || [];
+      r = arr.find(function(x){ return x && x.ticker===ticker; });
+      if(r) break;
+    }
   }
   if(!r){ showToast && showToast('분석 결과를 찾을 수 없습니다'); return; }
   // 종목코드: 005930.KS → 005930
