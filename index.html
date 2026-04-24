@@ -2109,7 +2109,7 @@ function calcDailyStats(candles, currentPrice){
   // 거래량 추세
   var vol3r = avg(vols, 3);
   var vol3p = vols.length >= 6 ? avg(vols.slice(3,6), 3) : vol3r;
-  var vol_trend = vol3p > 0 ? vol3r/vol3p : 1;
+  var vol_trend = vol3p > 0 ? parseFloat((vol3r/vol3p).toFixed(2)) : 1;
 
   // 눌림목 거래량 수축: 최근 5일 거래량 < 이전 5일 평균
   var vol5r = avg(vols, 5);
@@ -2141,7 +2141,7 @@ function calcDailyStats(candles, currentPrice){
 
   // 눌림목 깊이: 10일 고점 대비 현재가 (currentPrice 있으면 사용, 없으면 전일 종가)
   var priceRef = currentPrice || prevClose;
-  var pullback_depth_pct = box10_high > 0 ? (priceRef/box10_high - 1)*100 : null;
+  var pullback_depth_pct = box10_high > 0 ? parseFloat(((priceRef/box10_high - 1)*100).toFixed(1)) : null;
 
   // 상한가 관련 (MOMO용)
   var prev_day_limit = candles[0].prdy_vrss_sign === '1'
@@ -6778,7 +6778,7 @@ function swingEngine(ydata, swingData){
   var _c4 = swingData.no_consecutive_bear ? 4 : 0;
   var _c5 = (swingData.rsi14!==null&&swingData.rsi14>=40&&swingData.rsi14<=swingRsiMax) ? 3 : 0;
   r.layer_breakdown.pullback.push({
-    label:'조정폭 적정(-3%~-7%)'+(depthPct!==null?' '+depthPct+'%':''),
+    label:'조정폭 적정(-3%~-7%)'+(depthPct!==null?' '+depthPct.toFixed(1)+'%':''),
     got:_c1, max:10, ok:_c1===10, partial:_c1>0&&_c1<10,
     confidence: depthPct!==null ? 'full' : 'missing'
   });
@@ -6812,7 +6812,7 @@ function swingEngine(ydata, swingData){
   if(hasLiveTrigger){
   // D1/D3 통합: 계단형 점수
   if(swingData.bullish_candle && swingData.vol_ratio && swingData.vol_ratio >= 1.3){
-    trigScore += 5; r.signals.push('거래량 동반 양봉 ('+swingData.vol_ratio+'x)');
+    trigScore += 5; r.signals.push('거래량 동반 양봉 ('+swingData.vol_ratio.toFixed(2)+'x)');
   } else if(swingData.bullish_candle){
     trigScore += 2;
   }
@@ -6830,7 +6830,7 @@ function swingEngine(ydata, swingData){
   var _d2 = swingData.broke_prev3d_high ? 5 : 0;
   var _d3 = swingData.close_upper_40pct ? 5 : 0;
   r.layer_breakdown.trigger.push({
-    label:'거래량 동반 양봉(1.3x↑)'+(swingData.vol_ratio?' '+swingData.vol_ratio+'x':''),
+    label:'거래량 동반 양봉(1.3x↑)'+(swingData.vol_ratio?' '+swingData.vol_ratio.toFixed(2)+'x':''),
     got:_d1, max:5, ok:_d1===5, partial:_d1===2,
     confidence: 'full'
   });
@@ -6913,15 +6913,16 @@ function swingEngine(ydata, swingData){
 
   // ── [1] 명시적 위험 조건 검사 (점수와 무관하게 BLOCK) ──
   // 임계값 근거:
-  //   MA20 이격 > swingMa20Max + 5 : 허용폭보다 크게 벗어난 "과확장" (기존 L6506 경고를 BLOCK으로 승격)
+  //   MA20 이격 > swingMa20Max + 5 : 허용폭보다 크게 벗어난 "과확장"
   //   RSI14 > swingRsiMax + 10     : 사용자 기준보다 크게 과열 (기본 설정 시 80 초과)
   //   연속 대형 음봉                  : 하락 지속 구간 (눌림목 SWING 부적합)
+  // 철학: "더 갈 수는 있지만 기대값 음수" — 단일 종목 집착 대신 다른 후보 찾기
   var criticalRisks = [];
   if(swingData.ma20_gap_pct !== null && swingData.ma20_gap_pct > swingMa20Max + 5){
-    criticalRisks.push('MA20 이격 +'+swingData.ma20_gap_pct+'% — 과확장 (허용 '+swingMa20Max+'% 초과)');
+    criticalRisks.push('MA20 이격 +'+swingData.ma20_gap_pct.toFixed(1)+'% — 20일 평균 대비 과확장');
   }
   if(swingData.rsi14 !== null && swingData.rsi14 > swingRsiMax + 10){
-    criticalRisks.push('RSI '+swingData.rsi14+' — 심각한 과열 (기준 '+swingRsiMax+' 초과)');
+    criticalRisks.push('RSI '+swingData.rsi14.toFixed(1)+' — 과매수 극단 (통계적 조정 임박)');
   }
   if(swingData.no_consecutive_bear === false){
     criticalRisks.push('연속 대형 음봉 감지 — 하락 지속 구간');
@@ -6930,10 +6931,12 @@ function swingEngine(ydata, swingData){
   if(criticalRisks.length > 0){
     r.action = 'BLOCK';
     r.swing_grade = null;
+    // 첫 번째 blocker는 요약, 나머지는 개별 위험
+    r.blockers.push('기대값 음수 구간 — 다른 후보 검토 권장');
     criticalRisks.forEach(function(reason){
-      r.blockers.push('[과확장/과열] '+reason);
+      r.blockers.push('· '+reason);
     });
-    r.decision_path.push({gate:'액션',status:'block',note:'BLOCK · 명시적 위험 '+criticalRisks.length+'건 · '+r.score+'pt'});
+    r.decision_path.push({gate:'액션',status:'block',note:'BLOCK · 기대값 음수 ('+criticalRisks.length+'건) · '+r.score+'pt'});
     r.position_size = posSize;
     return r;
   }
