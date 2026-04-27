@@ -3840,31 +3840,46 @@ async function fetchDartFinancialsHistory(stockCode){
       if(!data) { rawHistory.push(null); continue; }
 
       // 항목별 추출
-      var rev=null, op=null, ni=null, capex=null, totAsset=null, totLiab=null, totEq=null;
+      // 중요: thstrm_amount = 당기 (단일 분기), thstrm_add_amount = 당기 누적
+      //   1Q/반기/3Q 보고서: thstrm_amount 자체가 단일 분기 값
+      //   사업보고서: thstrm_amount 는 연간 누적 (Q4 단일 아님)
+      var rev_q=null, op_q=null, ni_q=null, capex_q=null;     // 단일 분기 (thstrm_amount)
+      var rev_cum=null, op_cum=null, ni_cum=null, capex_cum=null; // 누적 (thstrm_add_amount)
+      var totAsset=null, totLiab=null, totEq=null;
       data.list.forEach(function(row){
         var acct = (row.account_nm||'').replace(/\s/g,'');
         var sj = (row.sj_div||'');  // BS, IS, CF, CIS
-        var amt = parseFloat((row.thstrm_amount||'').replace(/,/g,''))||null;
+        var amt_q = parseFloat((row.thstrm_amount||'').replace(/,/g,''))||null;
+        var amt_cum = parseFloat((row.thstrm_add_amount||'').replace(/,/g,''))||null;
 
         // 손익 (IS or CIS)
         if(sj==='IS' || sj==='CIS'){
-          if(rev===null && (acct.indexOf('매출액')>=0 || acct==='수익' || acct.indexOf('영업수익')>=0)) rev=amt;
-          if(op===null && acct.indexOf('영업이익')>=0) op=amt;
-          if(ni===null && (acct.indexOf('당기순이익')>=0 || acct==='순이익')) ni=amt;
+          if(rev_q===null && (acct.indexOf('매출액')>=0 || acct==='수익' || acct.indexOf('영업수익')>=0)){
+            rev_q = amt_q;
+            rev_cum = amt_cum;
+          }
+          if(op_q===null && acct.indexOf('영업이익')>=0){
+            op_q = amt_q;
+            op_cum = amt_cum;
+          }
+          if(ni_q===null && (acct.indexOf('당기순이익')>=0 || acct==='순이익')){
+            ni_q = amt_q;
+            ni_cum = amt_cum;
+          }
         }
-        // 재무상태표 (BS)
+        // 재무상태표 (BS) — 시점값이라 누적 개념 없음
         if(sj==='BS'){
-          if(totAsset===null && acct==='자산총계') totAsset=amt;
-          if(totLiab===null && acct==='부채총계') totLiab=amt;
-          if(totEq===null && acct==='자본총계') totEq=amt;
+          if(totAsset===null && acct==='자산총계') totAsset = amt_q;
+          if(totLiab===null && acct==='부채총계') totLiab = amt_q;
+          if(totEq===null && acct==='자본총계') totEq = amt_q;
         }
-        // 현금흐름표 (CF) — CAPEX = 유형자산취득
+        // 현금흐름표 (CF) — 누적 (재무제표 표준상 CF는 누적)
         if(sj==='CF'){
-          // 다양한 표현: "유형자산의 취득", "유형자산취득", "토지·건물·기계장치의 취득" 등
-          if(capex===null &&
-             (acct.indexOf('유형자산')>=0 && acct.indexOf('취득')>=0)){
+          if(capex_q===null && (acct.indexOf('유형자산')>=0 && acct.indexOf('취득')>=0)){
             // CF 는 음수로 표시되는 경우 많음 → 절대값
-            capex = amt!==null ? Math.abs(amt) : null;
+            // CF 의 thstrm_amount 는 누적 (당기 = 누적값)
+            capex_q = amt_q!==null ? Math.abs(amt_q) : null;
+            capex_cum = amt_cum!==null ? Math.abs(amt_cum) : capex_q;
           }
         }
       });
@@ -3873,76 +3888,81 @@ async function fetchDartFinancialsHistory(stockCode){
         label: qd.label,
         year: qd.year,
         q: qd.q,
-        revenue_cum: rev,        // 누적 매출
-        op_income_cum: op,       // 누적 영업이익
-        net_income_cum: ni,      // 누적 순이익
-        capex_cum: capex,        // 누적 CAPEX
-        total_assets: totAsset,  // 시점값 (누적 X)
+        rpt: qd.rpt,
+        // thstrm_amount 기반 (분기보고서면 단일분기, 사업보고서면 연간)
+        revenue_q: rev_q,
+        op_income_q: op_q,
+        net_income_q: ni_q,
+        capex_q: capex_q,
+        // thstrm_add_amount 기반 (누적)
+        revenue_cum: rev_cum,
+        op_income_cum: op_cum,
+        net_income_cum: ni_cum,
+        capex_cum: capex_cum,
+        // 시점값
+        total_assets: totAsset,
         total_liab: totLiab,
         total_equity: totEq,
       });
     }
 
-    // 누적값 → 단일 분기 변환
-    // Q1: cum 그대로
-    // Q2: 반기 cum - Q1 cum
-    // Q3: 3Q cum - 반기 cum
-    // Q4: 사업 cum - 3Q cum
-    // 분기 시계열로 재정렬
+    // 단일 분기 값 결정
+    //   1Q/반기/3Q (11013/11012/11014): thstrm_amount = 이미 단일 분기
+    //   사업보고서 (11011): thstrm_amount = 연간, Q4 단일 = 연간 - 3Q 누적
     var quarterly = [];
     for(var k=0; k<rawHistory.length; k++){
       var cur = rawHistory[k];
       if(!cur){ quarterly.push(null); continue; }
-      if(cur.q === 1){
-        quarterly.push({
-          label: cur.label,
-          year: cur.year, q: cur.q,
-          revenue: cur.revenue_cum,
-          op_income: cur.op_income_cum,
-          net_income: cur.net_income_cum,
-          capex: cur.capex_cum,
-          op_margin: (cur.revenue_cum && cur.revenue_cum!==0) ? (cur.op_income_cum/cur.revenue_cum*100) : null,
-          total_assets: cur.total_assets,
-          total_equity: cur.total_equity,
-          debt_ratio: (cur.total_equity && cur.total_equity!==0 && cur.total_liab!==null) ? (cur.total_liab/cur.total_equity*100) : null,
-        });
-      } else {
-        // 직전 누적값 찾기 (같은 연도 한 분기 전)
-        var prev = rawHistory.find(function(r){ return r && r.year===cur.year && r.q===cur.q-1; });
-        if(prev && prev.revenue_cum!==null && cur.revenue_cum!==null){
-          var qRev = cur.revenue_cum - prev.revenue_cum;
-          var qOp  = (cur.op_income_cum!==null && prev.op_income_cum!==null) ? cur.op_income_cum - prev.op_income_cum : null;
-          var qNi  = (cur.net_income_cum!==null && prev.net_income_cum!==null) ? cur.net_income_cum - prev.net_income_cum : null;
-          var qCx  = (cur.capex_cum!==null && prev.capex_cum!==null) ? cur.capex_cum - prev.capex_cum : null;
-          quarterly.push({
-            label: cur.label,
-            year: cur.year, q: cur.q,
-            revenue: qRev,
-            op_income: qOp,
-            net_income: qNi,
-            capex: qCx,
-            op_margin: (qRev!==null && qRev!==0) ? (qOp/qRev*100) : null,
-            total_assets: cur.total_assets,
-            total_equity: cur.total_equity,
-            debt_ratio: (cur.total_equity && cur.total_equity!==0 && cur.total_liab!==null) ? (cur.total_liab/cur.total_equity*100) : null,
-          });
+
+      var qRev=null, qOp=null, qNi=null, qCx=null;
+
+      if(cur.rpt === '11011'){
+        // 사업보고서: Q4 = 연간 - 3Q누적 → 같은 연도 3Q 데이터 찾기
+        var q3 = rawHistory.find(function(r){ return r && r.year===cur.year && r.q===3; });
+        if(q3 && q3.revenue_cum!==null && cur.revenue_q!==null){
+          qRev = cur.revenue_q - q3.revenue_cum;
+          qOp  = (cur.op_income_q!==null && q3.op_income_cum!==null) ? cur.op_income_q - q3.op_income_cum : null;
+          qNi  = (cur.net_income_q!==null && q3.net_income_cum!==null) ? cur.net_income_q - q3.net_income_cum : null;
+          qCx  = (cur.capex_q!==null && q3.capex_cum!==null) ? cur.capex_q - q3.capex_cum : null;
         } else {
-          // 누적값 그대로 (직전 데이터 없을 때)
-          quarterly.push({
-            label: cur.label,
-            year: cur.year, q: cur.q,
-            revenue: cur.revenue_cum,
-            op_income: cur.op_income_cum,
-            net_income: cur.net_income_cum,
-            capex: cur.capex_cum,
-            op_margin: (cur.revenue_cum && cur.revenue_cum!==0) ? (cur.op_income_cum/cur.revenue_cum*100) : null,
-            total_assets: cur.total_assets,
-            total_equity: cur.total_equity,
-            debt_ratio: (cur.total_equity && cur.total_equity!==0 && cur.total_liab!==null) ? (cur.total_liab/cur.total_equity*100) : null,
-            partial: true,  // 누적값 그대로 (단일분기 아님)
-          });
+          // 3Q 데이터 없으면 연간 값 그대로 (분기 단위 아님 — partial 표시)
+          qRev = cur.revenue_q;
+          qOp  = cur.op_income_q;
+          qNi  = cur.net_income_q;
+          qCx  = cur.capex_q;
+        }
+      } else {
+        // 1Q/반기/3Q: thstrm_amount 자체가 단일 분기 값
+        qRev = cur.revenue_q;
+        qOp  = cur.op_income_q;
+        qNi  = cur.net_income_q;
+        // CF 의 경우 thstrm_amount 도 누적이라 — 직전 분기 누적과의 차이로 계산
+        if(cur.q === 1){
+          qCx = cur.capex_q;  // 1Q 는 누적도 단일도 같음
+        } else {
+          // 2Q/3Q: 누적 - 직전 누적 = 단일 분기
+          var prevCum = rawHistory.find(function(r){ return r && r.year===cur.year && r.q===cur.q-1; });
+          if(prevCum && cur.capex_cum!==null && prevCum.capex_cum!==null){
+            qCx = cur.capex_cum - prevCum.capex_cum;
+          } else {
+            qCx = cur.capex_q;  // 폴백
+          }
         }
       }
+
+      quarterly.push({
+        label: cur.label,
+        year: cur.year, q: cur.q,
+        revenue: qRev,
+        op_income: qOp,
+        net_income: qNi,
+        capex: qCx,
+        op_margin: (qRev !== null && qRev !== 0) ? (qOp / qRev * 100) : null,
+        total_assets: cur.total_assets,
+        total_equity: cur.total_equity,
+        debt_ratio: (cur.total_equity && cur.total_equity !== 0 && cur.total_liab !== null)
+          ? (cur.total_liab / cur.total_equity * 100) : null,
+      });
     }
 
     var result = {
