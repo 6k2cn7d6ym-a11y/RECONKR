@@ -4102,16 +4102,59 @@ async function testDartConnection(){
 }
 
 // ── corp_code 조회 (종목코드 6자리 → DART 고유 corp_code) ──
+// 2026-04-27: Oracle VM /dart-corp/{code} 엔드포인트 사용으로 수정
+//   기존 /api/company.json 방식은 corp_code 가 이미 있어야 작동하므로 부적합
+//   localStorage 캐시 추가 (30일) — VM 재시작 후에도 빠른 복구
 var _dartCorpCache = {};
-async function fetchDartCorpCode(stockCode){
-  var code = stockCode.replace(/\.(KS|KQ)$/i,'');
-  if(_dartCorpCache[code]) return _dartCorpCache[code];
-  var data = await fetchDart('/api/company.json', { stock_code: code });
-  if(data && data.status === '000' && data.corp_code){
-    _dartCorpCache[code] = data.corp_code;
-    return data.corp_code;
+var DART_CORP_CACHE_KEY = 'dartCorpMap_v1';
+var DART_CORP_PROXY_BASE = 'https://dart.minon.kr/dart-corp';
+
+// localStorage 에서 캐시 로드 (앱 시작 시 자동)
+try{
+  var _dcCached = localStorage.getItem(DART_CORP_CACHE_KEY);
+  if(_dcCached){
+    var _dcParsed = JSON.parse(_dcCached);
+    if(_dcParsed && _dcParsed.timestamp && (Date.now() - _dcParsed.timestamp) < 30*24*60*60*1000){
+      _dartCorpCache = _dcParsed.map || {};
+    }
   }
-  return null;
+}catch(e){}
+
+function _saveDartCorpCache(){
+  try{
+    localStorage.setItem(DART_CORP_CACHE_KEY, JSON.stringify({
+      timestamp: Date.now(),
+      map: _dartCorpCache,
+    }));
+  }catch(e){}
+}
+
+async function fetchDartCorpCode(stockCode){
+  // 종목코드 정규화: .KS / .KQ / .KN 모두 제거
+  var code = String(stockCode||'').replace(/\.(KS|KQ|KN)$/i,'').replace(/[^\d]/g,'');
+  if(!/^\d{6}$/.test(code)) return null;
+
+  // 메모리 캐시
+  if(_dartCorpCache[code]) return _dartCorpCache[code];
+
+  // Oracle VM 호출
+  try{
+    var resp = await fetch(DART_CORP_PROXY_BASE + '/' + code);
+    if(!resp.ok){
+      console.warn('[DART-corp] '+code+' 조회 실패: HTTP '+resp.status);
+      return null;
+    }
+    var data = await resp.json();
+    if(data && data.corp_code){
+      _dartCorpCache[code] = data.corp_code;
+      _saveDartCorpCache();
+      return data.corp_code;
+    }
+    return null;
+  }catch(e){
+    console.warn('[DART-corp] '+code+' 조회 에러:', e.message);
+    return null;
+  }
 }
 
 // ── 공시 목록 조회 (종목 분석용 — 최근 30일, 최대 10건) ──
