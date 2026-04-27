@@ -4093,6 +4093,536 @@ async function fetchDartMajorStock(stockCode){
   }
 }
 
+// ═══════════════════════════════════════════════════════════
+// BabylonKR 신호 감지 함수
+// ═══════════════════════════════════════════════════════════
+// 모든 함수: 입력 데이터 → { active, score, evidence, raw }
+//   active: bool, 신호 발동 여부
+//   score: 가중치 적용된 점수 (verdict 계산용)
+//   evidence: 사람 읽을 수 있는 근거 텍스트
+//   raw: 디버그용 원시 데이터
+
+// ─────────────────────────────────────────
+// [1] 영업이익률 5%p+ 점프 (1년 내) — 가중치 25
+// ─────────────────────────────────────────
+// SK하이닉스 패턴: OPM 23% → 58% (Δ+35%p)
+// 한미반도체 패턴: OPM 37% → 48% (Δ+11%p)
+// 한화에어로 패턴: OPM -14% → 11% (턴어라운드 + 점프)
+// 분기 변동성 줄이기 위해 4분기 누적 OPM 비교 (TTM)
+function detectMarginJump5pp(financialsHistory){
+  var out = { active: false, score: 0, evidence: '', raw: {}, weight: 25 };
+  if(!financialsHistory || !financialsHistory.quarters || financialsHistory.quarters.length < 8){
+    out.evidence = '데이터 부족 (8분기 필요)';
+    return out;
+  }
+  var qs = financialsHistory.quarters;  // [최신, ..., 가장 오래된]
+
+  // TTM = 최근 4분기 합산
+  // 비교 기준: TTM 직전 1년 (5번째~8번째 분기)
+  function calcTTM(arr){
+    var rev=0, op=0, count=0;
+    for(var i=0; i<arr.length; i++){
+      if(arr[i] && arr[i].revenue!==null && arr[i].op_income!==null){
+        rev += arr[i].revenue;
+        op += arr[i].op_income;
+        count++;
+      }
+    }
+    if(count === 0 || rev === 0) return null;
+    return { revenue: rev, op_income: op, op_margin: op/rev*100, q_count: count };
+  }
+
+  var recentTTM = calcTTM(qs.slice(0, 4));
+  var priorTTM  = calcTTM(qs.slice(4, 8));
+
+  if(!recentTTM || !priorTTM){
+    out.evidence = 'TTM 계산 불가';
+    return out;
+  }
+
+  var deltaPp = recentTTM.op_margin - priorTTM.op_margin;
+  out.raw = {
+    recent_ttm_opm: recentTTM.op_margin.toFixed(1),
+    prior_ttm_opm: priorTTM.op_margin.toFixed(1),
+    delta_pp: deltaPp.toFixed(1),
+  };
+
+  if(deltaPp >= 5){
+    out.active = true;
+    // 5%p = 1.0배, 10%p = 1.5배, 20%p+ = 2.0배 (만점)
+    var multiplier = Math.min(2.0, 1 + (deltaPp - 5) / 30);
+    out.score = Math.min(out.weight, out.weight * multiplier / 2);  // 25점 만점
+    out.evidence = '영업이익률 ' + priorTTM.op_margin.toFixed(1) + '% → ' + recentTTM.op_margin.toFixed(1) + '% (Δ +' + deltaPp.toFixed(1) + '%p)';
+  } else if(deltaPp >= 2){
+    // 2~5%p: 약한 신호 (active=false 지만 score 일부)
+    out.score = out.weight * 0.3;
+    out.evidence = '영업이익률 약한 개선 ' + deltaPp.toFixed(1) + '%p';
+  } else if(deltaPp <= -5){
+    // 마진 악화는 BLOCK 트리거 (음수 score 로 표시)
+    out.score = -out.weight;
+    out.evidence = '⚠ 영업이익률 악화 ' + deltaPp.toFixed(1) + '%p (BLOCK 후보)';
+  } else {
+    out.evidence = '영업이익률 변동 미미 ' + deltaPp.toFixed(1) + '%p';
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────
+// [2] 매출 YoY 30%+ — 가중치 20
+// ─────────────────────────────────────────
+// 한미반도체 패턴: 2024 매출 +251% YoY
+// 한화에어로 패턴: 2024 매출 +137%
+// 현대로템 패턴: 2025 매출 +33%
+// TTM 비교 (최근 4분기 vs 직전 1년)
+function detectRevenueAccel(financialsHistory){
+  var out = { active: false, score: 0, evidence: '', raw: {}, weight: 20 };
+  if(!financialsHistory || !financialsHistory.quarters || financialsHistory.quarters.length < 8){
+    out.evidence = '데이터 부족';
+    return out;
+  }
+  var qs = financialsHistory.quarters;
+
+  function sumRev(arr){
+    var rev=0, count=0;
+    for(var i=0; i<arr.length; i++){
+      if(arr[i] && arr[i].revenue!==null && arr[i].revenue > 0){
+        rev += arr[i].revenue;
+        count++;
+      }
+    }
+    return count >= 3 ? rev : null;  // 최소 3분기 데이터 있어야
+  }
+
+  var recentRev = sumRev(qs.slice(0, 4));
+  var priorRev  = sumRev(qs.slice(4, 8));
+
+  if(!recentRev || !priorRev){
+    out.evidence = 'TTM 매출 계산 불가';
+    return out;
+  }
+
+  var yoyPct = (recentRev - priorRev) / priorRev * 100;
+  out.raw = {
+    recent_ttm_rev: recentRev,
+    prior_ttm_rev: priorRev,
+    yoy_pct: yoyPct.toFixed(1),
+  };
+
+  if(yoyPct >= 30){
+    out.active = true;
+    // 30% = 1.0배, 100% = 1.5배, 200%+ = 2.0배
+    var multiplier = Math.min(2.0, 1 + (yoyPct - 30) / 170);
+    out.score = Math.min(out.weight, out.weight * multiplier / 2);
+    out.evidence = '매출 YoY +' + yoyPct.toFixed(1) + '% (' + (priorRev/1e8).toFixed(0) + '억 → ' + (recentRev/1e8).toFixed(0) + '억)';
+  } else if(yoyPct >= 10){
+    out.score = out.weight * 0.5;
+    out.evidence = '매출 YoY +' + yoyPct.toFixed(1) + '% (양호)';
+  } else if(yoyPct <= -10){
+    out.score = -out.weight;
+    out.evidence = '⚠ 매출 역성장 ' + yoyPct.toFixed(1) + '% (BLOCK 후보)';
+  } else {
+    out.evidence = '매출 YoY ' + yoyPct.toFixed(1) + '% (정체)';
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────
+// [3] 적자→흑자 턴어라운드 — 가중치 25
+// ─────────────────────────────────────────
+// 한화오션 패턴: 2023 -1965억 → 2024 +2379억
+// SK하이닉스 패턴: 2023 -7.7조 → 2024 +23.5조
+// 한화에어로 패턴: 2022 -1.4조 → 2023 +7,409억
+// 직전 1년 영업이익 누적 < 0 AND 최근 1년 누적 > 0
+function detectTurnaround(financialsHistory){
+  var out = { active: false, score: 0, evidence: '', raw: {}, weight: 25 };
+  if(!financialsHistory || !financialsHistory.quarters || financialsHistory.quarters.length < 8){
+    out.evidence = '데이터 부족';
+    return out;
+  }
+  var qs = financialsHistory.quarters;
+
+  function sumOp(arr){
+    var op=0, count=0;
+    for(var i=0; i<arr.length; i++){
+      if(arr[i] && arr[i].op_income!==null){
+        op += arr[i].op_income;
+        count++;
+      }
+    }
+    return count >= 3 ? op : null;
+  }
+
+  var recentOp = sumOp(qs.slice(0, 4));
+  var priorOp  = sumOp(qs.slice(4, 8));
+
+  if(recentOp === null || priorOp === null){
+    out.evidence = '영업이익 누적 계산 불가';
+    return out;
+  }
+
+  out.raw = {
+    recent_ttm_op: recentOp,
+    prior_ttm_op: priorOp,
+  };
+
+  if(priorOp < 0 && recentOp > 0){
+    out.active = true;
+    // 턴어라운드 강도: 흑자 규모로 판정
+    // 1조 이상 흑자 = 만점, 그 이하는 비례
+    var bonusScale = Math.min(1.0, recentOp / 1e12);  // 1조 = 1.0
+    out.score = out.weight * (0.7 + bonusScale * 0.3);  // 17.5 ~ 25
+    out.evidence = '턴어라운드: 영업이익 ' + (priorOp/1e8).toFixed(0) + '억 → +' + (recentOp/1e8).toFixed(0) + '억';
+  } else if(priorOp > 0 && recentOp < 0){
+    // 역턴어라운드 = 매우 위험
+    out.score = -out.weight;
+    out.evidence = '⚠ 흑자→적자 전환 (BLOCK 후보): ' + (priorOp/1e8).toFixed(0) + '억 → ' + (recentOp/1e8).toFixed(0) + '억';
+  } else if(recentOp < 0){
+    out.evidence = '연속 적자 (' + (priorOp/1e8).toFixed(0) + '억, ' + (recentOp/1e8).toFixed(0) + '억)';
+  } else {
+    out.evidence = '연속 흑자 (턴어라운드 신호 없음)';
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────
+// [4] CAPEX 확대 — 가중치 8
+// ─────────────────────────────────────────
+// LS Electric 패턴: 부산 변압기 공장 3배 증설
+// 효성중공업 패턴: 멤피스 공장 2배 증설
+// 미래 매출 레벨업 가시성
+// CAPEX YoY 50%+ 증가
+function detectCapexExpansion(financialsHistory){
+  var out = { active: false, score: 0, evidence: '', raw: {}, weight: 8 };
+  if(!financialsHistory || !financialsHistory.quarters || financialsHistory.quarters.length < 8){
+    out.evidence = '데이터 부족';
+    return out;
+  }
+  var qs = financialsHistory.quarters;
+
+  function sumCapex(arr){
+    var cx=0, count=0;
+    for(var i=0; i<arr.length; i++){
+      if(arr[i] && arr[i].capex!==null && arr[i].capex > 0){
+        cx += arr[i].capex;
+        count++;
+      }
+    }
+    return count >= 2 ? cx : null;  // CAPEX 는 분기별 변동 크니 좀 관대
+  }
+
+  var recentCx = sumCapex(qs.slice(0, 4));
+  var priorCx  = sumCapex(qs.slice(4, 8));
+
+  if(!recentCx || !priorCx){
+    out.evidence = 'CAPEX 데이터 부족';
+    return out;
+  }
+
+  var yoyPct = (recentCx - priorCx) / priorCx * 100;
+  out.raw = {
+    recent_ttm_capex: recentCx,
+    prior_ttm_capex: priorCx,
+    yoy_pct: yoyPct.toFixed(1),
+  };
+
+  if(yoyPct >= 50){
+    out.active = true;
+    var multiplier = Math.min(2.0, 1 + (yoyPct - 50) / 100);
+    out.score = Math.min(out.weight, out.weight * multiplier / 2);
+    out.evidence = 'CAPEX 확대 +' + yoyPct.toFixed(0) + '% (' + (priorCx/1e8).toFixed(0) + '억 → ' + (recentCx/1e8).toFixed(0) + '억)';
+  } else if(yoyPct >= 20){
+    out.score = out.weight * 0.5;
+    out.evidence = 'CAPEX 증가 +' + yoyPct.toFixed(0) + '%';
+  } else {
+    out.evidence = 'CAPEX 정체 (' + yoyPct.toFixed(0) + '%)';
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────
+// [5] 연기금 5%+ 또는 매집 — 가중치 10
+// ─────────────────────────────────────────
+// 한미반도체 패턴: 국민연금 7.09% (외인 7.3% 대비 큰 비중)
+// 현대로템 패턴: 국민연금 8.08% (현대차 다음 2대 주주)
+// 검증된 신호 — "기관 발굴 완료" 표시
+function detectNpsPosition(majorStock){
+  var out = { active: false, score: 0, evidence: '', raw: {}, weight: 10 };
+  if(!majorStock){
+    out.evidence = 'majorStock 데이터 없음';
+    return out;
+  }
+
+  var nps = majorStock.nps;
+  var recentBuy = majorStock.nps_recent_buy;
+  out.raw = { nps_pct: nps ? nps.pct : null, recent_buy: recentBuy };
+
+  if(!nps){
+    out.evidence = '국민연금 5% 미만 보유 (또는 미보유)';
+    return out;
+  }
+
+  // 보유 비율 + 최근 매집 결합
+  if(nps.pct >= 5 && recentBuy){
+    out.active = true;
+    out.score = out.weight;  // 만점
+    out.evidence = '국민연금 ' + nps.pct + '% 보유 + 최근 매집 ↑ (' + (nps.change_pp >= 0 ? '+' : '') + nps.change_pp + '%p)';
+  } else if(nps.pct >= 5){
+    out.active = true;
+    // 비율 큼 + 매집 안 함 → 70% 점수
+    var multiplier = Math.min(1.0, nps.pct / 10);  // 10%+ = 만점
+    out.score = out.weight * 0.7 * multiplier;
+    var changeStr = nps.change_pp !== null ? ' (최근 ' + (nps.change_pp >= 0 ? '+' : '') + nps.change_pp + '%p)' : '';
+    out.evidence = '국민연금 ' + nps.pct + '% 보유' + changeStr;
+  } else if(recentBuy){
+    out.active = true;
+    out.score = out.weight * 0.5;
+    out.evidence = '국민연금 ' + nps.pct + '% but 최근 매집 ↑';
+  } else {
+    out.evidence = '국민연금 ' + nps.pct + '% (보유 약함)';
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────
+// [보조] 글로벌 연기금 진입 — 가중치 5 (보너스)
+// ─────────────────────────────────────────
+// 현대로템 사례: 블랙록 신규 5% 진입
+function detectGlobalPensionIn(majorStock){
+  var out = { active: false, score: 0, evidence: '', raw: {}, weight: 5 };
+  if(!majorStock || !majorStock.global_pensions){
+    out.evidence = '데이터 없음';
+    return out;
+  }
+  var globals = majorStock.global_pensions;
+  out.raw = { count: globals.length, holders: globals.map(g => g.holder) };
+
+  if(globals.length === 0){
+    out.evidence = '글로벌 연기금 5%+ 보유 없음';
+    return out;
+  }
+
+  out.active = true;
+  out.score = out.weight;
+  var names = globals.slice(0, 3).map(function(g){ return g.holder + ' ' + g.pct + '%'; }).join(', ');
+  out.evidence = '글로벌 연기금 진입: ' + names;
+  return out;
+}
+
+// ─────────────────────────────────────────
+// [한국 특수 BLOCK] 거버넌스/회계 위험 시그널
+// ─────────────────────────────────────────
+// 셀트리온 사례: 분식 의혹 + 가두리 주식
+// LG화학 사례: 물적분할
+// 공시 키워드 기반 검출
+function detectKoreaBlockSignals(disclosures){
+  var out = { active: false, blockers: [], evidence: '', raw: {} };
+  if(!disclosures || !disclosures.length){
+    out.evidence = '공시 데이터 없음';
+    return out;
+  }
+
+  var BLOCK_KEYWORDS = [
+    { kw: '물적분할', reason: '물적분할 (LG화학 트라우마)' },
+    { kw: '분할합병', reason: '분할합병' },
+    { kw: '감사의견 한정', reason: '감사 한정' },
+    { kw: '감사의견거절', reason: '감사 거절' },
+    { kw: '부적정', reason: '부적정 의견' },
+    { kw: '거래정지', reason: '거래정지' },
+    { kw: '관리종목', reason: '관리종목' },
+    { kw: '투자주의', reason: '투자주의' },
+    { kw: '투자경고', reason: '투자경고' },
+    { kw: '투자위험', reason: '투자위험' },
+    { kw: '횡령', reason: '횡령/배임' },
+    { kw: '배임', reason: '횡령/배임' },
+    { kw: '분식회계', reason: '분식회계 의혹' },
+    { kw: '상장폐지', reason: '상장폐지' },
+    { kw: '회생절차', reason: '회생절차' },
+  ];
+
+  disclosures.forEach(function(d){
+    var title = d.title || '';
+    BLOCK_KEYWORDS.forEach(function(b){
+      if(title.indexOf(b.kw) >= 0){
+        out.blockers.push({ keyword: b.kw, reason: b.reason, title: title, date: d.date });
+      }
+    });
+  });
+
+  if(out.blockers.length > 0){
+    out.active = true;
+    out.evidence = '한국 특수 BLOCK 시그널: ' + out.blockers.map(function(b){ return b.reason; }).join(', ');
+  } else {
+    out.evidence = '특수 BLOCK 신호 없음';
+  }
+  return out;
+}
+
+// ═══════════════════════════════════════════════════════════
+// BabylonKR 메인 평가 함수 (5개 신호 + BLOCK 시그널)
+// ═══════════════════════════════════════════════════════════
+// 반환:
+//   {
+//     verdict: 'ENTER_SUPERCYCLE' | 'ENTER_BREAKOUT' | 'ENTER_BUILDING' | 'WATCH_EARLY' | 'BLOCK',
+//     score: 0~73 (현재 5신호 합산 만점, 추후 11신호로 확대 시 ~143),
+//     signals: [...],   // 각 신호 결과
+//     blockers: [...],  // BLOCK 시그널 리스트
+//     position_size_pct: 0/25/50/75/100,
+//     evidence: 사람 읽을 텍스트,
+//   }
+function evaluateBabylonKR(data){
+  var out = {
+    verdict: 'WATCH_EARLY',
+    score: 0,
+    max_score: 73,  // 현재 25+25+20+8+10+5 = 93 (글로벌포함) but 한 종목이 다 받기 어려움
+    signals: [],
+    blockers: [],
+    position_size_pct: 0,
+    evidence: '',
+    market_cap: data.market_cap || null,
+  };
+
+  // 시총 1조 미만 = 자동 BLOCK (한국 특수)
+  // (현재는 데이터 없을 수도 있어서 일단 경고만)
+  if(data.market_cap !== null && data.market_cap < 3000e8){  // 3000억 미만
+    out.verdict = 'BLOCK';
+    out.evidence = '시총 ' + (data.market_cap/1e8).toFixed(0) + '억 — CORE 부적합 (3000억 미만)';
+    out.blockers.push({ type: 'liquidity', reason: out.evidence });
+    return out;
+  }
+
+  // 5개 신호 평가
+  var sigs = [
+    { name: 'margin_jump', fn: detectMarginJump5pp,    arg: data.financials },
+    { name: 'revenue_accel', fn: detectRevenueAccel,   arg: data.financials },
+    { name: 'turnaround', fn: detectTurnaround,        arg: data.financials },
+    { name: 'capex',      fn: detectCapexExpansion,    arg: data.financials },
+    { name: 'nps',        fn: detectNpsPosition,       arg: data.majorStock },
+    { name: 'global_pension', fn: detectGlobalPensionIn, arg: data.majorStock },
+  ];
+
+  var totalScore = 0;
+  var hasNegative = false;
+  sigs.forEach(function(s){
+    var result = s.fn(s.arg);
+    out.signals.push({ name: s.name, ...result });
+    totalScore += result.score;
+    if(result.score < 0) hasNegative = true;
+  });
+
+  // 한국 특수 BLOCK 시그널
+  if(data.disclosures){
+    var koreaBlock = detectKoreaBlockSignals(data.disclosures);
+    if(koreaBlock.active){
+      out.blockers = out.blockers.concat(koreaBlock.blockers);
+      out.verdict = 'BLOCK';
+      out.evidence = koreaBlock.evidence;
+      out.score = totalScore;
+      return out;
+    }
+  }
+
+  // 마진 악화 OR 매출 역성장 OR 흑자→적자 = BLOCK
+  if(hasNegative){
+    out.verdict = 'BLOCK';
+    var negSig = out.signals.find(function(s){ return s.score < 0; });
+    out.evidence = negSig ? negSig.evidence : '재무 악화';
+    out.score = totalScore;
+    out.blockers.push({ type: 'finance', reason: out.evidence });
+    return out;
+  }
+
+  out.score = Math.max(0, totalScore);
+
+  // Verdict 판정 (점수 기반)
+  // 만점 73 기준 (5신호 + 글로벌)
+  if(totalScore >= 55){
+    out.verdict = 'ENTER_SUPERCYCLE';
+    out.position_size_pct = 100;
+    out.evidence = '슈퍼사이클 신호 강함 (점수 ' + totalScore.toFixed(0) + ')';
+  } else if(totalScore >= 40){
+    out.verdict = 'ENTER_BREAKOUT';
+    out.position_size_pct = 75;
+    out.evidence = '구조적 성장 진입 (점수 ' + totalScore.toFixed(0) + ')';
+  } else if(totalScore >= 25){
+    out.verdict = 'ENTER_BUILDING';
+    out.position_size_pct = 50;
+    out.evidence = '초기 가속 신호 (점수 ' + totalScore.toFixed(0) + ')';
+  } else if(totalScore >= 10){
+    out.verdict = 'WATCH_EARLY';
+    out.position_size_pct = 0;
+    out.evidence = '신호 약함 (점수 ' + totalScore.toFixed(0) + ')';
+  } else {
+    out.verdict = 'BLOCK';
+    out.position_size_pct = 0;
+    out.evidence = '신호 부재 (점수 ' + totalScore.toFixed(0) + ')';
+  }
+
+  return out;
+}
+
+// ═══════════════════════════════════════════════════════════
+// BabylonKR 통합 fetch — 모든 데이터 + 평가
+// ═══════════════════════════════════════════════════════════
+async function fetchBabylonKR(stockCode){
+  var code = String(stockCode||'').replace(/\.(KS|KQ|KN)$/i,'').replace(/[^\d]/g,'');
+  if(!/^\d{6}$/.test(code)) return null;
+
+  // 캐시 (분기 데이터는 자주 안 변함, 7일)
+  try{
+    var ck = 'babylonKR_'+code;
+    var cached = localStorage.getItem(ck);
+    if(cached){
+      var c = JSON.parse(cached);
+      if(c.timestamp && (Date.now() - c.timestamp) < 7*24*60*60*1000){
+        return c.data;
+      }
+    }
+  }catch(e){}
+
+  try{
+    // 병렬 fetch
+    var [financials, majorStock, disclosures] = await Promise.all([
+      fetchDartFinancialsHistory(code),
+      fetchDartMajorStock(code),
+      fetchDartDisclosures(code),
+    ]);
+
+    var input = {
+      financials: financials,
+      majorStock: majorStock,
+      disclosures: disclosures,
+      market_cap: null,  // KIS price 에서 별도로 받아야 함 — TODO
+    };
+
+    var verdict = evaluateBabylonKR(input);
+
+    var result = {
+      stock_code: code,
+      verdict: verdict.verdict,
+      score: verdict.score,
+      max_score: verdict.max_score,
+      position_size_pct: verdict.position_size_pct,
+      evidence: verdict.evidence,
+      signals: verdict.signals,
+      blockers: verdict.blockers,
+      data: input,
+      fetched_at: Date.now(),
+    };
+
+    try{
+      localStorage.setItem('babylonKR_'+code, JSON.stringify({
+        timestamp: Date.now(),
+        data: result,
+      }));
+    }catch(e){}
+
+    return result;
+  }catch(e){
+    console.warn('[BabylonKR] '+code+' 실패:', e.message);
+    return null;
+  }
+}
+
 function updateDartStatus(){
   var el = document.getElementById('dartConnStatus');
   if(!el) return;
