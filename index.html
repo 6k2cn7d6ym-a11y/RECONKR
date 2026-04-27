@@ -4134,7 +4134,7 @@ async function fetchDartMajorStock(stockCode){
 // 한화에어로 패턴: OPM -14% → 11% (턴어라운드 + 점프)
 // 분기 변동성 줄이기 위해 4분기 누적 OPM 비교 (TTM)
 function detectMarginJump5pp(financialsHistory){
-  var out = { active: false, score: 0, evidence: '', raw: {}, weight: 25 };
+  var out = { active: false, score: 0, evidence: '', raw: {}, weight: 20 };
   if(!financialsHistory || !financialsHistory.quarters || financialsHistory.quarters.length < 8){
     out.evidence = '데이터 부족 (8분기 필요)';
     return out;
@@ -4199,7 +4199,7 @@ function detectMarginJump5pp(financialsHistory){
 // 현대로템 패턴: 2025 매출 +33%
 // TTM 비교 (최근 4분기 vs 직전 1년)
 function detectRevenueAccel(financialsHistory){
-  var out = { active: false, score: 0, evidence: '', raw: {}, weight: 20 };
+  var out = { active: false, score: 0, evidence: '', raw: {}, weight: 18 };
   if(!financialsHistory || !financialsHistory.quarters || financialsHistory.quarters.length < 8){
     out.evidence = '데이터 부족';
     return out;
@@ -4258,7 +4258,7 @@ function detectRevenueAccel(financialsHistory){
 // 한화에어로 패턴: 2022 -1.4조 → 2023 +7,409억
 // 직전 1년 영업이익 누적 < 0 AND 최근 1년 누적 > 0
 function detectTurnaround(financialsHistory){
-  var out = { active: false, score: 0, evidence: '', raw: {}, weight: 25 };
+  var out = { active: false, score: 0, evidence: '', raw: {}, weight: 22 };
   if(!financialsHistory || !financialsHistory.quarters || financialsHistory.quarters.length < 8){
     out.evidence = '데이터 부족';
     return out;
@@ -4304,6 +4304,93 @@ function detectTurnaround(financialsHistory){
     out.evidence = '연속 적자 (' + (priorOp/1e8).toFixed(0) + '억, ' + (recentOp/1e8).toFixed(0) + '억)';
   } else {
     out.evidence = '연속 흑자 (턴어라운드 신호 없음)';
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────
+// [3.5] 영업이익 가속 (TTM YoY) — 가중치 25
+// ─────────────────────────────────────────
+// 한국 빅 윈너의 진짜 핵심 신호
+// 한화오션: 영업이익 +391% (둘 다 흑자 → turnaround 안 잡혀도 잡아냄)
+// SK하이닉스: +103%
+// 한화에어로: +49%
+// 현대로템: +120%
+// 마진/매출 가속 둘 다 없어도 영업이익 절대 폭증은 강력
+function detectOpIncomeAccel(financialsHistory){
+  var out = { active: false, score: 0, evidence: '', raw: {}, weight: 25 };
+  if(!financialsHistory || !financialsHistory.quarters || financialsHistory.quarters.length < 8){
+    out.evidence = '데이터 부족';
+    return out;
+  }
+  var qs = financialsHistory.quarters;
+
+  function sumOp(arr){
+    var op=0, count=0;
+    for(var i=0; i<arr.length; i++){
+      if(arr[i] && arr[i].op_income !== null){
+        op += arr[i].op_income;
+        count++;
+      }
+    }
+    return count >= 3 ? op : null;
+  }
+
+  var recentOp = sumOp(qs.slice(0, 4));
+  var priorOp  = sumOp(qs.slice(4, 8));
+
+  if(recentOp === null || priorOp === null){
+    out.evidence = 'TTM 영업이익 계산 불가';
+    return out;
+  }
+
+  out.raw = {
+    recent_ttm_op: recentOp,
+    prior_ttm_op: priorOp,
+  };
+
+  // 적자→흑자 케이스는 turnaround 가 처리, 여기선 점수 0 (중복 방지)
+  if(priorOp <= 0){
+    out.evidence = '직전 적자 (turnaround 신호로 처리)';
+    return out;
+  }
+
+  // 흑자→흑자 가속만 평가
+  if(recentOp <= 0){
+    // 흑자→적자 = 음수 신호
+    out.score = -out.weight;
+    out.evidence = '⚠ 영업이익 흑자→적자 (BLOCK 후보)';
+    return out;
+  }
+
+  var yoyPct = (recentOp - priorOp) / priorOp * 100;
+  out.raw.yoy_pct = yoyPct.toFixed(1);
+
+  if(yoyPct >= 100){
+    // 100%+ 폭증 = 만점
+    out.active = true;
+    out.score = out.weight;
+    out.evidence = '영업이익 YoY +' + yoyPct.toFixed(0) + '% 폭증 (' + (priorOp/1e8).toFixed(0) + '억 → ' + (recentOp/1e8).toFixed(0) + '억)';
+  } else if(yoyPct >= 50){
+    // 50-100% 강함 = 0.7-1.0배
+    out.active = true;
+    out.score = out.weight * (0.7 + (yoyPct - 50) / 50 * 0.3);
+    out.evidence = '영업이익 YoY +' + yoyPct.toFixed(0) + '% 강한 가속';
+  } else if(yoyPct >= 30){
+    // 30-50% 양호 = 0.5-0.7배
+    out.active = true;
+    out.score = out.weight * (0.5 + (yoyPct - 30) / 20 * 0.2);
+    out.evidence = '영업이익 YoY +' + yoyPct.toFixed(0) + '% 양호';
+  } else if(yoyPct >= 10){
+    // 10-30% 약함, 점수만 일부
+    out.score = out.weight * 0.3;
+    out.evidence = '영업이익 YoY +' + yoyPct.toFixed(0) + '% (약함)';
+  } else if(yoyPct <= -20){
+    // 20%+ 감소 = 음수 신호
+    out.score = -out.weight * 0.5;
+    out.evidence = '⚠ 영업이익 ' + yoyPct.toFixed(0) + '% 감소';
+  } else {
+    out.evidence = '영업이익 YoY ' + yoyPct.toFixed(0) + '% (정체)';
   }
   return out;
 }
@@ -4497,7 +4584,7 @@ function evaluateBabylonKR(data){
   var out = {
     verdict: 'WATCH_EARLY',
     score: 0,
-    max_score: 73,  // 현재 25+25+20+8+10+5 = 93 (글로벌포함) but 한 종목이 다 받기 어려움
+    max_score: 108,  // 7신호 만점: 20+18+22+25+8+10+5 = 108
     signals: [],
     blockers: [],
     position_size_pct: 0,
@@ -4511,14 +4598,16 @@ function evaluateBabylonKR(data){
     out.market_cap_warning = '시총 ' + (data.market_cap/1e8).toFixed(0) + '억 — 변동성 큰 영역, 비중 작게 권장';
   }
 
-  // 5개 신호 평가
+  // 7개 신호 평가
+  // 가중치: margin(20) + revenue(18) + turnaround(22) + op_accel(25) + capex(8) + nps(10) + global(5) = 108
   var sigs = [
-    { name: 'margin_jump', fn: detectMarginJump5pp,    arg: data.financials },
-    { name: 'revenue_accel', fn: detectRevenueAccel,   arg: data.financials },
-    { name: 'turnaround', fn: detectTurnaround,        arg: data.financials },
-    { name: 'capex',      fn: detectCapexExpansion,    arg: data.financials },
-    { name: 'nps',        fn: detectNpsPosition,       arg: data.majorStock },
-    { name: 'global_pension', fn: detectGlobalPensionIn, arg: data.majorStock },
+    { name: 'margin_jump',    fn: detectMarginJump5pp,    arg: data.financials },
+    { name: 'revenue_accel',  fn: detectRevenueAccel,     arg: data.financials },
+    { name: 'turnaround',     fn: detectTurnaround,       arg: data.financials },
+    { name: 'op_income_accel',fn: detectOpIncomeAccel,    arg: data.financials },
+    { name: 'capex',          fn: detectCapexExpansion,   arg: data.financials },
+    { name: 'nps',            fn: detectNpsPosition,      arg: data.majorStock },
+    { name: 'global_pension', fn: detectGlobalPensionIn,  arg: data.majorStock },
   ];
 
   var totalScore = 0;
@@ -4553,22 +4642,22 @@ function evaluateBabylonKR(data){
   }
 
   out.score = Math.max(0, totalScore);
+  out.max_score = 108;  // 만점
 
-  // Verdict 판정 (점수 기반)
-  // 만점 73 기준 (5신호 + 글로벌)
-  if(totalScore >= 55){
+  // Verdict 판정 (점수 기반, 만점 108 기준)
+  if(totalScore >= 60){
     out.verdict = 'ENTER_SUPERCYCLE';
     out.position_size_pct = 100;
     out.evidence = '슈퍼사이클 신호 강함 (점수 ' + totalScore.toFixed(0) + ')';
-  } else if(totalScore >= 40){
+  } else if(totalScore >= 45){
     out.verdict = 'ENTER_BREAKOUT';
     out.position_size_pct = 75;
     out.evidence = '구조적 성장 진입 (점수 ' + totalScore.toFixed(0) + ')';
-  } else if(totalScore >= 25){
+  } else if(totalScore >= 28){
     out.verdict = 'ENTER_BUILDING';
     out.position_size_pct = 50;
     out.evidence = '초기 가속 신호 (점수 ' + totalScore.toFixed(0) + ')';
-  } else if(totalScore >= 10){
+  } else if(totalScore >= 12){
     out.verdict = 'WATCH_EARLY';
     out.position_size_pct = 0;
     out.evidence = '신호 약함 (점수 ' + totalScore.toFixed(0) + ')';
