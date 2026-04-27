@@ -4481,13 +4481,10 @@ function evaluateBabylonKR(data){
     market_cap: data.market_cap || null,
   };
 
-  // 시총 1조 미만 = 자동 BLOCK (한국 특수)
-  // (현재는 데이터 없을 수도 있어서 일단 경고만)
-  if(data.market_cap !== null && data.market_cap < 3000e8){  // 3000억 미만
-    out.verdict = 'BLOCK';
-    out.evidence = '시총 ' + (data.market_cap/1e8).toFixed(0) + '억 — CORE 부적합 (3000억 미만)';
-    out.blockers.push({ type: 'liquidity', reason: out.evidence });
-    return out;
+  // 시총 정보 (BLOCK 으로 사용 X — 작은 시총도 빅 윈너 가능, 다른 신호로 판단)
+  // 단, 시총 작으면 변동성 경고만 표시 — 비중 작게 잡으라는 메타 정보
+  if(data.market_cap !== null && data.market_cap < 5000e8){
+    out.market_cap_warning = '시총 ' + (data.market_cap/1e8).toFixed(0) + '억 — 변동성 큰 영역, 비중 작게 권장';
   }
 
   // 5개 신호 평가
