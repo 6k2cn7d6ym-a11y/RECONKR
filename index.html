@@ -3853,16 +3853,40 @@ async function fetchDartFinancialsHistory(stockCode){
         var amt_cum = parseFloat((row.thstrm_add_amount||'').replace(/,/g,''))||null;
 
         // 손익 (IS or CIS)
+        // 매출 표기 다양: '매출액' / '매출' / '수익' / '수익(매출액)' / '영업수익'
+        // 영업이익 표기 다양: '영업이익' / '영업손익' / '영업이익(손실)' / '영업손익(이익)'
+        // 순이익 표기 다양: '당기순이익(손실)' / '분기순이익' / '연결분기순이익' / '순이익'
+        // 단, 누적/단일 항목 모두 같은 이름으로 들어옴 → 첫 매칭만 사용
         if(sj==='IS' || sj==='CIS'){
-          if(rev_q===null && (acct.indexOf('매출액')>=0 || acct==='수익' || acct.indexOf('영업수익')>=0)){
+          if(rev_q===null && (
+              acct === '매출' || acct === '매출액' ||
+              acct.indexOf('수익(매출')>=0 ||
+              acct === '영업수익' ||
+              (acct === '수익' && !acct.indexOf('금융'))  // '수익' 단독은 매출 (금융수익 등 제외)
+            )){
             rev_q = amt_q;
             rev_cum = amt_cum;
           }
-          if(op_q===null && acct.indexOf('영업이익')>=0){
+          if(op_q===null && (
+              acct === '영업이익' ||
+              acct === '영업손익' ||
+              acct === '영업이익(손실)' ||
+              acct === '영업손실(이익)' ||
+              (acct.indexOf('영업이익')>=0 && acct.indexOf('영업이익률')<0) ||
+              acct.indexOf('영업손익')>=0
+            )){
             op_q = amt_q;
             op_cum = amt_cum;
           }
-          if(ni_q===null && (acct.indexOf('당기순이익')>=0 || acct==='순이익')){
+          if(ni_q===null && (
+              acct === '순이익' ||
+              acct === '당기순이익' ||
+              acct === '당기순이익(손실)' ||
+              acct === '분기순이익' ||
+              acct === '연결분기순이익' ||
+              acct === '반기순이익' ||
+              (acct.indexOf('순이익')>=0 && acct.indexOf('비지배')<0)
+            )){
             ni_q = amt_q;
             ni_cum = amt_cum;
           }
