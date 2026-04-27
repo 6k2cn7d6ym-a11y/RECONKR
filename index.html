@@ -3767,6 +3767,312 @@ async function fetchDartFinancials(stockCode){
   }
 }
 
+// ═══════════════════════════════════════════════════════════
+// BabylonKR 전용: 분기별 재무 시계열 + CAPEX
+// ═══════════════════════════════════════════════════════════
+// 8분기(2년)를 가져옴: 매출/영업이익/순이익/CAPEX/총자산/총부채
+// 캐시: localStorage 'dartFinHistory_{stockCode}', 7일
+// 각 분기마다 fnlttSinglAcntAll (전체 재무) 호출 → CAPEX 포함
+async function fetchDartFinancialsHistory(stockCode){
+  if(!G.dartApiKey) return null;
+
+  // 캐시 확인 (7일)
+  try{
+    var cacheKey = 'dartFinHistory_'+stockCode;
+    var cached = localStorage.getItem(cacheKey);
+    if(cached){
+      var c = JSON.parse(cached);
+      if(c.timestamp && (Date.now() - c.timestamp) < 7*24*60*60*1000){
+        return c.data;
+      }
+    }
+  }catch(e){}
+
+  try{
+    var corpCode = await fetchDartCorpCode(stockCode);
+    if(!corpCode) return null;
+
+    var now = new Date();
+    var yr = now.getFullYear();
+    var mo = now.getMonth()+1;
+
+    // 가장 최근 사용 가능한 분기부터 거꾸로 8개 (2년치)
+    // 보고서 코드: 11013(1Q), 11012(반기), 11014(3Q), 11011(사업)
+    // 분기별 추출: 누적값에서 직전 누적값을 빼서 단일 분기로 변환
+    var quarters = [];
+    var startYear, startQ;
+    if(mo >= 11)      { startYear=yr;   startQ=3; }      // 3Q 가능
+    else if(mo >= 8)  { startYear=yr;   startQ=2; }      // 반기
+    else if(mo >= 5)  { startYear=yr;   startQ=1; }      // 1Q
+    else              { startYear=yr-1; startQ=4; }      // 사업
+
+    // 8개 분기 빌드 (최신부터)
+    var y = startYear, q = startQ;
+    for(var i=0; i<8; i++){
+      var rpt;
+      if(q===1) rpt='11013';
+      else if(q===2) rpt='11012';
+      else if(q===3) rpt='11014';
+      else rpt='11011';
+      quarters.push({ year:y, q:q, rpt:rpt, label: y+'Q'+q });
+      q--;
+      if(q===0){ q=4; y--; }
+    }
+
+    // 각 분기별로 fetchAll (전체 재무: BS+IS+CF)
+    var rawHistory = [];
+    for(var j=0; j<quarters.length; j++){
+      var qd = quarters[j];
+      var data = null;
+      // CFS 우선 → OFS 폴백
+      for(var fs=0; fs<2; fs++){
+        try{
+          data = await fetchDart('/api/fnlttSinglAcntAll.json', {
+            corp_code:  corpCode,
+            bsns_year:  String(qd.year),
+            reprt_code: qd.rpt,
+            fs_div:     fs===0 ? 'CFS' : 'OFS',
+          });
+          if(data.status === '000' && data.list && data.list.length) break;
+          data = null;
+        }catch(e){ data = null; }
+      }
+      if(!data) { rawHistory.push(null); continue; }
+
+      // 항목별 추출
+      var rev=null, op=null, ni=null, capex=null, totAsset=null, totLiab=null, totEq=null;
+      data.list.forEach(function(row){
+        var acct = (row.account_nm||'').replace(/\s/g,'');
+        var sj = (row.sj_div||'');  // BS, IS, CF, CIS
+        var amt = parseFloat((row.thstrm_amount||'').replace(/,/g,''))||null;
+
+        // 손익 (IS or CIS)
+        if(sj==='IS' || sj==='CIS'){
+          if(rev===null && (acct.indexOf('매출액')>=0 || acct==='수익' || acct.indexOf('영업수익')>=0)) rev=amt;
+          if(op===null && acct.indexOf('영업이익')>=0) op=amt;
+          if(ni===null && (acct.indexOf('당기순이익')>=0 || acct==='순이익')) ni=amt;
+        }
+        // 재무상태표 (BS)
+        if(sj==='BS'){
+          if(totAsset===null && acct==='자산총계') totAsset=amt;
+          if(totLiab===null && acct==='부채총계') totLiab=amt;
+          if(totEq===null && acct==='자본총계') totEq=amt;
+        }
+        // 현금흐름표 (CF) — CAPEX = 유형자산취득
+        if(sj==='CF'){
+          // 다양한 표현: "유형자산의 취득", "유형자산취득", "토지·건물·기계장치의 취득" 등
+          if(capex===null &&
+             (acct.indexOf('유형자산')>=0 && acct.indexOf('취득')>=0)){
+            // CF 는 음수로 표시되는 경우 많음 → 절대값
+            capex = amt!==null ? Math.abs(amt) : null;
+          }
+        }
+      });
+
+      rawHistory.push({
+        label: qd.label,
+        year: qd.year,
+        q: qd.q,
+        revenue_cum: rev,        // 누적 매출
+        op_income_cum: op,       // 누적 영업이익
+        net_income_cum: ni,      // 누적 순이익
+        capex_cum: capex,        // 누적 CAPEX
+        total_assets: totAsset,  // 시점값 (누적 X)
+        total_liab: totLiab,
+        total_equity: totEq,
+      });
+    }
+
+    // 누적값 → 단일 분기 변환
+    // Q1: cum 그대로
+    // Q2: 반기 cum - Q1 cum
+    // Q3: 3Q cum - 반기 cum
+    // Q4: 사업 cum - 3Q cum
+    // 분기 시계열로 재정렬
+    var quarterly = [];
+    for(var k=0; k<rawHistory.length; k++){
+      var cur = rawHistory[k];
+      if(!cur){ quarterly.push(null); continue; }
+      if(cur.q === 1){
+        quarterly.push({
+          label: cur.label,
+          year: cur.year, q: cur.q,
+          revenue: cur.revenue_cum,
+          op_income: cur.op_income_cum,
+          net_income: cur.net_income_cum,
+          capex: cur.capex_cum,
+          op_margin: (cur.revenue_cum && cur.revenue_cum!==0) ? (cur.op_income_cum/cur.revenue_cum*100) : null,
+          total_assets: cur.total_assets,
+          total_equity: cur.total_equity,
+          debt_ratio: (cur.total_equity && cur.total_equity!==0 && cur.total_liab!==null) ? (cur.total_liab/cur.total_equity*100) : null,
+        });
+      } else {
+        // 직전 누적값 찾기 (같은 연도 한 분기 전)
+        var prev = rawHistory.find(function(r){ return r && r.year===cur.year && r.q===cur.q-1; });
+        if(prev && prev.revenue_cum!==null && cur.revenue_cum!==null){
+          var qRev = cur.revenue_cum - prev.revenue_cum;
+          var qOp  = (cur.op_income_cum!==null && prev.op_income_cum!==null) ? cur.op_income_cum - prev.op_income_cum : null;
+          var qNi  = (cur.net_income_cum!==null && prev.net_income_cum!==null) ? cur.net_income_cum - prev.net_income_cum : null;
+          var qCx  = (cur.capex_cum!==null && prev.capex_cum!==null) ? cur.capex_cum - prev.capex_cum : null;
+          quarterly.push({
+            label: cur.label,
+            year: cur.year, q: cur.q,
+            revenue: qRev,
+            op_income: qOp,
+            net_income: qNi,
+            capex: qCx,
+            op_margin: (qRev!==null && qRev!==0) ? (qOp/qRev*100) : null,
+            total_assets: cur.total_assets,
+            total_equity: cur.total_equity,
+            debt_ratio: (cur.total_equity && cur.total_equity!==0 && cur.total_liab!==null) ? (cur.total_liab/cur.total_equity*100) : null,
+          });
+        } else {
+          // 누적값 그대로 (직전 데이터 없을 때)
+          quarterly.push({
+            label: cur.label,
+            year: cur.year, q: cur.q,
+            revenue: cur.revenue_cum,
+            op_income: cur.op_income_cum,
+            net_income: cur.net_income_cum,
+            capex: cur.capex_cum,
+            op_margin: (cur.revenue_cum && cur.revenue_cum!==0) ? (cur.op_income_cum/cur.revenue_cum*100) : null,
+            total_assets: cur.total_assets,
+            total_equity: cur.total_equity,
+            debt_ratio: (cur.total_equity && cur.total_equity!==0 && cur.total_liab!==null) ? (cur.total_liab/cur.total_equity*100) : null,
+            partial: true,  // 누적값 그대로 (단일분기 아님)
+          });
+        }
+      }
+    }
+
+    var result = {
+      stock_code: stockCode,
+      corp_code: corpCode,
+      quarters: quarterly,    // [최신, ..., 가장 오래된] 8개
+      fetched_at: Date.now(),
+    };
+
+    // 캐시 저장
+    try{
+      localStorage.setItem(cacheKey, JSON.stringify({
+        timestamp: Date.now(),
+        data: result,
+      }));
+    }catch(e){}
+
+    return result;
+  }catch(e){
+    console.warn('[DART-재무시계열] 실패:', stockCode, e.message);
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// BabylonKR 전용: 대량보유 공시 (연기금 + 글로벌 연기금)
+// ═══════════════════════════════════════════════════════════
+// 국민연금공단 / 블랙록 등의 5%+ 보유 + 1%p+ 변동 공시
+// API: /api/majorstock.json
+async function fetchDartMajorStock(stockCode){
+  if(!G.dartApiKey) return null;
+
+  // 캐시 (3일 — 분기 발표 시기에 갱신 잦음)
+  try{
+    var cacheKey = 'dartMajorStock_'+stockCode;
+    var cached = localStorage.getItem(cacheKey);
+    if(cached){
+      var c = JSON.parse(cached);
+      if(c.timestamp && (Date.now() - c.timestamp) < 3*24*60*60*1000){
+        return c.data;
+      }
+    }
+  }catch(e){}
+
+  try{
+    var corpCode = await fetchDartCorpCode(stockCode);
+    if(!corpCode) return null;
+
+    var data = await fetchDart('/api/majorstock.json', {
+      corp_code: corpCode,
+    });
+    if(data.status !== '000' || !data.list){
+      return { holders: [], nps: null, global: null };
+    }
+
+    // 보유자 분류
+    var npsHoldings = [];        // 국민연금
+    var globalPensionHoldings = []; // 블랙록, 캐피탈 등 글로벌
+    var allHolders = [];
+
+    data.list.forEach(function(row){
+      var nm = (row.repror||'') + (row.report_resn||'');
+      var holder = row.repror || '';  // 보고자
+      var pct = parseFloat((row.stkrt||'').replace(/,/g,''))||0;       // 보유 비율 %
+      var prevPct = parseFloat((row.stkrt_irds||'').replace(/,/g,''))||0;  // 변동 %p
+      var date = row.rcept_dt;        // 보고일
+      var purpose = row.report_resn || ''; // 보고 사유
+
+      var entry = {
+        holder: holder,
+        pct: pct,
+        change_pp: prevPct,
+        date: date,
+        purpose: purpose,
+      };
+      allHolders.push(entry);
+
+      // 분류
+      var hLower = holder.toLowerCase();
+      if(holder.indexOf('국민연금')>=0){
+        npsHoldings.push(entry);
+      } else if(
+        hLower.indexOf('blackrock')>=0 || holder.indexOf('블랙록')>=0 ||
+        hLower.indexOf('vanguard')>=0 || holder.indexOf('뱅가드')>=0 ||
+        hLower.indexOf('capital')>=0 || holder.indexOf('캐피탈')>=0 ||
+        hLower.indexOf('fidelity')>=0 || holder.indexOf('피델리티')>=0 ||
+        hLower.indexOf('state street')>=0 ||
+        hLower.indexOf('norges')>=0 || holder.indexOf('노르웨이')>=0
+      ){
+        globalPensionHoldings.push(entry);
+      }
+    });
+
+    // 가장 최근 NPS 보유 상태
+    var npsLatest = npsHoldings.length>0 ? npsHoldings[0] : null;
+    // 최근 90일 내 신규 진입 또는 1%p+ 매집 체크
+    var npsRecentBuy = false;
+    if(npsHoldings.length > 0){
+      var cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 90);
+      var cutoffStr = cutoff.toISOString().slice(0,10).replace(/-/g,'');
+      npsRecentBuy = npsHoldings.some(function(h){
+        return h.date >= cutoffStr && h.change_pp > 0;
+      });
+    }
+
+    var result = {
+      stock_code: stockCode,
+      all_holders: allHolders,
+      nps: npsLatest,
+      nps_recent_buy: npsRecentBuy,
+      nps_holdings_history: npsHoldings,
+      global_pensions: globalPensionHoldings,
+      fetched_at: Date.now(),
+    };
+
+    try{
+      localStorage.setItem(cacheKey, JSON.stringify({
+        timestamp: Date.now(),
+        data: result,
+      }));
+    }catch(e){}
+
+    return result;
+  }catch(e){
+    console.warn('[DART-대량보유] 실패:', stockCode, e.message);
+    return null;
+  }
+}
+
 function updateDartStatus(){
   var el = document.getElementById('dartConnStatus');
   if(!el) return;
