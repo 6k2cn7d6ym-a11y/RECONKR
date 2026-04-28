@@ -4671,6 +4671,218 @@ function evaluateBabylonKR(data){
 }
 
 // ═══════════════════════════════════════════════════════════
+// BabylonKR Exit 신호 감지
+// ═══════════════════════════════════════════════════════════
+// 보유 중 종목에 대한 청산 시그널 평가
+//   - CRITICAL: 즉시 청산 (재무 급격 악화, 거버넌스 BLOCK)
+//   - WARNING: 부분 청산 + 모니터링 강화 (가속 둔화, 신호 약화)
+//   - NORMAL: 신호 유지 — HOLD
+//
+// 입력:
+//   currentBabylon: 오늘 fetchBabylonKR 결과
+//   entryBabylon (선택): 진입 시점 BabylonKR — 비교 기준 (있으면 더 정확)
+function detectExitSignals(currentBabylon, entryBabylon){
+  var out = {
+    severity: 'NORMAL',
+    triggers: [],     // [{type, level, evidence}]
+    recommendation: 'HOLD',
+    evidence: '',
+  };
+
+  if(!currentBabylon){
+    out.evidence = 'BabylonKR 데이터 없음 — 평가 불가';
+    return out;
+  }
+
+  // ─────────────────────────────────────────
+  // CRITICAL 트리거 — 즉시 청산
+  // ─────────────────────────────────────────
+
+  // 1. 한국 특수 BLOCK 신호 (분식, 거래정지, 물적분할 등)
+  if(currentBabylon.verdict === 'BLOCK' &&
+     currentBabylon.blockers && currentBabylon.blockers.length > 0){
+    var govBlock = currentBabylon.blockers.find(function(b){
+      return b.type === 'governance' || (b.reason && (
+        b.reason.indexOf('분식')>=0 ||
+        b.reason.indexOf('물적분할')>=0 ||
+        b.reason.indexOf('거래정지')>=0 ||
+        b.reason.indexOf('상장폐지')>=0 ||
+        b.reason.indexOf('감사')>=0 ||
+        b.reason.indexOf('횡령')>=0 ||
+        b.reason.indexOf('투자위험')>=0 ||
+        b.reason.indexOf('관리종목')>=0
+      ));
+    });
+    if(govBlock){
+      out.triggers.push({
+        type: 'korea_block',
+        level: 'CRITICAL',
+        evidence: '한국 특수 BLOCK: ' + govBlock.reason,
+      });
+    }
+  }
+
+  // 2. 영업이익 흑자 → 적자 전환
+  var opAccelSig = currentBabylon.signals.find(function(s){ return s.name === 'op_income_accel'; });
+  if(opAccelSig && opAccelSig.evidence && opAccelSig.evidence.indexOf('흑자→적자')>=0){
+    out.triggers.push({
+      type: 'op_to_loss',
+      level: 'CRITICAL',
+      evidence: opAccelSig.evidence,
+    });
+  }
+
+  // 3. 매출 역성장 (-10% 이하)
+  var revSig = currentBabylon.signals.find(function(s){ return s.name === 'revenue_accel'; });
+  if(revSig && revSig.score < 0){
+    out.triggers.push({
+      type: 'revenue_decline',
+      level: 'CRITICAL',
+      evidence: revSig.evidence,
+    });
+  }
+
+  // 4. 마진 5%p+ 악화
+  var marginSig = currentBabylon.signals.find(function(s){ return s.name === 'margin_jump'; });
+  if(marginSig && marginSig.score < 0){
+    out.triggers.push({
+      type: 'margin_collapse',
+      level: 'CRITICAL',
+      evidence: marginSig.evidence,
+    });
+  }
+
+  // 5. 영업이익 -30% 이상 감소
+  if(opAccelSig && opAccelSig.raw && opAccelSig.raw.yoy_pct !== undefined){
+    var yoy = parseFloat(opAccelSig.raw.yoy_pct);
+    if(yoy <= -30){
+      out.triggers.push({
+        type: 'op_collapse',
+        level: 'CRITICAL',
+        evidence: '영업이익 ' + yoy.toFixed(0) + '% 급감',
+      });
+    }
+  }
+
+  // 6. Verdict 가 BLOCK 으로 변경됨 (진입 시 ENTER 였을 경우)
+  if(entryBabylon &&
+     entryBabylon.verdict.indexOf('ENTER')>=0 &&
+     currentBabylon.verdict === 'BLOCK'){
+    out.triggers.push({
+      type: 'verdict_block',
+      level: 'CRITICAL',
+      evidence: '진입 시 ' + entryBabylon.verdict + ' → 현재 BLOCK',
+    });
+  }
+
+  // ─────────────────────────────────────────
+  // WARNING 트리거 — 부분 청산 + 모니터링
+  // ─────────────────────────────────────────
+
+  // 1. 영업이익 가속 둔화 (진입 vs 현재 비교, entry 있을 때만)
+  if(entryBabylon){
+    var entryOp = entryBabylon.signals.find(function(s){ return s.name === 'op_income_accel'; });
+    var curOp = opAccelSig;
+    if(entryOp && curOp && entryOp.raw && curOp.raw &&
+       entryOp.raw.yoy_pct !== undefined && curOp.raw.yoy_pct !== undefined){
+      var entryYoy = parseFloat(entryOp.raw.yoy_pct);
+      var curYoy = parseFloat(curOp.raw.yoy_pct);
+      // 진입 시 +50%+ 였는데 현재 +10% 이하로 둔화
+      if(entryYoy >= 50 && curYoy < 10 && curYoy > -30){
+        out.triggers.push({
+          type: 'op_decel',
+          level: 'WARNING',
+          evidence: '영업이익 가속 둔화: 진입 +' + entryYoy.toFixed(0) + '% → 현재 ' + curYoy.toFixed(0) + '%',
+        });
+      }
+    }
+  }
+
+  // 2. 점수 30%+ 하락 (entry 있을 때만)
+  if(entryBabylon && entryBabylon.score > 0){
+    var scoreDrop = (entryBabylon.score - currentBabylon.score) / entryBabylon.score * 100;
+    if(scoreDrop >= 30){
+      out.triggers.push({
+        type: 'score_drop',
+        level: 'WARNING',
+        evidence: '점수 ' + scoreDrop.toFixed(0) + '% 하락 (' + entryBabylon.score.toFixed(0) + ' → ' + currentBabylon.score.toFixed(0) + ')',
+      });
+    }
+  }
+
+  // 3. NPS 매도 (현재 신호에서 추출)
+  var npsSig = currentBabylon.signals.find(function(s){ return s.name === 'nps'; });
+  if(npsSig && npsSig.raw && npsSig.raw.nps_pct !== null){
+    // NPS 매집이 아니고 이전보다 줄었을 가능성
+    var changeMatch = npsSig.evidence && npsSig.evidence.match(/-(\d+\.?\d*)%p/);
+    if(changeMatch){
+      var declinePp = parseFloat(changeMatch[1]);
+      if(declinePp >= 1.0){
+        out.triggers.push({
+          type: 'nps_selling',
+          level: 'WARNING',
+          evidence: 'NPS 매도: ' + npsSig.evidence,
+        });
+      }
+    }
+  }
+
+  // 4. CAPEX 50%+ 감축 (현재 신호에서 추출)
+  var capexSig = currentBabylon.signals.find(function(s){ return s.name === 'capex'; });
+  if(capexSig && capexSig.raw && capexSig.raw.yoy_pct !== undefined){
+    var capexYoy = parseFloat(capexSig.raw.yoy_pct);
+    if(capexYoy <= -50){
+      out.triggers.push({
+        type: 'capex_cut',
+        level: 'WARNING',
+        evidence: 'CAPEX ' + capexYoy.toFixed(0) + '% 감축 (성장 둔화 시그널)',
+      });
+    }
+  }
+
+  // 5. Verdict 격하 (SUPER → BUILDING 등)
+  if(entryBabylon){
+    var verdictRank = { 'ENTER_SUPERCYCLE': 4, 'ENTER_BREAKOUT': 3, 'ENTER_BUILDING': 2, 'WATCH_EARLY': 1, 'BLOCK': 0 };
+    var entryRank = verdictRank[entryBabylon.verdict] || 0;
+    var curRank = verdictRank[currentBabylon.verdict] || 0;
+    if(entryRank - curRank >= 2){
+      out.triggers.push({
+        type: 'verdict_downgrade',
+        level: 'WARNING',
+        evidence: 'Verdict 격하: ' + entryBabylon.verdict + ' → ' + currentBabylon.verdict,
+      });
+    }
+  }
+
+  // ─────────────────────────────────────────
+  // 종합 판정
+  // ─────────────────────────────────────────
+
+  var hasCritical = out.triggers.some(function(t){ return t.level === 'CRITICAL'; });
+  var hasWarning = out.triggers.some(function(t){ return t.level === 'WARNING'; });
+
+  if(hasCritical){
+    out.severity = 'CRITICAL';
+    out.recommendation = 'EXIT_NOW';
+    out.evidence = '⚠️ 즉시 청산 신호: ' +
+      out.triggers.filter(function(t){ return t.level === 'CRITICAL'; })
+                  .map(function(t){ return t.evidence; }).join('; ');
+  } else if(hasWarning){
+    out.severity = 'WARNING';
+    out.recommendation = 'PARTIAL_EXIT';
+    out.evidence = '🟡 부분 청산 검토: ' +
+      out.triggers.filter(function(t){ return t.level === 'WARNING'; })
+                  .map(function(t){ return t.evidence; }).join('; ');
+  } else {
+    out.severity = 'NORMAL';
+    out.recommendation = 'HOLD';
+    out.evidence = '✓ 신호 유지 (점수 ' + currentBabylon.score.toFixed(0) + ')';
+  }
+
+  return out;
+}
+
+// ═══════════════════════════════════════════════════════════
 // BabylonKR 통합 fetch — 모든 데이터 + 평가
 // ═══════════════════════════════════════════════════════════
 async function fetchBabylonKR(stockCode){
