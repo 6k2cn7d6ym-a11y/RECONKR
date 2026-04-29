@@ -8585,12 +8585,13 @@ function runAllEngineTests(){
   return { swing: r1, core: r2, timeAwareness: r3, passRate: pass/total };
 }
 
-function coreEngine(ydata, coreData){
+function coreEngine(ydata, coreData, babylonKR){
   var r = {
     action:'WATCH', score:0, position_size:'none',
     blockers:[], warnings:[], signals:[],
     entry:null, stop:null, target1:null, rr:null,
     underground_score:0, core_mode:'A', core_detail:[],
+    babylonKR: babylonKR || null,  // 펀더 평가 결과 (시각화용)
   };
   if(!coreData){ r.blockers.push('물밑 지표 데이터 부족'); r.action='BLOCK'; return r; }
 
@@ -8957,12 +8958,49 @@ function coreEngine(ydata, coreData){
   if(_scoreRS < 0)      { _axisGatePass=false; _axisGateFail.push('RS '+_scoreRS+'pt — 음수'); }
   if(_scoreStruct < 5)  { _axisGatePass=false; _axisGateFail.push('구조(HL+Stage) '+_scoreStruct+'pt < 5pt 최소'); }
 
+  // ═══════════════════════════════════════
+  // BabylonKR 펀더 게이트 (사용 가능한 경우)
+  // ═══════════════════════════════════════
+  // (a) BabylonKR BLOCK = 무조건 BLOCK (재무 악화/거버넌스 등 펀더 함정)
+  // (b) ENTER 시 BabylonKR verdict 로 position_size 차등
+  // (c) BabylonKR 가 차트보다 우선 (BabylonKR BLOCK = 차트 ENTER 무시)
+  if(babylonKR){
+    if(babylonKR.verdict === 'BLOCK'){
+      r.action = 'BLOCK';
+      r.blockers.push('[BabylonKR] 펀더 BLOCK — ' + babylonKR.evidence);
+      r.decision_path.push({gate:'BabylonKR', status:'block', note:'펀더 게이트 차단 (점수 '+babylonKR.score.toFixed(0)+')'});
+      return r;
+    }
+  }
+
   // ── 액션 결정 ──
   if(r.score >= 65 && r.underground_score >= 4 && !coreData.rs_declining && _axisGatePass){
-    r.action='ENTER'; r.position_size='quarter(25%)';
-    // 베이스 돌파 준비 → 절반 진입 허용
-    if(coreData.base_breakout_ready) r.position_size='half(50%)';
-    r.decision_path.push({gate:'액션',status:'enter',note:'ENTER · '+r.score+'pt · 물밑 '+r.underground_score+'/8 · '+r.position_size});
+    r.action='ENTER';
+
+    // BabylonKR verdict 별 기본 사이즈 (없으면 기존 로직)
+    if(babylonKR){
+      if(babylonKR.verdict === 'ENTER_SUPERCYCLE'){
+        r.position_size = 'full(100%)';
+        r.signals.push('🚀 BabylonKR SUPERCYCLE + 차트 진입 = 만점 (펀더 점수 '+babylonKR.score.toFixed(0)+')');
+      } else if(babylonKR.verdict === 'ENTER_BREAKOUT'){
+        r.position_size = 'half(50%)';
+        r.signals.push('🟢 BabylonKR BREAKOUT (펀더 점수 '+babylonKR.score.toFixed(0)+')');
+      } else if(babylonKR.verdict === 'ENTER_BUILDING'){
+        r.position_size = 'quarter(25%)';
+        r.signals.push('🟡 BabylonKR BUILDING (펀더 점수 '+babylonKR.score.toFixed(0)+') — 작은 비중');
+      } else if(babylonKR.verdict === 'WATCH_EARLY'){
+        r.position_size = 'eighth(12.5%)';
+        r.signals.push('⚠ BabylonKR WATCH (펀더 점수 '+babylonKR.score.toFixed(0)+') — 매우 작은 비중');
+      } else {
+        // verdict 없거나 기타 — 기존 로직
+        r.position_size = coreData.base_breakout_ready ? 'half(50%)' : 'quarter(25%)';
+      }
+    } else {
+      // BabylonKR 데이터 없을 때 기존 로직
+      r.position_size = coreData.base_breakout_ready ? 'half(50%)' : 'quarter(25%)';
+    }
+
+    r.decision_path.push({gate:'액션',status:'enter',note:'ENTER · '+r.score+'pt · 물밑 '+r.underground_score+'/8 · '+r.position_size + (babylonKR ? ' · BabylonKR='+babylonKR.verdict : '')});
   } else if(r.score >= 45 || r.underground_score >= 3){
     r.action='WATCH';
     if(!_axisGatePass){
@@ -8973,7 +9011,11 @@ function coreEngine(ydata, coreData){
     if(coreData.base_breakout_ready){
       r.signals.push('📦 베이스 돌파 임박 — 거래량 확인 후 진입 고려');
     }
-    r.decision_path.push({gate:'액션',status:'watch',note:'WATCH · '+r.score+'pt · '+(_axisGatePass?'점수 부족':'축 불균형')});
+    // BabylonKR 강력 신호 시 격상 힌트
+    if(babylonKR && (babylonKR.verdict === 'ENTER_SUPERCYCLE' || babylonKR.verdict === 'ENTER_BREAKOUT')){
+      r.signals.push('💎 펀더 강함 ('+babylonKR.verdict+', '+babylonKR.score.toFixed(0)+'pt) — 차트 개선 시 우선 후보');
+    }
+    r.decision_path.push({gate:'액션',status:'watch',note:'WATCH · '+r.score+'pt · '+(_axisGatePass?'점수 부족':'축 불균형') + (babylonKR ? ' · 펀더='+babylonKR.verdict : '')});
   } else {
     r.action='BLOCK';
     r.blockers.push('[CORE] 점수 '+r.score+'pt/물밑 '+r.underground_score+'/8 — 매집 증거 부족');
@@ -9369,14 +9411,17 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
   // 일봉 기반 데이터 (SWING/CORE 양쪽에서 사용 — 한 번씩 fetch)
   var swingData = null;
   var coreData  = null;
+  var babylonKR = null;
   try{
-    // SWING + CORE 병렬 fetch (둘 다 일봉 260일 + 투자자 호출, 일부 중복 있지만 캐시 미적용 시 별도 호출)
+    // SWING + CORE 병렬 fetch + BabylonKR (분기 펀더 데이터)
     var _resData = await Promise.all([
       fetchSwingData(ticker, kisPrice).catch(function(e){ console.warn('[fetchSwingData]',e.message); return null; }),
       fetchCoreData(ticker).catch(function(e){ console.warn('[fetchCoreData]',e.message); return null; }),
+      fetchBabylonKR(ticker).catch(function(e){ console.warn('[fetchBabylonKR]',e.message); return null; }),
     ]);
     swingData = _resData[0];
     coreData  = _resData[1];
+    babylonKR = _resData[2];
   }catch(e){ console.warn('[unified fetch]', e.message); }
 
   var prompt;
@@ -9399,9 +9444,9 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
     if(swingData){
       try{ compatScores.swing = swingEngine(ydata, swingData); }catch(e){ console.warn('[compat swing]',e.message); }
     }
-    // CORE 평가도 일봉+투자자 있으면 가능
+    // CORE 평가도 일봉+투자자 있으면 가능 (BabylonKR 펀더 게이트 + position_size 차등)
     if(coreData){
-      try{ compatScores.core = coreEngine(ydata, coreData); }catch(e){ console.warn('[compat core]',e.message); }
+      try{ compatScores.core = coreEngine(ydata, coreData, babylonKR); }catch(e){ console.warn('[compat core]',e.message); }
     }
     // MOMO 평가: CORE 검색 시 생략 (Jim 지시), 장 마감 시도 생략
     // CORE 검색 = 장기 관점이라 단타 MOMO 적합성은 사용자가 알 필요 적음
@@ -9412,7 +9457,7 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
     // 메인 의사결정 = 검색한 모드의 엔진 (호환성 평가와 별도)
     if(mode==='momo')       decision = compatScores.momo || momoEngine(ydata);
     else if(mode==='swing') decision = compatScores.swing || swingEngine(ydata, swingData);
-    else                    decision = compatScores.core  || coreEngine(ydata, coreData);
+    else                    decision = compatScores.core  || coreEngine(ydata, coreData, babylonKR);
     prompt = makeExplainPrompt(mode, ticker, ydata, decision);
   }
 
@@ -10893,6 +10938,72 @@ function coreCardHTML(r){
     }
   }
 
+  // ── BabylonKR 펀더 평가 (CORE 전용 신규 2026-04-27) ──
+  var babylonHtml = '';
+  if(r.babylonKR){
+    var bk = r.babylonKR;
+    var bkVerdict = bk.verdict || 'WATCH_EARLY';
+    var bkScore   = bk.score !== undefined ? bk.score : 0;
+    var bkPos     = bk.position_size_pct !== undefined ? bk.position_size_pct : 0;
+    var bkClr =
+      bkVerdict === 'ENTER_SUPERCYCLE' ? 'var(--pu)' :
+      bkVerdict === 'ENTER_BREAKOUT'   ? 'var(--g)' :
+      bkVerdict === 'ENTER_BUILDING'   ? 'var(--bl)' :
+      bkVerdict === 'WATCH_EARLY'      ? 'var(--a)' :
+      bkVerdict === 'BLOCK'            ? 'var(--r)' : 'var(--t3)';
+    var bkLabel = {
+      'ENTER_SUPERCYCLE': '슈퍼사이클',
+      'ENTER_BREAKOUT':   '구조적 성장',
+      'ENTER_BUILDING':   '초기 가속',
+      'WATCH_EARLY':      '신호 약함',
+      'BLOCK':            '펀더 차단',
+    }[bkVerdict] || bkVerdict;
+    var bkPct = Math.round(bkScore / 108 * 100);  // 만점 108 기준
+
+    // 발동 신호만 한 줄로
+    var activeSigs = (bk.signals || []).filter(function(s){ return s.active; });
+    var sigsLine = '';
+    if(activeSigs.length){
+      sigsLine = '<div style="font-family:var(--mono);font-size:9px;color:var(--t3);margin-top:4px;line-height:1.5">'+
+        activeSigs.map(function(s){
+          var sname = ({
+            'margin_jump': 'OPM점프',
+            'revenue_accel': '매출가속',
+            'turnaround': '턴어라운드',
+            'op_income_accel': '영익가속',
+            'capex': 'CAPEX↑',
+            'nps': 'NPS',
+            'global_pension': '글로벌연기금',
+          })[s.name] || s.name;
+          return '<span style="display:inline-block;padding:1px 5px;margin:1px 3px 1px 0;background:rgba(123,113,255,.15);border:1px solid var(--pu);border-radius:3px;color:var(--pu);font-size:9px">'+sname+'</span>';
+        }).join('')+
+      '</div>';
+    } else {
+      sigsLine = '<div style="font-family:var(--mono);font-size:9px;color:var(--t3);margin-top:4px;font-style:italic">발동 신호 없음</div>';
+    }
+
+    // 시총 경고 (있을 때만)
+    var capWarn = bk.market_cap_warning ?
+      '<div style="font-family:var(--mono);font-size:9px;color:var(--a);margin-top:4px">⚠ '+bk.market_cap_warning+'</div>' : '';
+
+    babylonHtml =
+      '<div style="margin:6px 0 6px;padding:8px 10px;background:var(--bg2);border:1px solid '+bkClr+';border-radius:10px">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">'+
+          '<span style="font-family:var(--mono);font-size:9px;color:var(--t2);letter-spacing:.08em">'+
+            '<span style="color:var(--pu);font-weight:600">BabylonKR</span> · 펀더 평가</span>'+
+          '<span style="font-family:var(--mono);font-size:11px;color:'+bkClr+';font-weight:600">'+bkLabel+(bkPos>0 ? ' · '+bkPos+'%' : '')+'</span>'+
+        '</div>'+
+        '<div style="display:flex;align-items:center;gap:8px">'+
+          '<div style="flex:1;height:5px;background:var(--bg3);border-radius:3px;overflow:hidden">'+
+            '<div style="height:100%;width:'+bkPct+'%;background:'+bkClr+';border-radius:3px;transition:width .5s"></div>'+
+          '</div>'+
+          '<span style="font-family:var(--mono);font-size:9px;color:'+bkClr+';min-width:48px;text-align:right">'+bkScore.toFixed(0)+' / 108</span>'+
+        '</div>'+
+        sigsLine+
+        capWarn+
+      '</div>';
+  }
+
   // ── 밸류에이션 / 성장 ──
   var coreValuationHtml='';
   if(r.per || r.pbr || r.psr || (r.revenue_yoy!==null && r.revenue_yoy!==undefined)){
@@ -10982,6 +11093,7 @@ function coreCardHTML(r){
     (r.news?'<div class="news-line">'+r.news+'</div>':'')+
     coreScoreHtml+
     sectorRsHtml+
+    babylonHtml+
     coreValuationHtml+
     levelsBlock+
     _cardSignalLines(r)+
