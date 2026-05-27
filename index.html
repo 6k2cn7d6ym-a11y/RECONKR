@@ -359,6 +359,16 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
 .mc-verdict-enter .mc-ac{color:rgba(0,240,122,.65)}
 .mc-verdict-watch .mc-ac{color:rgba(255,58,140,.65)}
 .mc-verdict-block .mc-ac{color:rgba(255,45,78,.65)}
+/* ★ 2026-05-27: 점수·액션 분리 박스 — 측정값(점수)과 판정(액션)을 시각적으로 분리 */
+.split-badge{display:flex;gap:4px;flex-shrink:0;align-items:stretch}
+.sb-score,.sb-action{display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:8px;border:1.5px solid;padding:6px 8px;min-width:38px;text-align:center;line-height:1}
+.sb-score{font-family:var(--mono);font-size:18px;font-weight:700}
+.sb-action{font-size:9px;font-weight:700;letter-spacing:.08em}
+.sb-enter{background:rgba(0,240,122,.10);border-color:rgba(0,240,122,.35);color:var(--g)}
+.sb-watch{background:rgba(255,58,140,.08);border-color:rgba(255,58,140,.28);color:var(--a)}
+.sb-block{background:rgba(255,45,78,.08);border-color:rgba(255,45,78,.28);color:var(--r)}
+/* 게이트 BLOCK 시 점수에 취소선 — 점수는 통과했지만 하드게이트 차단을 시각화 */
+.sb-score-blocked{text-decoration:line-through;text-decoration-thickness:2px;opacity:0.55}
 .mc-price-row{display:flex;align-items:baseline;gap:8px;margin-bottom:10px;flex-wrap:wrap}
 .mc-price{font-family:var(--mono);font-size:26px;color:var(--t)}
 .mc-gap{font-family:var(--mono);font-size:13px;padding:2px 9px;border-radius:6px;font-weight:700}
@@ -2898,13 +2908,19 @@ function trackMerge(local, cloud){
   return out;
 }
 
-// 외부에서 부르는 진입점: 클라우드 풀 → 로컬과 머지 → 저장
+// 외부에서 부르는 진입점: 클라우드 풀 → 로컬과 머지 → 저장 → (필요시) 푸시
 async function trackPullAndMerge(mode){
   var cloud = await trackPull(mode);
   if(!cloud) return null;
   var local  = loadTrack(mode);
   var merged = trackMerge(local, cloud);
   localStorage.setItem(TRACK_CFG[mode].key, JSON.stringify(merged));
+  // ★ 2026-05-27 fix: 로컬에만 있던 데이터를 클라우드로 자동 푸시
+  // (mergeTrack은 union이라 cloud의 모든 id는 merged에 있음 → 길이 차이 = 로컬-only 데이터)
+  // p1/p2 차이까지 정확히 잡으려면 비싸니 길이 기반 휴리스틱으로 충분
+  if(merged.length > cloud.length){
+    trackSync(mode); // fire-and-forget
+  }
   return merged;
 }
 
@@ -10602,10 +10618,18 @@ function momoCardHTML(r){
           (tsStr?'<span class="mc-ts">'+tsStr+'</span>':'')+
         '</div>'+
       '</div>'+
-      '<div class="mc-verdict '+vcC+'">'+
-        '<div class="mc-score">'+r.score+'</div>'+
-        '<div class="mc-ac">'+ac+'</div>'+
-      '</div>'+
+      // ★ 2026-05-27: 점수·액션 분리 박스 (혼란 방지)
+      // 점수BLOCK vs 게이트BLOCK 시각 구분 (게이트는 점수에 취소선)
+      (function(){
+        var bt = _classifyBlock(r);
+        var sbColor = ac === 'ENTER' ? 'sb-enter' : ac === 'WATCH' ? 'sb-watch' : 'sb-block';
+        var scoreExtra = bt === 'gate' ? ' sb-score-blocked' : '';
+        var acText = bt === 'gate' ? '게이트' : ac;
+        return '<div class="split-badge">'+
+          '<div class="sb-score '+sbColor+scoreExtra+'">'+r.score+'</div>'+
+          '<div class="sb-action '+sbColor+'">'+acText+'</div>'+
+        '</div>';
+      })()+
     '</div>'+
     // 가격 행
     '<div class="mc-price-row">'+
@@ -10666,6 +10690,30 @@ function cardHTML(r, mode){
 // ─────────────────────────────────────────
 // 카드 공통 helper — 모든 카드에서 재사용
 // ─────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// ★ 2026-05-27: BLOCK 사유 분류
+// 점수BLOCK vs 게이트BLOCK 구분 — 사용자 혼란 해소
+//
+// 같은 "70 BLOCK" 표시여도 의미가 완전히 달라:
+//   · 점수BLOCK: 점수 자체가 너무 낮음 (구조 손상) → 점수가 곧 원인
+//   · 게이트BLOCK: 점수는 통과했으나 하드 게이트(MA20 이격, MA60 이탈, R:R,
+//                  거래대금, 시장 충격, 과매수극단 등) 차단 → 점수는 무효
+//
+// BLOCK 사유 텍스트 패턴으로 구분:
+//   · MOMO  : "점수 Xpt — 기준 미달 (<30)"
+//   · SWING : "[점수] Xpt — 구조 손상 심각" / "[점수] Xpt — SWING 기준 미달"
+//   · CORE  : "[CORE] 점수 Xpt/물밑 X/8 — 매집 증거 부족"
+// 그 외는 모두 게이트 BLOCK으로 간주
+// ─────────────────────────────────────────────────────────────
+function _classifyBlock(r){
+  if(!r || r.action !== 'BLOCK') return 'none';
+  var blockers = r.blockers || [];
+  var isScoreBlock = blockers.some(function(b){
+    return /^\[?점수\]?\s|^\[CORE\] 점수/.test(b);
+  });
+  return isScoreBlock ? 'score' : 'gate';
+}
+
 function _cardHoldBanner(r){
   if(!r._openTrade) return '';
   var ot = r._openTrade;
@@ -10904,10 +10952,21 @@ function swingCardHTML(r){
           ' · '+(r.news_quality||'--')+
         '</div>'+
       '</div>'+
-      '<div class="action-badge '+abC+'">'+
-        '<div class="ab-score">'+r.score+'</div>'+
-        '<div class="ab-label">'+(r.swing_grade?'ENTER '+r.swing_grade:ac)+'</div>'+
-      '</div>'+
+      // ★ 2026-05-27: 점수·액션 분리 박스 (혼란 방지)
+      // ENTER A/B는 액션 박스에 그대로 표기, 게이트BLOCK은 점수에 취소선
+      (function(){
+        var bt = _classifyBlock(r);
+        var sbColor = ac === 'ENTER' ? 'sb-enter' : ac === 'WATCH' ? 'sb-watch' : 'sb-block';
+        var scoreExtra = bt === 'gate' ? ' sb-score-blocked' : '';
+        var label;
+        if(r.swing_grade)         label = 'ENTER '+r.swing_grade;
+        else if(bt === 'gate')    label = '게이트';
+        else                       label = ac;
+        return '<div class="split-badge">'+
+          '<div class="sb-score '+sbColor+scoreExtra+'">'+r.score+'</div>'+
+          '<div class="sb-action '+sbColor+'">'+label+'</div>'+
+        '</div>';
+      })()+
     '</div>'+
 
     '<div class="card-row2">'+
@@ -11231,10 +11290,17 @@ function coreCardHTML(r){
           ' · '+(r.news_quality||'--')+
         '</div>'+
       '</div>'+
-      '<div class="action-badge '+abC+'">'+
-        '<div class="ab-score">'+r.score+'</div>'+
-        '<div class="ab-label">'+ac+'</div>'+
-      '</div>'+
+      // ★ 2026-05-27: 점수·액션 분리 박스 (혼란 방지)
+      (function(){
+        var bt = _classifyBlock(r);
+        var sbColor = ac === 'ENTER' ? 'sb-enter' : ac === 'WATCH' ? 'sb-watch' : 'sb-block';
+        var scoreExtra = bt === 'gate' ? ' sb-score-blocked' : '';
+        var label = bt === 'gate' ? '게이트' : ac;
+        return '<div class="split-badge">'+
+          '<div class="sb-score '+sbColor+scoreExtra+'">'+r.score+'</div>'+
+          '<div class="sb-action '+sbColor+'">'+label+'</div>'+
+        '</div>';
+      })()+
     '</div>'+
 
     '<div class="card-row2">'+
