@@ -2726,7 +2726,7 @@ var TRACK_CFG = {
   swing: { key:'reconkr_track_swing', periods:[5,10],  labels:['5일','10일'],  color:'var(--bl)', prefix:'sw' },
   core:  { key:'reconkr_track_core',  periods:[20,60], labels:['20일','60일'], color:'var(--pu)', prefix:'co' },
 };
-var TRACK_MAX = 150;
+var TRACK_MAX = 500; // 2026-05-27 Plan B: 150 → 500 (Worker KV 동기화 위해 확장)
 
 function loadTrack(mode){
   try{ return JSON.parse(localStorage.getItem(TRACK_CFG[mode].key)||'[]'); }
@@ -2798,6 +2798,8 @@ function saveTrackResults(mode, candidates){
   track.sort(function(a,b){ return b.scannedAt-a.scannedAt; });
   if(track.length > TRACK_MAX) track = track.slice(0, TRACK_MAX);
   localStorage.setItem(cfg.key, JSON.stringify(track));
+  // ★ Plan B (2026-05-27): Worker로 비동기 동기화 (실패해도 로컬은 정상)
+  trackSync(mode);
 }
 
 async function checkTrackUpdates(mode){
@@ -2835,7 +2837,75 @@ async function checkTrackUpdates(mode){
   if(updated){
     localStorage.setItem(cfg.key, JSON.stringify(track));
     renderTrack(mode);
+    // ★ Plan B (2026-05-27): p1/p2 갱신 후 클라우드 동기화
+    trackSync(mode);
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ★ TRACK 멀티 디바이스 동기화 (Plan B, 2026-05-27)
+// 모바일·PC·아이패드 어디서 스캔하든 한 곳에 누적
+// Worker /reconkr/track 엔드포인트 사용 (holdSync 패턴 그대로)
+// ═══════════════════════════════════════════════════════════════
+async function trackSync(mode){
+  var cfg = TRACK_CFG[mode];
+  if(!cfg) return false;
+  var track = loadTrack(mode);
+  try {
+    var resp = await fetch(WORKER_URL + '/reconkr/track', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: mode, track: track })
+    });
+    var data = await resp.json();
+    return !!data.ok;
+  } catch(e){
+    console.warn('[trackSync]', mode, e.message);
+    return false;
+  }
+}
+
+async function trackPull(mode){
+  if(!TRACK_CFG[mode]) return null;
+  try {
+    var resp = await fetch(WORKER_URL + '/reconkr/track?mode=' + encodeURIComponent(mode));
+    var data = await resp.json();
+    if(!data.ok || !Array.isArray(data.track)) return null;
+    return data.track;
+  } catch(e){
+    console.warn('[trackPull]', mode, e.message);
+    return null;
+  }
+}
+
+// id 기준 dedup + p1/p2 검증결과 보존 (어느 디바이스에서 검증한 결과도 안 잃음)
+function trackMerge(local, cloud){
+  var byId = {};
+  local.forEach(function(t){ byId[t.id] = t; });
+  cloud.forEach(function(t){
+    var ex = byId[t.id];
+    if(!ex){ byId[t.id] = t; return; }
+    var merged = Object.assign({}, ex, t);
+    if(ex.p1 && !t.p1) merged.p1 = ex.p1;
+    if(ex.p2 && !t.p2) merged.p2 = ex.p2;
+    if(merged.p2)      merged.status = 'complete';
+    else if(merged.p1) merged.status = 'p1_done';
+    byId[t.id] = merged;
+  });
+  var out = Object.keys(byId).map(function(k){ return byId[k]; });
+  out.sort(function(a,b){ return b.scannedAt - a.scannedAt; });
+  if(out.length > TRACK_MAX) out = out.slice(0, TRACK_MAX);
+  return out;
+}
+
+// 외부에서 부르는 진입점: 클라우드 풀 → 로컬과 머지 → 저장
+async function trackPullAndMerge(mode){
+  var cloud = await trackPull(mode);
+  if(!cloud) return null;
+  var local  = loadTrack(mode);
+  var merged = trackMerge(local, cloud);
+  localStorage.setItem(TRACK_CFG[mode].key, JSON.stringify(merged));
+  return merged;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2962,6 +3032,86 @@ function showPerformanceStats(){
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
   return ['momo','swing','core'].map(calcPerformanceStats);
+}
+
+// ─────────────────────────────────────────────────────────────
+// ★ 모바일에서도 보이는 성과 카드 (Plan B, 2026-05-27)
+// showPerformanceStats의 UI 버전 — renderScreenerResults 상단에 prepend
+// 콘솔 의존 제거: 모바일에서도 실시간으로 EV·승률·구간별 통계 확인 가능
+// ─────────────────────────────────────────────────────────────
+function renderPerformanceStatsCard(mode){
+  var s = calcPerformanceStats(mode);
+  if(!s) return '';
+  var cfg = TRACK_CFG[mode];
+  var color = cfg ? cfg.color : 'var(--t2)';
+  var periodLabel = (cfg && cfg.labels) ? cfg.labels.join('/') : '';
+
+  // 데이터 없을 때
+  if(s.total === 0){
+    return (
+      '<div style="background:var(--bg2);border:1px solid var(--b);border-radius:8px;padding:8px 12px;margin-bottom:10px;font-family:var(--mono);font-size:10px;color:var(--t3)">' +
+        '📊 '+mode.toUpperCase()+' · 추적 데이터 없음 (스캔 후 자동 누적)' +
+      '</div>'
+    );
+  }
+
+  if(s.done === 0){
+    return (
+      '<div style="background:var(--bg2);border:1px solid '+color+';border-radius:8px;padding:10px 12px;margin-bottom:10px;font-family:var(--mono);font-size:11px">' +
+        '<div style="color:'+color+';font-weight:700;margin-bottom:4px">📊 성과 · '+mode.toUpperCase()+'</div>' +
+        '<div style="color:var(--t2)">누적 '+s.total+'건 · 검증 완료 0건 (기간 경과 대기)</div>' +
+      '</div>'
+    );
+  }
+
+  var wrPct = Math.round(s.winRate*100);
+  var evStr = s.ev!=null ? (s.ev>=0?'+':'')+s.ev.toFixed(1)+'%' : '-';
+  var evColor = s.ev>=0 ? 'var(--g)' : 'var(--r)';
+  var pfStr = s.profitFactor!=null ? s.profitFactor.toFixed(2) : '-';
+  var pfBadge = s.profitFactor>=1.5 ? '🚀' : s.profitFactor>=1 ? '✓' : s.profitFactor!=null ? '⚠' : '';
+
+  // 점수 구간별 (있는 것만)
+  var bucketsHtml = s.byScore.filter(function(b){return b.count>0;}).map(function(b){
+    var wr  = Math.round(b.winRate*100);
+    var ar  = (b.avgReturn>=0?'+':'')+b.avgReturn.toFixed(1)+'%';
+    var arC = b.avgReturn>=0?'var(--g)':'var(--r)';
+    return (
+      '<div style="display:grid;grid-template-columns:55px 1fr 60px;gap:6px;align-items:center;font-size:10px;padding:2px 0">' +
+        '<span style="color:var(--t3)">'+b.range+'</span>' +
+        '<span style="color:var(--t)">'+b.count+'건 · '+wr+'%</span>' +
+        '<span style="color:'+arC+';text-align:right">'+ar+'</span>' +
+      '</div>'
+    );
+  }).join('');
+
+  // 최근 30일 비교
+  var recentHtml = '';
+  if(s.recent30 && s.recent30.count > 0){
+    var rwr = Math.round(s.recent30.winRate*100);
+    var rev = (s.recent30.ev>=0?'+':'')+s.recent30.ev.toFixed(1)+'%';
+    var revC = s.recent30.ev>=0?'var(--g)':'var(--r)';
+    recentHtml = (
+      '<div style="color:var(--t3);font-size:10px;margin-top:6px;padding-top:6px;border-top:1px dashed var(--b)">' +
+        '최근30일: '+s.recent30.count+'건 · 승률 '+rwr+'% · EV <span style="color:'+revC+'">'+rev+'</span>' +
+      '</div>'
+    );
+  }
+
+  return (
+    '<div style="background:var(--bg2);border:1px solid '+color+';border-radius:8px;padding:10px 12px;margin-bottom:10px;font-family:var(--mono);font-size:11px">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">' +
+        '<span style="color:'+color+';font-weight:700">📊 성과 · '+mode.toUpperCase()+'</span>' +
+        '<span style="color:var(--t3);font-size:9px">'+s.done+'/'+s.total+' 검증 · '+periodLabel+'</span>' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px">' +
+        '<div><div style="color:var(--t3);font-size:9px;letter-spacing:.04em">승률</div><div style="color:var(--t);font-weight:700">'+wrPct+'%</div></div>' +
+        '<div><div style="color:var(--t3);font-size:9px;letter-spacing:.04em">EV/회</div><div style="color:'+evColor+';font-weight:700">'+evStr+'</div></div>' +
+        '<div><div style="color:var(--t3);font-size:9px;letter-spacing:.04em">PF</div><div style="color:var(--t);font-weight:700">'+pfStr+' '+pfBadge+'</div></div>' +
+      '</div>' +
+      (bucketsHtml ? '<div style="color:var(--t3);font-size:9px;margin:6px 0 2px;letter-spacing:.04em">점수 구간별 (승률·평균수익)</div>'+bucketsHtml : '') +
+      recentHtml +
+    '</div>'
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -3553,15 +3703,18 @@ function renderScreenerResults(mode){
   var modeColor = mode==='momo'?'var(--a)':mode==='swing'?'var(--bl)':'var(--pu)';
   var minScoreForMode = mode==='momo'?60:mode==='swing'?60:65;
 
+  // ★ Plan B (2026-05-27): 모바일용 성과 카드를 항상 최상단에
+  var statsCard = renderPerformanceStatsCard(mode);
+
   if(!results.length){
     var noResultMsg = lastRun
       ? '<div class="sc-status" style="color:var(--a)">조건 통과 종목 없음<br><span style="font-size:10px;color:var(--t3)">설정에서 최소갭·거래대금 조건을 낮추거나 KIS 연결 후 재시도</span></div>'
       : '<div class="sc-status">스캔 버튼을 눌러 후보 종목을 찾습니다<br><span style="font-size:10px;color:var(--t3)">KIS 연결 시 더 정확한 후보 제공</span></div>';
-    area.innerHTML = noResultMsg;
+    area.innerHTML = statsCard + noResultMsg;
     return;
   }
 
-  var html = '';
+  var html = statsCard;
   results.forEach(function(s, i){
     // SWING은 A2 통합으로 80pt 만점 (A+B+C), MOMO/CORE는 100pt 그대로
     // 임계값도 비율 기반으로 통일
@@ -16515,6 +16668,32 @@ async function holdTestTg() {
 }
 
 holdRender();
+
+// ─────────────────────────────────────────────────────────────
+// ★ Plan B (2026-05-27): TRACK 클라우드 동기화 초기화
+// 앱 시작 시 1회 풀+머지, 이후 5분마다 자동 동기화
+// 모바일·PC 어디서 스캔하든 한 곳에 누적됨
+// ─────────────────────────────────────────────────────────────
+(async function initTrackSync(){
+  var modes = ['momo','swing','core'];
+  for(var i=0; i<modes.length; i++){
+    try { await trackPullAndMerge(modes[i]); } catch(e){ console.warn('[initTrackSync]', modes[i], e.message); }
+  }
+  // 머지 후 현재 화면 다시 렌더 (성과 카드 즉시 업데이트)
+  modes.forEach(function(m){
+    try { renderScreenerResults(m); } catch(e){}
+  });
+})();
+
+setInterval(function(){
+  ['momo','swing','core'].forEach(function(m){
+    trackPullAndMerge(m).then(function(merged){
+      if(merged) {
+        try { renderScreenerResults(m); } catch(e){}
+      }
+    });
+  });
+}, 5*60*1000);
 
 
 (function initKis(){
