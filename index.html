@@ -364,6 +364,7 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
 .sb-score,.sb-action{display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:8px;border:1.5px solid;padding:6px 8px;min-width:38px;text-align:center;line-height:1}
 .sb-score{font-family:var(--mono);font-size:18px;font-weight:700}
 .sb-action{font-size:9px;font-weight:700;letter-spacing:.08em}
+.sb-action-sub{font-size:7px;font-weight:600;letter-spacing:0;opacity:0.7;margin-top:2px}
 .sb-enter{background:rgba(0,240,122,.10);border-color:rgba(0,240,122,.35);color:var(--g)}
 .sb-watch{background:rgba(255,58,140,.08);border-color:rgba(255,58,140,.28);color:var(--a)}
 .sb-block{background:rgba(255,45,78,.08);border-color:rgba(255,45,78,.28);color:var(--r)}
@@ -10619,15 +10620,15 @@ function momoCardHTML(r){
         '</div>'+
       '</div>'+
       // ★ 2026-05-27: 점수·액션 분리 박스 (혼란 방지)
-      // 점수BLOCK vs 게이트BLOCK 시각 구분 (게이트는 점수에 취소선)
+      // BLOCK은 메인 라벨 유지, 게이트BLOCK은 (게이트) 부가 라벨로 표시
       (function(){
         var bt = _classifyBlock(r);
         var sbColor = ac === 'ENTER' ? 'sb-enter' : ac === 'WATCH' ? 'sb-watch' : 'sb-block';
         var scoreExtra = bt === 'gate' ? ' sb-score-blocked' : '';
-        var acText = bt === 'gate' ? '게이트' : ac;
+        var subLabel = bt === 'gate' ? '<div class="sb-action-sub">게이트</div>' : '';
         return '<div class="split-badge">'+
           '<div class="sb-score '+sbColor+scoreExtra+'">'+r.score+'</div>'+
-          '<div class="sb-action '+sbColor+'">'+acText+'</div>'+
+          '<div class="sb-action '+sbColor+'">'+ac+subLabel+'</div>'+
         '</div>';
       })()+
     '</div>'+
@@ -10953,18 +10954,16 @@ function swingCardHTML(r){
         '</div>'+
       '</div>'+
       // ★ 2026-05-27: 점수·액션 분리 박스 (혼란 방지)
-      // ENTER A/B는 액션 박스에 그대로 표기, 게이트BLOCK은 점수에 취소선
+      // BLOCK/WATCH/ENTER A/B 메인 라벨 유지, 게이트BLOCK은 (게이트) 부가 라벨
       (function(){
         var bt = _classifyBlock(r);
         var sbColor = ac === 'ENTER' ? 'sb-enter' : ac === 'WATCH' ? 'sb-watch' : 'sb-block';
         var scoreExtra = bt === 'gate' ? ' sb-score-blocked' : '';
-        var label;
-        if(r.swing_grade)         label = 'ENTER '+r.swing_grade;
-        else if(bt === 'gate')    label = '게이트';
-        else                       label = ac;
+        var label = r.swing_grade ? 'ENTER '+r.swing_grade : ac;
+        var subLabel = bt === 'gate' ? '<div class="sb-action-sub">게이트</div>' : '';
         return '<div class="split-badge">'+
           '<div class="sb-score '+sbColor+scoreExtra+'">'+r.score+'</div>'+
-          '<div class="sb-action '+sbColor+'">'+label+'</div>'+
+          '<div class="sb-action '+sbColor+'">'+label+subLabel+'</div>'+
         '</div>';
       })()+
     '</div>'+
@@ -11295,10 +11294,10 @@ function coreCardHTML(r){
         var bt = _classifyBlock(r);
         var sbColor = ac === 'ENTER' ? 'sb-enter' : ac === 'WATCH' ? 'sb-watch' : 'sb-block';
         var scoreExtra = bt === 'gate' ? ' sb-score-blocked' : '';
-        var label = bt === 'gate' ? '게이트' : ac;
+        var subLabel = bt === 'gate' ? '<div class="sb-action-sub">게이트</div>' : '';
         return '<div class="split-badge">'+
           '<div class="sb-score '+sbColor+scoreExtra+'">'+r.score+'</div>'+
-          '<div class="sb-action '+sbColor+'">'+label+'</div>'+
+          '<div class="sb-action '+sbColor+'">'+ac+subLabel+'</div>'+
         '</div>';
       })()+
     '</div>'+
