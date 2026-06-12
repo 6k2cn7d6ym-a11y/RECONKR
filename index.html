@@ -974,6 +974,7 @@ var G = {
   apiTotal: JSON.parse(localStorage.getItem('apexTotal')||'{"calls":0,"input":0,"output":0,"cost":0}'),
   usageDate: localStorage.getItem('apexUsageDate') || '',
   spyAboveMA200: null,
+  _isHoliday: null,    // 공휴일 여부 (checkMarketRegime이 KIS 지수 일봉으로 판별, null=미판별)
   spyIntraday: null,   // {change_pct, trend:'up'|'down'|'crash', open, price}
   marketPhase: null,   // 'PRE'|'ORB'|'EARLY'|'PRIME'|'LATE'|'CLOSED'
   momoHistory: JSON.parse(localStorage.getItem('momoHistory')||'[]'),
@@ -1167,7 +1168,9 @@ function updateClock(){
   // 한국 시장 구분
   // 동시호가(시가): 8:30~9:00 | 정규: 9:00~15:20 | 장마감동시호가: 15:20~15:30 | 시간외: 15:30~18:00
   var day=kst.getDay(), phase;
-  if(day===0||day===6){ phase='CLOSED'; }
+  // ★ 2026-06: 공휴일(G._isHoliday)이면 평일이어도 휴장 — checkMarketRegime이 지수 일봉으로 판별
+  var _holiday = (G._isHoliday === true);
+  if(day===0||day===6 || _holiday){ phase='CLOSED'; }
   else if(hm<830)             { phase='CLOSED'; }
   else if(hm>=830 && hm<900)  { phase='PRE'; }   // 동시호가
   else if(hm>=900 && hm<1000) { phase='OPEN'; }  // 개장 초반
@@ -1180,7 +1183,7 @@ function updateClock(){
   // ── marketPhase (MOMO 시간대) 실시간 동기화 — 한국 기준 ──
   // NXT(넥스트레이드): 08:00~20:00 / KRX 정규: 08:30~15:30
   var newMomoPhase;
-  if(day===0||day===6){
+  if(day===0||day===6 || _holiday){
     newMomoPhase='CLOSED';
   } else if(hm>=800 && hm<830){
     // NXT 전용 시간대 (08:00~08:30) — KRX는 아직 PRE 전
@@ -1679,7 +1682,7 @@ async function fetchKisFluctuationRanking(market, sortDiv){
 // TR: FHKST03010100
 // ─────────────────────────────────────────
 async function fetchKisDailyChart(symbol){
-  var code = symbol.replace(/\.(KS|KQ)$/i,'');
+  var code = symbol.replace(/\.(KS|KQ|KN)$/i,'');
   var today = new Date();
   var from  = new Date(today); from.setDate(from.getDate()-100); // MA60 계산 위해 100일치 요청
   function fmt(d){ return d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0'); }
@@ -2063,7 +2066,7 @@ function calcInvestorFlow(investorData){
 // TR: CTPF1002R
 // ─────────────────────────────────────────
 async function fetchKisStockInfo(symbol){
-  var code = symbol.replace(/\.(KS|KQ)$/i,'');
+  var code = symbol.replace(/\.(KS|KQ|KN)$/i,'');
   var headers = await kisAuthHeaders('CTPF1002R');
   var data = await kisGet('/uapi/domestic-stock/v1/quotations/search-stock-info',{
     PRDT_TYPE_CD: '300',
@@ -2080,6 +2083,24 @@ async function fetchKisStockInfo(symbol){
 function calcDailyStats(candles, currentPrice){
   // currentPrice: 선택적 — SWING 눌림깊이 계산 시 사용
   if(!candles || candles.length < 5) return null;
+
+  // ★ 2026-06: 장중 미완성 봉 제거 — prevClose/MA/high20/전일양봉이
+  //   "오늘의 부분 데이터"로 오염되는 문제 차단.
+  //   KIS/야후 일봉 index 0은 장중엔 오늘(미확정) 봉. 거래일 캘린더는 캔들 날짜 자체가 진실.
+  //   오늘 봉은 KST 15:35(장 마감 정리) 이후에만 확정으로 간주하고 유지.
+  (function(){
+    if(!candles[0] || !candles[0].stck_bsop_date) return; // 날짜 없으면 보수적으로 그대로
+    var kst = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Seoul'}));
+    var p2  = function(x){ return String(x).padStart(2,'0'); };
+    var todayYmd = ''+kst.getFullYear()+p2(kst.getMonth()+1)+p2(kst.getDate());
+    var hm = kst.getHours()*100 + kst.getMinutes();
+    var confirmed = hm >= 1535; // 15:35 이후 = 오늘 봉도 확정
+    if(!confirmed && candles[0].stck_bsop_date === todayYmd){
+      candles = candles.slice(1); // 오늘 미완성 봉 1개 제거 → 이하 전부 "어제까지 확정"
+    }
+  })();
+  if(candles.length < 5) return null;
+
   var n60 = Math.min(candles.length, 65);  // MA60용
   var n20 = Math.min(candles.length, 25);  // MA20용
   var n   = n20;
@@ -2590,7 +2611,7 @@ function score_momo(s){
   var rvol  = s.rvol     || 0;
   var vp    = s._volumePower || 0;
   var src   = s._poolSources || [];
-  var code  = (s.symbol||'').replace(/\.(KS|KQ)$/i,'');
+  var code  = (s.symbol||'').replace(/\.(KS|KQ|KN)$/i,'');
   var d        = s._daily   || null;   // 일봉 통계
   var vwapPct  = (s._vwapPct !== undefined && s._vwapPct !== null) ? s._vwapPct : null;
 
@@ -3649,7 +3670,7 @@ function score_core(s){
   var frgn    = s._frgn    || 0;   // 외국인
   var orgn    = s._orgn    || 0;   // 기관 전체
   var src     = s._poolSources || [];
-  var code    = (s.symbol||'').replace(/\.(KS|KQ)$/i,'');
+  var code    = (s.symbol||'').replace(/\.(KS|KQ|KN)$/i,'');
   var isNxt   = _NXT_CODES.has(code);
 
   // ── ① 수급 — CORE의 핵심 (기관/외인 실제 순매수량 반영)
@@ -3779,7 +3800,7 @@ async function runScreener(mode){
       }
       var dailyRes = await _batchSettle(passed, function(s){ return fetchKisDailyChart(s.symbol); }, 5);
       var infoRes  = await _batchSettle(passed, function(s){ return fetchKisStockInfo(s.symbol); }, 5);
-      var priceRes = await _batchSettle(passed, function(s){ return fetchKisPrice(s.symbol.replace(/\.(KS|KQ)$/i,'')); }, 5);
+      var priceRes = await _batchSettle(passed, function(s){ return fetchKisPrice(s.symbol.replace(/\.(KS|KQ|KN)$/i,'')); }, 5);
 
       // 일봉·종목정보·현재가(VWAP) 부착
       passed.forEach(function(s, i){
@@ -3843,7 +3864,7 @@ async function runScreener(mode){
 
       var swDailyRes  = await batchSettle(passed, function(s){ return fetchKisDailyChart(s.symbol); }, 5);
       var swInfoRes   = await batchSettle(passed, function(s){ return fetchKisStockInfo(s.symbol); }, 5);
-      var swPriceRes  = await batchSettle(passed, function(s){ return fetchKisPrice(s.symbol.replace(/\.(KS|KQ)$/i,'')); }, 5);
+      var swPriceRes  = await batchSettle(passed, function(s){ return fetchKisPrice(s.symbol.replace(/\.(KS|KQ|KN)$/i,'')); }, 5);
 
       passed.forEach(function(s, i){
         var cp = (swPriceRes[i].status==='fulfilled') ? swPriceRes[i].value.price : null;
@@ -6167,7 +6188,7 @@ async function fetchYahooData(ticker){
     result.dartDisclosures = null;
     if(G.dartApiKey){
       try{
-        var rawCode = ticker.replace(/\.(KS|KQ)$/i,'');
+        var rawCode = ticker.replace(/\.(KS|KQ|KN)$/i,'');
         var dartList = await fetchDartDisclosures(rawCode);
         if(dartList && dartList.length){
           result.dartDisclosures = dartList;
@@ -7151,6 +7172,20 @@ async function fetchCoreData(ticker){
 // ═══════════════════════════════════════
 // 프롬프트 생성 (한국 시장 전용)
 // ═══════════════════════════════════════
+// ── 보유 포지션 해설 프롬프트 (Claude = 해설 전용, 판정은 exitEngine) ──
+function makeHoldExplainPrompt(mode, ticker, ydata, exitResult, trade){
+  var pnl = ydata.price && trade.entry ? ((ydata.price/trade.entry-1)*100).toFixed(1) : '?';
+  var acLabel = {SELL_ALL:'전량 매도',SELL_HALF:'절반 익절',HOLD:'홀드'}[exitResult.hold_action]||exitResult.hold_action;
+  return '한국 주식 보유 포지션 해설. 판정은 이미 규칙 엔진이 내렸고 바꿀 수 없음.\n\n'+
+    '종목: '+ticker+' / 현재가 '+(ydata.price?Math.round(ydata.price).toLocaleString()+'원':'?')+
+    ' / 진입가 '+Math.round(trade.entry).toLocaleString()+'원 / 수익률 '+pnl+'%\n'+
+    '엔진 판정: '+acLabel+' — '+exitResult.reason+'\n'+
+    (ydata.newsText ? '최근 뉴스: '+String(ydata.newsText).slice(0,300)+'\n' : '')+
+    (ydata.dartFactTitles && ydata.dartFactTitles.length ? '공시: '+ydata.dartFactTitles.slice(0,2).join(' / ')+'\n' : '')+
+    '\n위 판정을 전제로, 뉴스·공시·정성적 위험 관점에서 참고 해설 2~3문장만. '+
+    '판정 번복/레벨 제시 금지. 순수 텍스트만 (JSON·마크다운 금지).';
+}
+
 function makePrompt(mode, ticker, ydata, swingData, openTrade, coreData){
   var minGap  = parseInt((document.getElementById('minGap')||{textContent:'5'}).textContent)||5;
   var minMcap = parseInt((document.getElementById('minMcap')||{textContent:'500'}).textContent)||500;
@@ -7705,7 +7740,7 @@ function getWhaleStage(r){
   var tv   = r.trading_value_ratio  || 0;
   var turn = r.turnover_pct         || 0;
   var gap  = r.gap_pct              || 0;
-  var isoK = r.ma20_gap_pct         || 0;
+  var isoK = (r.ma20_gap_pct != null) ? r.ma20_gap_pct : null;  // 미계산(null)을 0%로 오인하지 않도록
   var ul   = r.ulimit_pct;
   var news = (r.news_quality        || 'none');
   var nwTx = (r.newsText            || '').toLowerCase();
@@ -9936,9 +9971,22 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
   var compatScores = { momo:null, swing:null, core:null };
 
   if(openTrade){
-    // ── 보유 포지션 관리: 기존 makePrompt 사용 (청산/홀드/추가 판단)
-    prompt = makePrompt(mode, ticker, ydata, swingData, openTrade, coreData);
-    decision = null; // openTrade는 Claude가 판단
+    // ── 보유 포지션: exitEngine이 판정 (결정론), Claude는 해설 전용 (2026-06) ──
+    var _holdEng2 = (mode === 'momo') ? momoEngine(ydata) : null;
+    var _exitSig2 = (mode === 'swing' && swingData)
+      ? calcSwingExitSignals({ price: ydata.price, hold_action: 'HOLD' }, swingData, openTrade)
+      : null;
+    decision = exitEngine(mode, openTrade, {
+      price:      ydata.price,
+      ydata:      ydata,
+      swingData:  swingData || null,
+      coreData:   coreData  || null,
+      holdEngine: _holdEng2,
+      exitSig:    _exitSig2,
+    });
+    decision._holdEngineRef = _holdEng2; // 표시용 (whale 등)
+    decision._exitSignals   = _exitSig2; // 카드 렌더 호환
+    prompt = makeHoldExplainPrompt(mode, ticker, ydata, decision, openTrade);
   } else {
     // ── 신규 진입: 결정 엔진 + Claude 설명
     // 3-엔진 동시 평가 (호환성 footer용)
@@ -9972,7 +10020,7 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
         model:'claude-sonnet-4-20250514',
-        max_tokens: openTrade ? 600 : 250,
+        max_tokens: openTrade ? 350 : 250,  // 보유는 해설 전용 (판정은 exitEngine)
         messages:[{role:'user',content:prompt}]
       })
     });
@@ -9994,54 +10042,27 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
 
     var result;
     if(openTrade){
-      // ── 보유 포지션: Claude 판단 + JS 청산 신호 병합 ──
-      result = JSON.parse(rawText);
+      // ── 보유 포지션: exitEngine 판정이 전부 — Claude 응답은 해설(ai_note)로만 ──
+      result = Object.assign({}, decision);
       result.ticker = ticker;
       result.price  = ydata.price || result.price;
       result.news   = ydata.newsText || '';
+      result.ai_note = String(rawText||'').replace(/```[a-z]*|```/g,'').trim().slice(0, 500) || null;
 
       // ── 종목명 (신규 진입과 동일 경로) ──
-      var _tCode2 = ticker.replace(/\.(KS|KQ)$/i,'');
+      var _tCode2 = ticker.replace(/\.(KS|KQ|KN)$/i,'');
       var _mEntry2 = masterByCode(_tCode2);
       result.displayName = (_mEntry2 && _mEntry2.name) || ydata.shortName || ticker;
 
-      // ── MOMO: 엔진으로 현재 상태 재평가 → BLOCK이면 SELL_ALL 승격 ──
-      if(mode === 'momo'){
-        var _holdEng = momoEngine(ydata);
-        result._holdEngineAction  = _holdEng.action;
-        result._holdEngineScore   = _holdEng.score;
-        result.whale_stage        = _holdEng.whale_stage;
-        result.whale_label        = _holdEng.whale_label;
-        result.vwap               = ydata.vwap || null;
-        result.rvol               = ydata.rvol || null;
-
-        // 엔진이 BLOCK → 즉시 매도 승격
-        if(_holdEng.action === 'BLOCK' && result.hold_action === 'HOLD'){
-          result.hold_action = 'SELL_ALL';
-          result.urgency     = 'immediate';
-          var _blkReason     = (_holdEng.blockers||[]).slice(0,2).join(' / ');
-          result.reason      = '⚡ 엔진 BLOCK 감지 — ' + _blkReason + (result.reason ? '\n' + result.reason : '');
-          result.warnings    = (_holdEng.blockers||[]).concat(result.warnings||[]);
-        } else {
-          // 엔진 경고를 기존 warnings 앞에 병합 (중복 제거)
-          var _engWarnMerge = (_holdEng.warnings||[]).filter(function(w){
-            return !(result.warnings||[]).some(function(x){ return x===w; });
-          });
-          result.warnings = _engWarnMerge.concat(result.warnings||[]);
-          result.signals  = (_holdEng.signals||[]).concat(result.signals||[]);
-        }
-      }
-
-      // ── 스윙 청산 신호 — JS 규칙 기반 (MA5/거래량소멸/위꼬리) ──
-      if(mode === 'swing' && swingData){
-        var _exitSig = calcSwingExitSignals(result, swingData, openTrade);
-        result._exitSignals = _exitSig;
-        // critical 신호 있고 Claude가 HOLD면 → SELL_ALL로 승격
-        if(_exitSig.override){
-          result.hold_action = 'SELL_ALL';
-          result.urgency     = 'today';
-          result.reason      = (result.reason||'') + ' / ⚠ JS 청산신호: ' + _exitSig.critical[0];
-        }
+      // ── MOMO 표시용 필드 (whale/vwap — 판정은 이미 exitEngine에 반영됨) ──
+      var _holdEng = decision._holdEngineRef;
+      if(mode === 'momo' && _holdEng){
+        result._holdEngineAction = _holdEng.action;
+        result._holdEngineScore  = _holdEng.score;
+        result.whale_stage       = _holdEng.whale_stage;
+        result.whale_label       = _holdEng.whale_label;
+        result.vwap              = ydata.vwap || null;
+        result.rvol              = ydata.rvol || null;
       }
     } else {
       // ── 신규 진입: 엔진 결정 + Claude 설명 병합 ──
@@ -10051,7 +10072,7 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
       result = Object.assign({}, decision);
       result.ticker      = ticker;
       // ── 한글 종목명 표시 (KIS 캐시 또는 Yahoo shortName) ──
-      var _tCode = ticker.replace(/\.(KS|KQ)$/i,'');
+      var _tCode = ticker.replace(/\.(KS|KQ|KN)$/i,'');
       // 종목 마스터에서 종목명 조회
       var _mEntry = masterByCode(_tCode);
       result.displayName = (_mEntry && _mEntry.name) || ydata.shortName || ticker;
@@ -10162,15 +10183,7 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
       else if(result.action==='BLOCK'&&document.getElementById('tgBlock').classList.contains('on')) fireAlert(result,'BLOCK');
     }
 
-    // ── 트레일링 손절 이탈 시 SELL_ALL 강제 적용 ──
-    if(openTrade && mode==='momo' && result.trailing_stop && result.price){
-      if(result.price < result.trailing_stop){
-        result.hold_action = 'SELL_ALL';
-        result.urgency = 'immediate';
-        result.reason = (result.reason||'')+' / 트레일링 손절 ₩'+Math.round(result.trailing_stop).toLocaleString()+' 이탈';
-        result.summary = '트레일링 손절 ₩'+Math.round(result.trailing_stop).toLocaleString()+' 이탈 — 즉시 전량 매도';
-      }
-    }
+    // (구 트레일링 강제블록 제거 — exitEngine P4가 고점 추적 포함해 대체, 2026-06)
 
     saveToHistory(mode, result);
     if(!openTrade) trackFromAnalysis(mode, result);
@@ -10187,7 +10200,20 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
 
   }catch(e){
     analyzeEl.innerHTML='';
-    resultEl.innerHTML='<div class="alert-card" style="margin:4px 0 10px"><div class="alert-msg" style="color:var(--r)">'+ticker+' 오류: '+e.message+'</div></div>';
+    // ── 보유 포지션: AI 해설이 실패해도 엔진 판정만으로 카드 완성 (2026-06) ──
+    if(openTrade && decision && decision._engineExit){
+      var rFb = Object.assign({}, decision);
+      rFb.ticker = ticker;
+      rFb.price  = ydata && ydata.price ? ydata.price : null;
+      rFb.ai_note = null;
+      rFb.warnings = (rFb.warnings||[]).concat(['AI 해설 생략 ('+e.message+') — 판정은 규칙 엔진이라 영향 없음']);
+      var _tCodeF = ticker.replace(/\.(KS|KQ|KN)$/i,'');
+      var _mEntryF = masterByCode(_tCodeF);
+      rFb.displayName = (_mEntryF && _mEntryF.name) || (ydata && ydata.shortName) || ticker;
+      resultEl.innerHTML = holdCardHTML(rFb, mode, openTrade);
+    } else {
+      resultEl.innerHTML='<div class="alert-card" style="margin:4px 0 10px"><div class="alert-msg" style="color:var(--r)">'+ticker+' 오류: '+e.message+'</div></div>';
+    }
   }
 }
 
@@ -10252,13 +10278,10 @@ function applyHistory(r){
   var t = r.ticker, now = Date.now();
   if(!G.history[t]) G.history[t]=[];
   if(r.price){ G.history[t].push({price:r.price,time:now,score:r.score}); G.history[t]=G.history[t].slice(-10); }
-  if(G.history[t].length>=3){
-    var pts=G.history[t], lows=pts.map(function(p){return p.price;}), last3=lows.slice(-3);
-    var higherLow = last3[2]>last3[1]&&last3[1]>last3[0];
-    var lowerHigh = last3[2]<last3[1]&&last3[1]<last3[0];
-    if(higherLow){ if(!r.signals) r.signals=[]; r.signals.push('Higher Low 확인 ('+pts.length+'회 관찰)'); }
-    if(lowerHigh){ if(!r.warnings) r.warnings=[]; r.warnings.push('Lower High 진행 중 ('+pts.length+'회 관찰)'); }
-  }
+  // ★ 2026-06: 과거 "Higher Low/Lower High 신호" 제거.
+  //   G.history는 사용자가 종목을 탭한 시점의 불규칙 스냅샷일 뿐 — 균등 시간격의
+  //   차트 저점/고점이 아니라서 진짜 패턴 신호로 쓰면 오해를 유발함.
+  //   가격 이력은 내부 참고용으로만 보존하고 카드 신호로는 띄우지 않음.
   return r;
 }
 
@@ -11757,6 +11780,253 @@ function _legacyCardHTML(r, mode){
   return '<div class="stock-card"><div class="card-ticker">'+(r.ticker||'?')+'</div>'+
     '<div style="font-size:11px;color:var(--t3);padding:8px">모드 정보 없음 — 다시 분석하세요.</div></div>';
 }
+// ═══════════════════════════════════════════════════════════════
+// EXIT ENGINE — 결정론적 청산 엔진 (2026-06)
+//
+// 원칙:
+//  1. 레벨(손절/T1/T2)은 포지션에 1회 고정(exitState) — Claude가 매번 새로 정하지 않음
+//  2. 갱신은 코드 규칙만: T1 도달 → 절반 매도 + 손절 BE 이동 / 트레일링 고점 추적
+//  3. 우선순위 결정 트리 — 손절(P0)이 모든 것에 우선
+//  4. SWING MA 이탈은 종가 확정(15:20+) 기준 청산 — 장중엔 경고만 (휩쏘 방지)
+//  5. Claude는 해설 전용 — API 실패해도 카드는 엔진만으로 완전체
+//
+// 조정: localStorage.setItem('exitCfg', JSON.stringify({...})) 후 새로고침
+// ═══════════════════════════════════════════════════════════════
+var EXIT_CFG = (function(){
+  var def = {
+    momo:  { stopPct:-4.5, t1R:1.0, t2R:2.0, trailPct:3,  timeDays:2,  timeMinPnl:0 },
+    swing: { stopPct:-3.5, t1R:1.5, t2R:3.0, trailPct:7,  timeDays:14, timeMinPnl:1 },
+    core:  { stopPct:-7.0, t1R:2.0, t2R:4.0, trailPct:10, timeDays:56, timeMinPnl:0 },
+  };
+  try{
+    var ov = JSON.parse(localStorage.getItem('exitCfg')||'null');
+    if(ov) ['momo','swing','core'].forEach(function(m){ if(ov[m]) Object.assign(def[m], ov[m]); });
+  }catch(e){}
+  return def;
+})();
+
+// 포지션 청산 상태 초기화 (1회) — 이후 모든 스캔은 이 상태를 기준으로 판정
+function initExitState(trade, mode){
+  if(trade.exitState && trade.exitState.ver === 1) return trade.exitState;
+  var cfg   = EXIT_CFG[mode] || EXIT_CFG.momo;
+  var entry = trade.entry;
+  var stop  = parseFloat((entry * (1 + cfg.stopPct/100)).toFixed(2));
+  var risk  = entry - stop;
+  var x = {
+    ver: 1,
+    stop:        stop,
+    initialStop: stop,
+    t1:          parseFloat((entry + risk * cfg.t1R).toFixed(2)),
+    t2:          parseFloat((entry + risk * cfg.t2R).toFixed(2)),
+    t1Done:      trade.status === 'partial',  // 이미 분할매도 했으면 T1 완료 취급
+    beMoved:     false,
+    highWater:   entry,
+    setAt:       Date.now(),
+    src:         'engine-default',
+  };
+  // 이미 분할매도 상태면 손절선을 본전으로
+  if(x.t1Done && x.stop < entry){ x.stop = entry; x.beMoved = true; }
+  trade.exitState = x;
+  return x;
+}
+
+function persistExitState(){
+  try{ localStorage.setItem('reconJournal', JSON.stringify(G_journal)); }catch(e){}
+}
+
+// ── 메인 엔진 ──
+// ctx: { price, ydata, swingData, coreData, holdEngine(momo 재평가), exitSig(swing 신호), hm }
+function exitEngine(mode, trade, ctx){
+  var cfg   = EXIT_CFG[mode] || EXIT_CFG.momo;
+  var x     = initExitState(trade, mode);
+  var price = ctx.price;
+  var entry = trade.entry;
+  var r = {
+    _engineExit: true,
+    hold_action: 'HOLD', urgency: 'monitor',
+    stop: x.stop, t1: x.t1, t2: x.t2, trailing_stop: null,
+    score: ctx.holdEngine ? ctx.holdEngine.score : null,
+    reason: '', summary: '',
+    signals: [], warnings: [], decision_path: [],
+    _exitStage: x.t1Done ? 'RISK_FREE' : 'INITIAL',
+  };
+  if(!(price > 0) || !(entry > 0)){
+    r.reason = '가격 데이터 없음 — 판정 보류';
+    r.summary = '시세 미수신 — 다음 스캔에서 재평가';
+    return r;
+  }
+  var pnlPct   = (price/entry - 1) * 100;
+  var holdDays = 0;
+  if(trade.date){
+    var dEntry = new Date(trade.date);
+    if(!isNaN(dEntry)) holdDays = Math.max(0, Math.round((Date.now() - dEntry.getTime())/86400000));
+  }
+  var hm = ctx.hm != null ? ctx.hm : (function(){
+    var k = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Seoul'}));
+    return k.getHours()*100 + k.getMinutes();
+  })();
+  var fmtW = function(v){ return '₩'+Math.round(v).toLocaleString(); };
+  var dp = function(gate, status, note){ r.decision_path.push({gate:gate, status:status, note:note}); };
+
+  // ── 트레일링 고점 추적 (판정 전에 갱신·영속) ──
+  if(x.t1Done && price > x.highWater){
+    x.highWater = price;
+    persistExitState();
+  }
+
+  // ════════ P0. 하드 스탑 — 모든 것에 우선 ════════
+  if(price <= x.stop){
+    r.hold_action = 'SELL_ALL'; r.urgency = 'immediate';
+    var stopKind = x.beMoved ? '본전 스탑' : '손절선';
+    r.reason  = stopKind+' '+fmtW(x.stop)+' 이탈 ('+pnlPct.toFixed(1)+'%) — 규칙상 즉시 전량 매도';
+    r.summary = '⛔ '+stopKind+' 이탈 — 즉시 전량 매도';
+    r.warnings.push('손절은 협상 대상이 아님 — 미루면 평균 손실이 커짐');
+    dp('P0 스탑', 'block', stopKind+' '+fmtW(x.stop)+' ≥ 현재가');
+    return r;
+  }
+  dp('P0 스탑', 'pass', fmtW(x.stop)+' 위 ('+((price/x.stop-1)*100).toFixed(1)+'% 여유)');
+
+  // ════════ P1. T2 도달 — 잔량 전량 익절 ════════
+  if(price >= x.t2){
+    r.hold_action = 'SELL_ALL'; r.urgency = 'today';
+    r.reason  = 'T2 '+fmtW(x.t2)+' 도달 ('+pnlPct.toFixed(1)+'%) — 계획된 최종 목표, 잔량 전량 매도';
+    r.summary = '🎯 T2 도달 — 잔량 전량 익절';
+    r.signals.push('최종 목표 도달 — 계획 완수');
+    dp('P1 T2', 'pass', 'T2 '+fmtW(x.t2)+' 도달');
+    return r;
+  }
+
+  // ════════ P2. T1 도달 — 절반 매도 + BE 이동 ════════
+  if(!x.t1Done && price >= x.t1){
+    x.t1Done = true;
+    if(x.stop < entry){ x.stop = entry; x.beMoved = true; }
+    x.highWater = Math.max(x.highWater, price);
+    persistExitState();
+    r.stop = x.stop;
+    r._exitStage = 'RISK_FREE';
+    r.hold_action = 'SELL_HALF'; r.urgency = 'today';
+    r.reason  = 'T1 '+fmtW(x.t1)+' 도달 ('+pnlPct.toFixed(1)+'%) — 절반 익절 + 손절선 본전('+fmtW(entry)+') 이동. 이후 잔량은 무위험';
+    r.summary = '🟡 T1 도달 — 절반 매도, 스탑→본전';
+    r.signals.push('T1 달성 — 원금 리스크 제거');
+    dp('P2 T1', 'pass', '절반 매도 + BE 이동');
+    return r;
+  }
+
+  // ════════ P3. 구조 붕괴 (모드별) ════════
+  if(mode === 'momo'){
+    // 엔진 재평가 BLOCK = 모멘텀 사망
+    if(ctx.holdEngine && ctx.holdEngine.action === 'BLOCK'){
+      r.hold_action = 'SELL_ALL'; r.urgency = 'today';
+      var blk = (ctx.holdEngine.blockers||[]).slice(0,2).join(' / ');
+      r.reason  = 'MOMO 엔진 재평가 BLOCK — '+blk+'. 모멘텀 근거 소멸, 잔량 정리';
+      r.summary = '⚡ 엔진 BLOCK — 모멘텀 소멸, 전량 매도';
+      r.warnings = (ctx.holdEngine.blockers||[]).concat(r.warnings);
+      dp('P3 구조', 'block', '엔진 BLOCK');
+      return r;
+    }
+    // 당일 진입분: ORB 저점 이탈
+    if(holdDays === 0 && ctx.ydata && ctx.ydata.orb_low && price < ctx.ydata.orb_low * 0.99){
+      r.hold_action = 'SELL_ALL'; r.urgency = 'immediate';
+      r.reason  = 'ORB 저점 '+fmtW(ctx.ydata.orb_low)+' 이탈 — 당일 모멘텀 실패 구조';
+      r.summary = '⛔ ORB 저점 이탈 — 전량 매도';
+      dp('P3 구조', 'block', 'ORB 저점 이탈');
+      return r;
+    }
+    // VWAP -1% 이탈 + 오후 = 모멘텀 소멸
+    if(ctx.ydata && ctx.ydata.vwap && price < ctx.ydata.vwap * 0.99 &&
+       (G.marketPhase === 'PRIME' || G.marketPhase === 'LATE')){
+      r.hold_action = 'SELL_ALL'; r.urgency = 'today';
+      r.reason  = 'VWAP '+fmtW(ctx.ydata.vwap)+' -1% 이탈 + 오후 — 세력 평균단가 아래, 모멘텀 소멸';
+      r.summary = '📉 VWAP 이탈 — 전량 정리';
+      dp('P3 구조', 'block', 'VWAP -1% 이탈 (오후)');
+      return r;
+    }
+    dp('P3 구조', 'pass', 'VWAP/ORB 유지');
+  }
+  if(mode === 'swing' && ctx.swingData){
+    var ma5s = ctx.swingData.ma5;
+    // T1 이후 잔량: MA5 종가 이탈 = 청산 (종가 확정 기준 — 휩쏘 방지)
+    if(x.t1Done && ma5s && price < ma5s * 0.995){
+      if(hm >= 1520 || hm < 900){
+        r.hold_action = 'SELL_ALL'; r.urgency = 'today';
+        r.reason  = 'MA5 '+fmtW(ma5s)+' 종가 이탈 — T1 이후 잔량 청산 기준 충족';
+        r.summary = '📉 MA5 종가 이탈 — 잔량 청산';
+        dp('P3 구조', 'block', 'MA5 종가 이탈');
+        return r;
+      } else {
+        r.warnings.push('MA5 '+fmtW(ma5s)+' 이탈 진행 중 — 15:20 종가 확정 시 잔량 청산 (휩쏘 방지로 장중 보류)');
+        dp('P3 구조', 'warn', 'MA5 이탈 진행 — 종가 대기');
+      }
+    } else {
+      dp('P3 구조', 'pass', ma5s ? 'MA5 '+fmtW(ma5s)+' 위' : 'MA5 데이터 없음');
+    }
+    // JS 청산 신호 (거래량 소멸/위꼬리) — T1 이후면 격상, 이전엔 경고
+    if(ctx.exitSig){
+      if(ctx.exitSig.critical && ctx.exitSig.critical.length){
+        if(x.t1Done && r.hold_action === 'HOLD'){
+          r.hold_action = 'SELL_ALL'; r.urgency = 'today';
+          r.reason  = ctx.exitSig.critical[0]+' — T1 이후 잔량 보호 우선';
+          r.summary = '⚠ 청산 신호 — 잔량 정리';
+          dp('P3 신호', 'block', ctx.exitSig.critical[0].split(' — ')[0]);
+          return r;
+        }
+        r.warnings = r.warnings.concat(ctx.exitSig.critical);
+      }
+      if(ctx.exitSig.warning) r.warnings = r.warnings.concat(ctx.exitSig.warning);
+    }
+  }
+  if(mode === 'core' && ctx.coreData){
+    var vs120 = ctx.coreData.price_vs_ma120_pct;
+    if(vs120 != null && vs120 < -2){
+      r.hold_action = 'SELL_ALL'; r.urgency = 'this_week';
+      r.reason  = '경기선(120일선) '+vs120.toFixed(1)+'% 이탈 — CORE 보유 근거 붕괴';
+      r.summary = '📉 경기선 이탈 — CORE 근거 소멸, 전량 정리';
+      dp('P3 구조', 'block', '120일선 '+vs120.toFixed(1)+'%');
+      return r;
+    }
+    dp('P3 구조', 'pass', vs120 != null ? '경기선 대비 '+(vs120>=0?'+':'')+vs120.toFixed(1)+'%' : '경기선 데이터 없음');
+  }
+
+  // ════════ P4. 트레일링 (T1 이후) ════════
+  if(x.t1Done){
+    var trailLine = parseFloat((x.highWater * (1 - cfg.trailPct/100)).toFixed(2));
+    r.trailing_stop = Math.max(trailLine, x.stop);
+    r._exitStage = 'TRAILING';
+    if(price <= r.trailing_stop && price > x.stop){
+      r.hold_action = 'SELL_ALL'; r.urgency = 'today';
+      r.reason  = '트레일링 스탑 '+fmtW(r.trailing_stop)+' 이탈 (고점 '+fmtW(x.highWater)+' 대비 -'+cfg.trailPct+'%) — 추세 종료, 잔량 확정';
+      r.summary = '🔻 트레일링 이탈 — 잔량 전량 매도';
+      dp('P4 트레일링', 'block', '고점 -'+cfg.trailPct+'% 이탈');
+      return r;
+    }
+    dp('P4 트레일링', 'pass', fmtW(r.trailing_stop)+' (고점 '+fmtW(x.highWater)+')');
+  }
+
+  // ════════ P5. 시간 손절 ════════
+  if(holdDays >= cfg.timeDays && pnlPct < cfg.timeMinPnl){
+    r.hold_action = 'SELL_ALL'; r.urgency = mode==='momo' ? 'today' : 'this_week';
+    r.reason  = '보유 '+holdDays+'일 / 수익 '+pnlPct.toFixed(1)+'% — '+
+      (mode==='momo' ? 'MOMO는 1~2일 전략, 모멘텀 부재' : '시간 손절 기준 충족, 자본 회전 우선');
+    r.summary = '⏱ 시간 손절 — 자본 회전';
+    r.warnings.push('횡보 포지션은 기회비용 — 더 좋은 자리로 이동');
+    dp('P5 시간', 'block', holdDays+'일 / '+pnlPct.toFixed(1)+'%');
+    return r;
+  }
+  dp('P5 시간', 'pass', '보유 '+holdDays+'일 / '+(pnlPct>=0?'+':'')+pnlPct.toFixed(1)+'%');
+
+  // ════════ P6. HOLD ════════
+  r.hold_action = 'HOLD'; r.urgency = 'monitor';
+  var stageLabel = r._exitStage === 'TRAILING' ? '무위험 트레일링 중' :
+                   r._exitStage === 'RISK_FREE' ? '본전 스탑 — 무위험' : '초기 구간';
+  var nextUp   = x.t1Done ? 'T2 '+fmtW(x.t2)+' ('+((x.t2/price-1)*100).toFixed(1)+'%↑)' : 'T1 '+fmtW(x.t1)+' ('+((x.t1/price-1)*100).toFixed(1)+'%↑)';
+  var nextDown = r.trailing_stop ? '트레일링 '+fmtW(r.trailing_stop) : '스탑 '+fmtW(x.stop);
+  r.reason  = '['+stageLabel+'] 위로 '+nextUp+' / 아래로 '+nextDown+' — 규칙 충족 전까지 홀드';
+  r.summary = '🟢 홀드 — '+stageLabel;
+  r.signals.push(stageLabel+' · 다음 레벨: '+nextUp);
+  dp('P6 홀드', 'pass', stageLabel);
+  return r;
+}
+
 function calcSwingExitSignals(result, swingData, trade){
   var out = { critical:[], warning:[], override:false };
   if(!swingData || !result.price || !trade.entry) return out;
@@ -11917,6 +12187,16 @@ function holdCardHTML(r, mode, trade){
       '</div>':'')+
 
     // 핵심 판단 근거
+    (r._exitStage?
+      '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">'+
+        '<span style="font-family:var(--mono);font-size:9px;padding:2px 7px;border-radius:4px;letter-spacing:.05em;'+
+          (r._exitStage==='TRAILING'?'background:rgba(0,240,122,.10);color:var(--g);border:1px solid rgba(0,240,122,.25)':
+           r._exitStage==='RISK_FREE'?'background:rgba(43,159,255,.10);color:var(--bl);border:1px solid rgba(43,159,255,.25)':
+           'background:rgba(255,255,255,.04);color:var(--t2);border:1px solid var(--b)')+'">'+
+          (r._exitStage==='TRAILING'?'🛡 무위험 트레일링':r._exitStage==='RISK_FREE'?'🛡 본전 스탑':'초기 구간')+
+        '</span>'+
+        '<span style="font-family:var(--mono);font-size:8px;color:var(--t3)">규칙 엔진 판정</span>'+
+      '</div>':'')+
     (r.reason||r.summary?
       '<div style="font-size:12px;color:var(--t);line-height:1.6;padding:10px 12px;background:var(--bg2);border-radius:10px;margin-bottom:10px;white-space:pre-line">'+
         (r.reason||r.summary)+'</div>':'')+
@@ -12025,6 +12305,9 @@ function holdCardHTML(r, mode, trade){
     // 요약 (reason과 다를 때만 표시)
     (r.summary&&r.summary!==(r.reason||'')?
       '<div style="font-size:11px;color:var(--t2);margin-bottom:10px">'+r.summary+'</div>':'')+
+    (r.ai_note?
+      '<div style="font-size:10px;color:var(--t3);margin-bottom:10px;padding:7px 10px;background:rgba(255,255,255,.025);border:1px solid var(--b);border-radius:8px;line-height:1.5">'+
+        '<span style="font-family:var(--mono);font-size:8px;color:var(--t3);letter-spacing:.06em">CLAUDE 해설 (참고용 · 판정과 무관)</span><br>'+r.ai_note+'</div>':'')+
 
     // 버튼
     '<div style="display:flex;gap:6px">'+
@@ -12190,6 +12473,12 @@ function confirmPartialSell(tradeId){
   } else {
     trade.status='partial';
     trade.pnl=parseFloat(trade.sells.reduce(function(s,sv){return s+sv.pnl;},0).toFixed(2));
+    // ── 엔진 상태 동기화: 수동 분할매도 = T1 실행 취급 + 스탑 본전 이동 (2026-06) ──
+    if(trade.exitState){
+      trade.exitState.t1Done = true;
+      if(trade.exitState.stop < trade.entry){ trade.exitState.stop = trade.entry; trade.exitState.beMoved = true; }
+      trade.exitState.highWater = Math.max(trade.exitState.highWater||trade.entry, trade.exit||trade.entry);
+    }
   }
   localStorage.setItem('reconJournal',JSON.stringify(G_journal));
   document.querySelector('div[style*=fixed]')?.remove();
@@ -12658,6 +12947,10 @@ function recalcTrade(trade){
     } else {
       trade.status='partial';
       trade.exit=null;
+      if(trade.exitState){
+        trade.exitState.t1Done = true;
+        if(trade.exitState.stop < trade.entry){ trade.exitState.stop = trade.entry; trade.exitState.beMoved = true; }
+      }
     }
   } else {
     trade.remaining=trade.shares||0;
@@ -16553,7 +16846,7 @@ async function doTickerSearch(inputId, q, mode){
   // KIS 가격 백그라운드 업데이트
   if(quotes.length && KIS.appKey && KIS.appSecret){
     Promise.allSettled(
-      quotes.map(function(r){ return fetchKisPrice(r.symbol.replace(/\.(KS|KQ)$/i,'')); })
+      quotes.map(function(r){ return fetchKisPrice(r.symbol.replace(/\.(KS|KQ|KN)$/i,'')); })
     ).then(function(results){
       var updated = false;
       results.forEach(function(res,i){
@@ -16673,6 +16966,24 @@ async function checkMarketRegime(){
         G.spyAboveMA200 = closesK[0] > ma120k;
         _ma120Done = true;
       }
+      // ★ 2026-06: 공휴일 판별 — 평일 장중인데 지수 최신 거래일이 오늘이 아니면 휴장
+      //   (KIS 거래일 캔들이 진실. 공휴일 테이블 불필요)
+      (function(){
+        if(!dcK[0] || !dcK[0].stck_bsop_date) return;
+        var kh = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Seoul'}));
+        var p2 = function(x){ return String(x).padStart(2,'0'); };
+        var ymd = ''+kh.getFullYear()+p2(kh.getMonth()+1)+p2(kh.getDate());
+        var hmh = kh.getHours()*100 + kh.getMinutes();
+        var dayh = kh.getDay();
+        var isWeekdayMktTime = dayh>0 && dayh<6 && hmh>=900 && hmh<1530;
+        // 장중인데 최신 지수 캔들이 오늘이 아님 → 오늘은 거래일 아님(공휴일)
+        if(isWeekdayMktTime && dcK[0].stck_bsop_date !== ymd){
+          G._isHoliday = true;
+        } else if(dcK[0].stck_bsop_date === ymd || !isWeekdayMktTime){
+          // 오늘 캔들 존재(=거래일) 또는 장외시간(판별보류) → 휴일 아님
+          if(dcK[0].stck_bsop_date === ymd) G._isHoliday = false;
+        }
+      })();
     }catch(e){ console.warn('[regime] KIS 일봉 실패 → Yahoo 폴백:', e.message); }
   }
   if(!_ma120Done){
@@ -17049,7 +17360,7 @@ function holdFromAnalysis(ticker){
   }
   if(!r){ showToast && showToast('분석 결과를 찾을 수 없습니다'); return; }
   // 종목코드: 005930.KS → 005930
-  var code = (r.ticker||'').replace(/\.(KS|KQ)$/i,'');
+  var code = (r.ticker||'').replace(/\.(KS|KQ|KN)$/i,'');
   if(!/^\d{6}$/.test(code)){ showToast && showToast('종목코드 형식 오류: '+r.ticker); return; }
 
   var st = (typeof calcSellTargets === 'function') ? calcSellTargets(r) : null;
