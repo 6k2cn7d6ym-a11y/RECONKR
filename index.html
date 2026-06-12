@@ -176,6 +176,8 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
 .stock-card.enter::before{content:'';position:absolute;inset:0 0 auto 0;height:2px;background:linear-gradient(90deg,var(--g),transparent)}
 .stock-card.watch{border-color:rgba(255,58,140,.2)}
 .stock-card.block{border-color:rgba(255,45,78,.2);opacity:.75}
+.stock-card.ready{border-color:rgba(43,159,255,.3)}
+.stock-card.ready::before{content:'';position:absolute;inset:0 0 auto 0;height:2px;background:linear-gradient(90deg,var(--bl),transparent)}
 
 .card-row1{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}
 .card-ticker{font-family:var(--mono);font-size:22px;color:var(--t);letter-spacing:.06em}
@@ -188,6 +190,8 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
 .ab-enter .ab-score{color:var(--g)} .ab-watch .ab-score{color:var(--a)} .ab-block .ab-score{color:var(--r)}
 .ab-label{font-size:8px;font-weight:700;letter-spacing:.08em;margin-top:1px}
 .ab-enter .ab-label{color:rgba(0,240,122,.6)} .ab-watch .ab-label{color:rgba(255,58,140,.6)} .ab-block .ab-label{color:rgba(255,45,78,.6)}
+.ab-ready{background:rgba(43,159,255,.10);border:1.5px solid rgba(43,159,255,.32)}
+.ab-ready .ab-score{color:var(--bl)} .ab-ready .ab-label{color:rgba(43,159,255,.65)}
 
 .card-row2{display:flex;align-items:baseline;gap:10px;margin-bottom:8px}
 .card-price{font-family:var(--mono);font-size:28px;color:var(--t)}
@@ -359,6 +363,9 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
 .mc-verdict-enter .mc-ac{color:rgba(0,240,122,.65)}
 .mc-verdict-watch .mc-ac{color:rgba(255,58,140,.65)}
 .mc-verdict-block .mc-ac{color:rgba(255,45,78,.65)}
+.mc-verdict-ready{background:rgba(43,159,255,.10);border:1.5px solid rgba(43,159,255,.35)}
+.mc-verdict-ready .mc-score{color:var(--bl)}
+.mc-verdict-ready .mc-ac{color:rgba(43,159,255,.65)}
 /* ★ 2026-05-27: 점수·액션 분리 박스 — 측정값(점수)과 판정(액션)을 시각적으로 분리 */
 .split-badge{display:flex;gap:4px;flex-shrink:0;align-items:stretch}
 .sb-score,.sb-action{display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:8px;border:1.5px solid;padding:6px 8px;min-width:38px;text-align:center;line-height:1}
@@ -368,6 +375,7 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
 .sb-enter{background:rgba(0,240,122,.10);border-color:rgba(0,240,122,.35);color:var(--g)}
 .sb-watch{background:rgba(255,58,140,.08);border-color:rgba(255,58,140,.28);color:var(--a)}
 .sb-block{background:rgba(255,45,78,.08);border-color:rgba(255,45,78,.28);color:var(--r)}
+.sb-ready .sb-score{color:var(--bl)} .sb-ready .sb-action{color:var(--bl)}
 /* 게이트 BLOCK 시 점수에 취소선 — 점수는 통과했지만 하드게이트 차단을 시각화 */
 .sb-score-blocked{text-decoration:line-through;text-decoration-thickness:2px;opacity:0.55}
 .mc-price-row{display:flex;align-items:baseline;gap:8px;margin-bottom:10px;flex-wrap:wrap}
@@ -701,10 +709,10 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
 <!-- MOMO 설정 -->
 <div class="scroll" id="page-momo-settings" style="display:none">
 <div class="settings">
-  <div class="sg-title">Claude API</div>
-  <div class="sg-row" style="flex-direction:column;align-items:flex-start">
-    <div><div class="sg-label">API Key</div><div class="sg-sub">console.anthropic.com</div></div>
-    <input class="key-input" type="password" id="apiKeyInput" placeholder="sk-ant-..." oninput="save('apexKey',this.value)">
+  <div class="sg-title">Claude AI</div>
+  <div class="sg-row">
+    <div><div class="sg-label">AI 분석</div><div class="sg-sub">Cloudflare Worker 경유 (키 불필요)</div></div>
+    <div style="font-family:var(--mono);font-size:11px;color:var(--g)" id="aiWorkerStatus">✓ Worker 연결됨</div>
   </div>
 
   <div class="sg-title">DART API (금융감독원 전자공시)</div>
@@ -955,7 +963,6 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
 // 전역 상태
 // ═══════════════════════════════════════
 var G = {
-  apiKey:    localStorage.getItem('apexKey') || '',
   dartApiKey: localStorage.getItem('dartApiKey') || '',
   ntfy:     localStorage.getItem('ntfyCh') || '',
   alerts:   JSON.parse(localStorage.getItem('apexAlerts')||'[]'),
@@ -979,7 +986,6 @@ var G_journal = JSON.parse(localStorage.getItem('reconJournal')||'[]');
 var G_jFilters = { momo:'today', swing:'today', core:'today' };
 
 // 초기값 로드
-if(G.apiKey){ document.getElementById('apiKeyInput').value = G.apiKey; }
 if(G.ntfy)  { document.getElementById('ntfyChInput').value = G.ntfy; }
 if(G.dartApiKey){ var _di=document.getElementById('dartApiKeyInput'); if(_di) _di.value=G.dartApiKey; }
 
@@ -1138,13 +1144,11 @@ function switchSubTab(sub){
 }
 
 function updateKeyStatus(){
-  var hasKey = !!G.apiKey;
+  // AI 키는 Cloudflare Worker 환경변수에 보관 — 브라우저에 키 없음
   var swingEl = document.getElementById('swingKeyStatus');
   var coreEl  = document.getElementById('coreKeyStatus');
-  if(swingEl) swingEl.textContent = hasKey ? '✓ 연결됨' : '미설정';
-  if(swingEl) swingEl.style.color = hasKey ? 'var(--g)' : 'var(--r)';
-  if(coreEl)  coreEl.textContent  = hasKey ? '✓ 연결됨' : '미설정';
-  if(coreEl)  coreEl.style.color  = hasKey ? 'var(--g)' : 'var(--r)';
+  if(swingEl){ swingEl.textContent = '✓ Worker AI'; swingEl.style.color = 'var(--g)'; }
+  if(coreEl) { coreEl.textContent  = '✓ Worker AI'; coreEl.style.color  = 'var(--g)'; }
 }
 
 // ═══════════════════════════════════════
@@ -1173,10 +1177,6 @@ function updateClock(){
 
   var badge = document.getElementById('phaseBadge');
   // NXT_AFTER는 별도 표시
-  var badgePhase = (newMomoPhase==='NXT_AFTER') ? 'NXT' : phase;
-  badge.textContent = badgePhase;
-  badge.className = 'phase-badge phase-'+(newMomoPhase==='NXT_AFTER'?'LATE':phase);
-
   // ── marketPhase (MOMO 시간대) 실시간 동기화 — 한국 기준 ──
   // NXT(넥스트레이드): 08:00~20:00 / KRX 정규: 08:30~15:30
   var newMomoPhase;
@@ -1203,6 +1203,11 @@ function updateClock(){
   }
   // NXT_AFTER는 NXT 종목에서만 의미 있음 — CLOSED 대신 별도 구분
   G._isNxtHours = (newMomoPhase==='NXT_AFTER' || (hm>=800&&hm<830&&day>0&&day<6));
+
+  // ── 배지 표시 (newMomoPhase 계산 완료 후 — 호이스팅 버그 수정 2026-06) ──
+  var badgePhase = (newMomoPhase==='NXT_AFTER') ? 'NXT' : phase;
+  badge.textContent = badgePhase;
+  badge.className = 'phase-badge phase-'+(newMomoPhase==='NXT_AFTER'?'LATE':phase);
 
   // ── 국면 변경 감지 → stale 배너 표시 ──
   if(G.marketPhase && G.marketPhase !== newMomoPhase){
@@ -2732,37 +2737,108 @@ function score_swing(s){
 // ═══════════════════════════════════════════════════════════
 // 공통 스캐너 결과 추적 시스템 (MOMO / SWING / CORE)
 // ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// TRACK v2 — 성과 추적 재설계 (2026-06-12)
+// ═══════════════════════════════════════════════════════════════
+
 var TRACK_CFG = {
   momo:  { key:'reconkr_track_momo',  periods:[1,3],   labels:['1일','3일'],   color:'var(--a)',  prefix:'mo' },
   swing: { key:'reconkr_track_swing', periods:[5,10],  labels:['5일','10일'],  color:'var(--bl)', prefix:'sw' },
   core:  { key:'reconkr_track_core',  periods:[20,60], labels:['20일','60일'], color:'var(--pu)', prefix:'co' },
 };
-var TRACK_MAX = 500; // 2026-05-27 Plan B: 150 → 500 (Worker KV 동기화 위해 확장)
+var TRACK_MAX = 500;
+
+// 왕복 비용 % (수수료 0.015×2 + 거래세 0.15 ≈ 0.18, 보수적 0.20)
+// 콘솔에서 변경: localStorage.setItem('trackCostRt','0.25'); 새로고침
+var TRACK_COST_RT = parseFloat(localStorage.getItem('trackCostRt')||'0.20');
+
+// 모드별 기본 손절폭 % (엔진 하드스탑 기준)
+var TRACK_STOP_DEFAULT = { momo:-4.5, swing:-3.5, core:-7.0 };
+
+var TRACK_MAX_TRIES   = 6;
+var TRACK_VERIFY_BATCH = 8;
 
 function loadTrack(mode){
   try{ return JSON.parse(localStorage.getItem(TRACK_CFG[mode].key)||'[]'); }
   catch(e){ return []; }
 }
 
+function _trkSave(mode, track){
+  track.sort(function(a,b){ return b.scannedAt - a.scannedAt; });
+  if(track.length > TRACK_MAX) track = track.slice(0, TRACK_MAX);
+  localStorage.setItem(TRACK_CFG[mode].key, JSON.stringify(track));
+  return track;
+}
+
+function _trkR2(v){ return parseFloat(Number(v).toFixed(2)); }
+
+function _trkKst(ts){
+  var k = new Date(new Date(ts).toLocaleString('en-US',{timeZone:'Asia/Seoul'}));
+  var p = function(n){ return String(n).padStart(2,'0'); };
+  return { ymd: ''+k.getFullYear()+p(k.getMonth()+1)+p(k.getDate()),
+           hm:  k.getHours()*100 + k.getMinutes() };
+}
+
+// 확정 가능한 최신 날짜 — 오늘은 KST 15:35 이후에만 확정
+function _trkFinalYmd(){
+  var now = _trkKst(Date.now());
+  if(now.hm >= 1535) return now.ymd;
+  var y = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Seoul'}));
+  y.setDate(y.getDate()-1);
+  var p = function(n){ return String(n).padStart(2,'0'); };
+  return ''+y.getFullYear()+p(y.getMonth()+1)+p(y.getDate());
+}
+
+// 벤치마크 지수 시리즈 (세션 10분 캐시) — '0001' KOSPI / '1001' KOSDAQ
+async function _trkBenchSeries(idxCode, needDays){
+  G._trkBench = G._trkBench || {};
+  var c = G._trkBench[idxCode];
+  if(c && (Date.now()-c.ts) < 10*60*1000 && c.candles.length >= needDays) return c.candles;
+  var raw = await fetchKisSectorDailyChart(idxCode, Math.max(needDays+10, 70));
+  var asc = raw.slice()
+    .sort(function(a,b){ return a.stck_bsop_date.localeCompare(b.stck_bsop_date); })
+    .map(function(x){ return { date:x.stck_bsop_date, close:parseFloat(x.bstp_nmix_prpr)||0 }; })
+    .filter(function(x){ return x.close > 0; });
+  G._trkBench[idxCode] = { ts: Date.now(), candles: asc };
+  return asc;
+}
+
+function _trkBenchPct(bench, d0date, dNdate){
+  function closeAt(date){
+    var last = null;
+    for(var i=0;i<bench.length;i++){
+      if(bench[i].date <= date) last = bench[i].close;
+      else break;
+    }
+    return last;
+  }
+  var a = closeAt(d0date), b = closeAt(dNdate);
+  return (a && b && a > 0) ? (b/a - 1) * 100 : null;
+}
+
+// ── 스크리너 결과 저장 (scoreType:'list') ──
 function saveTrackResults(mode, candidates){
-  var cfg   = TRACK_CFG[mode];
+  var cfg = TRACK_CFG[mode];
   if(!cfg) return;
   var track = loadTrack(mode);
   var now   = Date.now();
-  var today = new Date().toISOString().slice(0,10);
+  var kst   = _trkKst(now);
   var minScore = mode==='momo' ? 50 : 40;
 
   candidates.forEach(function(s){
     if((s._score||0) < minScore) return;
-    var code = (s.symbol||'').replace(/\.(KS|KQ)$/i,'');
-    if(track.some(function(t){ return t.code===code && t.scannedAt > now-86400000; })) return;
+    if(!(s.price > 0)) return;
+    var code = (s.symbol||'').replace(/\.(KS|KQ|KN)$/i,'');
+    if(track.some(function(t){
+      return t.code===code && (t.scoreType||'list')==='list' && t.scannedAt > now-86400000;
+    })) return;
 
     var d = s._daily || {};
     var cond = {};
     if(mode==='momo'){
       cond = {
-        gap_pct:      parseFloat((s.chgPct||0).toFixed(1)),
-        tv_ratio:     parseFloat((s.tvRatio||0).toFixed(1)),
+        gap_pct:      _trkR2(s.chgPct||0),
+        tv_ratio:     _trkR2(s.tvRatio||0),
         vwap_above:   s._vwapPct!==null&&s._vwapPct!==undefined ? s._vwapPct>=0 : null,
         ma_aligned:   !!(d.is_aligned_momo),
         high20_break: !!(d.high20 && (s.price||0) >= d.high20*0.99),
@@ -2772,8 +2848,8 @@ function saveTrackResults(mode, candidates){
       cond = {
         ma60_above:     !!(d.ma60 && (s.price||0) > d.ma60),
         ma_aligned:     !!d.is_aligned,
-        ma20_gap:       d.ma20_gap!=null ? parseFloat(d.ma20_gap.toFixed(1)) : null,
-        pullback_depth: d.pullback_depth_pct!=null ? parseFloat(d.pullback_depth_pct.toFixed(1)) : null,
+        ma20_gap:       d.ma20_gap!=null ? _trkR2(d.ma20_gap) : null,
+        pullback_depth: d.pullback_depth_pct!=null ? _trkR2(d.pullback_depth_pct) : null,
         vol_quiet:      !!d.pullback_vol_quiet,
         rsi14:          d.rsi14||null,
         ma60_slope_pos: d.ma60_slope!=null ? d.ma60_slope>=0 : null,
@@ -2782,82 +2858,228 @@ function saveTrackResults(mode, candidates){
       cond = {
         inst_buy:   (s._mrbn||0)>0||(s._frgn||0)>0,
         frgn_buy:   (s._frgn||0)>0,
-        vol_trend:  parseFloat((s.volRatio||0).toFixed(1)),
-        ma20_gap:   d.ma20_gap!=null ? parseFloat(d.ma20_gap.toFixed(1)) : null,
+        vol_trend:  _trkR2(s.volRatio||0),
+        ma20_gap:   d.ma20_gap!=null ? _trkR2(d.ma20_gap) : null,
         cap_large:  (s.cap||0)>=5000,
-        nxt:        _NXT_CODES.has(code),
+        nxt:        (typeof _NXT_CODES!=='undefined') ? _NXT_CODES.has(code) : false,
       };
     }
 
-    var entry = {
+    track.push({
+      schema:      2,
+      scoreType:   'list',
       id:          cfg.prefix+'_'+now+'_'+code,
       code:        code,
       name:        s.name||(masterByCode(code)||{}).name||code,
       symbol:      s.symbol,
       scannedAt:   now,
-      scanDate:    today,
+      scanDate:    kst.ymd.slice(0,4)+'-'+kst.ymd.slice(4,6)+'-'+kst.ymd.slice(6,8),
+      scanHM:      kst.hm,
       scanPrice:   s.price||0,
       score:       s._score||0,
+      stopPct:     TRACK_STOP_DEFAULT[mode],
       conditions:  cond,
       poolSources: s._poolSources||[],
-      p1: null, p2: null,
+      p1: null, p2: null, path: null,
+      tries: 0,
       status: 'pending',
-    };
-    track.push(entry);
+    });
   });
 
-  track.sort(function(a,b){ return b.scannedAt-a.scannedAt; });
-  if(track.length > TRACK_MAX) track = track.slice(0, TRACK_MAX);
-  localStorage.setItem(cfg.key, JSON.stringify(track));
-  // ★ Plan B (2026-05-27): Worker로 비동기 동기화 (실패해도 로컬은 정상)
+  _trkSave(mode, track);
   trackSync(mode);
 }
 
-async function checkTrackUpdates(mode){
-  var cfg   = TRACK_CFG[mode];
+// ── 단일 분석(엔진) 결과 저장 (scoreType:'engine') ──
+// runSingleScan에서 saveToHistory 직후 호출
+function trackFromAnalysis(mode, r){
+  try{
+    var cfg = TRACK_CFG[mode];
+    if(!cfg || !r || r._openTrade) return;
+    if(!(r.price > 0)) return;
+    if(r.action !== 'ENTER' && r.action !== 'WATCH' && r.action !== 'READY') return;
+
+    var now   = Date.now();
+    var kst   = _trkKst(now);
+    var code  = (r.ticker||'').replace(/\.(KS|KQ|KN)$/i,'');
+    var track = loadTrack(mode);
+    if(track.some(function(t){
+      return t.code===code && t.scoreType==='engine' && t.scannedAt > now-86400000;
+    })) return;
+
+    var stopPct = TRACK_STOP_DEFAULT[mode];
+    if(r.stop && r.entry && r.entry > 0 && r.stop < r.entry){
+      stopPct = Math.max(-15, Math.min(-1, _trkR2((r.stop/r.entry - 1)*100)));
+    }
+
+    track.push({
+      schema:    2,
+      scoreType: 'engine',
+      id:        cfg.prefix+'e_'+now+'_'+code,
+      code:      code,
+      name:      r.displayName||code,
+      symbol:    r.ticker,
+      scannedAt: now,
+      scanDate:  kst.ymd.slice(0,4)+'-'+kst.ymd.slice(4,6)+'-'+kst.ymd.slice(6,8),
+      scanHM:    kst.hm,
+      scanPrice: r.price,
+      score:     r.score||0,
+      action:    r.action,
+      stopPct:   stopPct,
+      engineLevels: { entry:r.entry||null, stop:r.stop||null, t1:r.target1||null, t2:r.target2||null },
+      conditions: { phase: G.marketPhase||'' },
+      p1: null, p2: null, path: null,
+      tries: 0,
+      status: 'pending',
+    });
+
+    _trkSave(mode, track);
+    trackSync(mode);
+  }catch(e){ console.warn('[trackFromAnalysis]', e.message); }
+}
+
+// ── 검증 — 일봉 사후 조회로 정확한 N거래일 종가 + 경로 지표 ──
+async function verifyTrack(mode){
+  var cfg = TRACK_CFG[mode];
   if(!cfg) return;
+  if(!(KIS.appKey && KIS.appSecret)){
+    console.warn('[verifyTrack] KIS 미연결 — 검증은 KIS 일봉 필요');
+    return;
+  }
   var track = loadTrack(mode);
   var now   = Date.now();
-  var updated = false;
-  var p1Days  = cfg.periods[0];
-  var p2Days  = cfg.periods[1];
+  var p1Days = cfg.periods[0], p2Days = cfg.periods[1];
+  var finalYmd = _trkFinalYmd();
 
-  var toUpdate = track.filter(function(t){
-    if(t.status==='complete') return false;
-    var td = (now - t.scannedAt) / 86400000 * 5/7;
-    return (!t.p1 && td >= p1Days) || (!t.p2 && td >= p2Days);
-  }).slice(0, 10);
+  var todo = track.filter(function(t){
+    if(t.schema !== 2) return false;
+    if(t.status === 'complete' || t.status === 'error') return false;
+    return (now - t.scannedAt) >= p1Days * 86400000 * 0.9;
+  }).slice(0, TRACK_VERIFY_BATCH);
+  if(!todo.length){ renderTrack(mode); return; }
 
-  if(!toUpdate.length) return;
+  var anyUpdate = false;
 
-  var results = await Promise.allSettled(
-    toUpdate.map(function(t){ return fetchKisPrice(t.code); })
-  );
+  for(var ti=0; ti<todo.length; ti++){
+    var t = todo[ti];
+    try{
+      var raw = await fetchKisDailyChartLong(t.symbol || (t.code+'.KS'), p2Days + 30);
+      if(!raw || !raw.length){
+        t.tries = (t.tries||0) + 1;
+        if(t.tries >= TRACK_MAX_TRIES){ t.status='error'; anyUpdate=true; }
+        continue;
+      }
+      var asc = raw.slice()
+        .sort(function(a,b){ return a.stck_bsop_date.localeCompare(b.stck_bsop_date); })
+        .map(function(c){ return {
+          date:  c.stck_bsop_date,
+          open:  parseFloat(c.stck_oprc)||0,
+          high:  parseFloat(c.stck_hgpr)||0,
+          low:   parseFloat(c.stck_lwpr)||0,
+          close: parseFloat(c.stck_clpr)||0,
+        };})
+        .filter(function(c){ return c.close > 0; });
 
-  toUpdate.forEach(function(t, i){
-    if(results[i].status !== 'fulfilled') return;
-    var cp  = results[i].value.price;
-    var pct = t.scanPrice>0 ? parseFloat(((cp/t.scanPrice-1)*100).toFixed(2)) : 0;
-    var td  = (now - t.scannedAt) / 86400000 * 5/7;
-    var dt  = new Date().toISOString().slice(0,10);
-    if(!t.p1 && td >= p1Days)  { t.p1 = {price:cp,pct:pct,date:dt}; updated=true; }
-    if(!t.p2 && td >= p2Days)  { t.p2 = {price:cp,pct:pct,date:dt}; t.status='complete'; updated=true; }
-    else if(t.p1 && !t.p2)    { t.status='p1_done'; }
-  });
+      // D0 결정: 09:00 이후 스캔 → 스캔일 이하 / 이전 → 스캔일 미만
+      var scan = _trkKst(t.scannedAt);
+      var d0 = -1;
+      for(var i=asc.length-1; i>=0; i--){
+        var dd = asc[i].date;
+        if(scan.hm >= 900 ? dd <= scan.ymd : dd < scan.ymd){ d0 = i; break; }
+      }
+      if(d0 < 0){
+        t.tries = (t.tries||0) + 1;
+        if(t.tries >= TRACK_MAX_TRIES){ t.status='error'; anyUpdate=true; }
+        continue;
+      }
 
-  if(updated){
-    localStorage.setItem(cfg.key, JSON.stringify(track));
+      var base = t.scanPrice > 0 ? t.scanPrice : asc[d0].close;
+      var p1i = d0 + p1Days, p2i = d0 + p2Days;
+
+      // 벤치마크
+      var bench = [];
+      try{
+        var idxCode = /\.KQ$/i.test(t.symbol||'') ? '1001' : '0001';
+        bench = await _trkBenchSeries(idxCode, p2Days + 15);
+      }catch(eB){ bench = []; }
+
+      function mkPoint(idx){
+        var c = asc[idx];
+        if(!c || !(c.close > 0)) return null;
+        if(c.date > finalYmd) return null;
+        var pct = _trkR2((c.close/base - 1) * 100);
+        var bp  = bench.length ? _trkBenchPct(bench, asc[d0].date, c.date) : null;
+        return {
+          date:  c.date,
+          price: c.close,
+          pct:   pct,
+          bench: bp!=null ? _trkR2(bp) : null,
+          alpha: bp!=null ? _trkR2(pct - bp) : null,
+        };
+      }
+
+      if(!t.p1 && asc.length > p1i){ var q1 = mkPoint(p1i); if(q1){ t.p1 = q1; anyUpdate = true; } }
+      if(!t.p2 && asc.length > p2i){ var q2 = mkPoint(p2i); if(q2){ t.p2 = q2; anyUpdate = true; } }
+
+      // 경로 지표: D0+1 ~ min(p2i, 마지막 캔들)
+      var endI = Math.min(p2i, asc.length - 1);
+      if(endI > d0){
+        var stopPct = (typeof t.stopPct === 'number') ? t.stopPct : TRACK_STOP_DEFAULT[mode];
+        var stopLv  = base * (1 + stopPct/100);
+        var mae=0, mfe=0, maeDay=0, mfeDay=0, stopDay=null, stopExit=null;
+        for(var k=d0+1; k<=endI; k++){
+          var c2 = asc[k], dayN = k - d0;
+          if(c2.low > 0){
+            var lo = (c2.low/base - 1) * 100;
+            if(lo < mae){ mae = lo; maeDay = dayN; }
+          }
+          if(c2.high > 0){
+            var hi = (c2.high/base - 1) * 100;
+            if(hi > mfe){ mfe = hi; mfeDay = dayN; }
+          }
+          if(stopDay === null && c2.low > 0 && c2.low <= stopLv){
+            stopDay = dayN;
+            stopExit = (c2.open > 0 && c2.open <= stopLv)
+              ? (c2.open/base - 1) * 100
+              : stopPct;
+          }
+        }
+        var newPath = {
+          mae: _trkR2(mae), maeDay: maeDay,
+          mfe: _trkR2(mfe), mfeDay: mfeDay,
+          stopHit: stopDay !== null,
+          stopDay: stopDay,
+          stopExitPct: stopDay !== null ? _trkR2(stopExit) : null,
+          days: endI - d0,
+          final: (endI === p2i) && asc[p2i] && asc[p2i].date <= finalYmd,
+        };
+        if(JSON.stringify(newPath) !== JSON.stringify(t.path||{})){ t.path = newPath; anyUpdate = true; }
+      }
+
+      var newStatus = t.p2 ? 'complete' : (t.p1 ? 'p1_done' : t.status);
+      if(newStatus !== t.status){ t.status = newStatus; anyUpdate = true; }
+      if(t.tries) { t.tries = 0; }
+
+      await new Promise(function(res){ setTimeout(res, 250); });
+
+    }catch(e){
+      console.warn('[verifyTrack]', t.code, e.message);
+      t.tries = (t.tries||0) + 1;
+      if(t.tries >= TRACK_MAX_TRIES){ t.status='error'; anyUpdate=true; }
+    }
+  }
+
+  if(anyUpdate){
+    _trkSave(mode, track);
     renderTrack(mode);
-    // ★ Plan B (2026-05-27): p1/p2 갱신 후 클라우드 동기화
     trackSync(mode);
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// ★ TRACK 멀티 디바이스 동기화 (Plan B, 2026-05-27)
-// 모바일·PC·아이패드 어디서 스캔하든 한 곳에 누적
-// Worker /reconkr/track 엔드포인트 사용 (holdSync 패턴 그대로)
-// ═══════════════════════════════════════════════════════════════
+// 기존 HTML 버튼 호환 래퍼
+async function checkTrackUpdates(mode){ return verifyTrack(mode); }
+
+// Worker 멀티디바이스 동기화
 async function trackSync(mode){
   var cfg = TRACK_CFG[mode];
   if(!cfg) return false;
@@ -2889,7 +3111,6 @@ async function trackPull(mode){
   }
 }
 
-// id 기준 dedup + p1/p2 검증결과 보존 (어느 디바이스에서 검증한 결과도 안 잃음)
 function trackMerge(local, cloud){
   var byId = {};
   local.forEach(function(t){ byId[t.id] = t; });
@@ -2897,10 +3118,14 @@ function trackMerge(local, cloud){
     var ex = byId[t.id];
     if(!ex){ byId[t.id] = t; return; }
     var merged = Object.assign({}, ex, t);
-    if(ex.p1 && !t.p1) merged.p1 = ex.p1;
-    if(ex.p2 && !t.p2) merged.p2 = ex.p2;
-    if(merged.p2)      merged.status = 'complete';
-    else if(merged.p1) merged.status = 'p1_done';
+    if(ex.p1  && !t.p1)  merged.p1   = ex.p1;
+    if(ex.p2  && !t.p2)  merged.p2   = ex.p2;
+    if(ex.path && !t.path) merged.path = ex.path;
+    if(ex.path && t.path && (ex.path.days||0) > (t.path.days||0)) merged.path = ex.path;
+    if(merged.status !== 'error'){
+      if(merged.p2)      merged.status = 'complete';
+      else if(merged.p1) merged.status = 'p1_done';
+    }
     byId[t.id] = merged;
   });
   var out = Object.keys(byId).map(function(k){ return byId[k]; });
@@ -2909,102 +3134,160 @@ function trackMerge(local, cloud){
   return out;
 }
 
-// 외부에서 부르는 진입점: 클라우드 풀 → 로컬과 머지 → 저장 → (필요시) 푸시
 async function trackPullAndMerge(mode){
   var cloud = await trackPull(mode);
   if(!cloud) return null;
   var local  = loadTrack(mode);
   var merged = trackMerge(local, cloud);
   localStorage.setItem(TRACK_CFG[mode].key, JSON.stringify(merged));
-  // ★ 2026-05-27 fix: 로컬에만 있던 데이터를 클라우드로 자동 푸시
-  // (mergeTrack은 union이라 cloud의 모든 id는 merged에 있음 → 길이 차이 = 로컬-only 데이터)
-  // p1/p2 차이까지 정확히 잡으려면 비싸니 길이 기반 휴리스틱으로 충분
   if(merged.length > cloud.length){
-    trackSync(mode); // fire-and-forget
+    trackSync(mode);
   }
   return merged;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// C2: 고급 성과 통계 — 승률·기대값·구간별 분석
-// 콘솔에서 `showPerformanceStats()` 호출 시 전체 대시보드 출력
-// 리스크:리워드 기반 기대값 계산으로 "이 엔진이 실제로 돈이 되냐?" 판정
-// ═══════════════════════════════════════════════════════════════
+// ── calcPerformanceStats v2 ──
+function _trkMedian(arr){
+  if(!arr.length) return null;
+  var a = arr.slice().sort(function(x,y){ return x-y; });
+  var m = Math.floor(a.length/2);
+  return a.length%2 ? a[m] : (a[m-1]+a[m])/2;
+}
+function _trkPctile(arr, p){
+  if(!arr.length) return null;
+  var a = arr.slice().sort(function(x,y){ return x-y; });
+  var idx = Math.min(a.length-1, Math.max(0, Math.round((a.length-1)*p)));
+  return a[idx];
+}
+
 function calcPerformanceStats(mode){
   var cfg = TRACK_CFG[mode];
   if(!cfg) return null;
   var track = loadTrack(mode);
+  var cost  = TRACK_COST_RT;
 
-  // 검증 완료된 것만 (p1 또는 p2 있음)
-  var done = track.filter(function(t){ return t.p1||t.p2; });
-  if(!done.length) return { total: track.length, done: 0 };
+  var v2     = track.filter(function(t){ return t.schema === 2 && t.status !== 'error'; });
+  var legacy = track.filter(function(t){ return t.schema !== 2 && (t.p1||t.p2); }).length;
+  var errors = track.filter(function(t){ return t.status === 'error'; }).length;
 
-  var finalPct = function(t){ return t.p2?t.p2.pct:(t.p1?t.p1.pct:0); };
-
-  // 전체
-  var wins = done.filter(function(t){ return finalPct(t)>0; });
-  var losses = done.filter(function(t){ return finalPct(t)<0; });
-  var flats = done.filter(function(t){ return finalPct(t)===0; });
-  var avgWin  = wins.length   ? wins.reduce(function(s,t){return s+finalPct(t);},0)/wins.length   : 0;
-  var avgLoss = losses.length ? losses.reduce(function(s,t){return s+finalPct(t);},0)/losses.length : 0;
-  var winRate = done.length ? wins.length / done.length : 0;
-
-  // 기대값 (EV) = winRate * avgWin + lossRate * avgLoss
-  // "100번 돌리면 평균 몇 % 수익?" 지표
-  var ev = winRate * avgWin + (1 - winRate) * avgLoss;
-
-  // Profit Factor = 총이익 / 총손실 (1.0 초과해야 돈됨)
-  var totalProfit = wins.reduce(function(s,t){return s+finalPct(t);},0);
-  var totalLoss   = Math.abs(losses.reduce(function(s,t){return s+finalPct(t);},0));
-  var profitFactor = totalLoss > 0 ? totalProfit / totalLoss : null;
-
-  // 점수 구간별 분석 (60+ vs 70+ vs 80+)
-  var byScore = [
-    { range: '50~59', filter: function(t){ return t.score>=50 && t.score<60; } },
-    { range: '60~69', filter: function(t){ return t.score>=60 && t.score<70; } },
-    { range: '70~79', filter: function(t){ return t.score>=70 && t.score<80; } },
-    { range: '80+',   filter: function(t){ return t.score>=80; } },
-  ].map(function(bucket){
-    var inRange = done.filter(bucket.filter);
-    if(!inRange.length) return Object.assign({}, bucket, { count:0 });
-    var w = inRange.filter(function(t){ return finalPct(t)>0; });
-    var avg = inRange.reduce(function(s,t){return s+finalPct(t);},0)/inRange.length;
+  function horizonStats(items, sel){
+    var rows = [];
+    items.forEach(function(t){
+      var p = sel(t);
+      if(!p || typeof p.pct !== 'number') return;
+      rows.push({ net: p.pct - cost, alpha: (typeof p.alpha==='number') ? p.alpha : null, t: t });
+    });
+    if(!rows.length) return { n:0 };
+    var nets   = rows.map(function(r){ return r.net; });
+    var wins   = nets.filter(function(v){ return v > 0; });
+    var losses = nets.filter(function(v){ return v < 0; });
+    var sumW   = wins.reduce(function(s,v){ return s+v; }, 0);
+    var sumL   = Math.abs(losses.reduce(function(s,v){ return s+v; }, 0));
+    var alphas = rows.map(function(r){ return r.alpha; }).filter(function(v){ return v !== null; });
     return {
-      range: bucket.range,
-      count: inRange.length,
-      winRate: w.length/inRange.length,
-      avgReturn: avg,
+      n:        rows.length,
+      winRate:  wins.length / rows.length,
+      wins:     wins.length,
+      losses:   losses.length,
+      flats:    rows.length - wins.length - losses.length,
+      ev:       _trkR2(nets.reduce(function(s,v){ return s+v; },0) / rows.length),
+      avgWin:   wins.length   ? _trkR2(sumW / wins.length)    : 0,
+      avgLoss:  losses.length ? _trkR2(-sumL / losses.length) : 0,
+      profitFactor: sumL > 0 ? _trkR2(sumW / sumL) : (sumW > 0 ? Infinity : null),
+      alpha:    alphas.length ? _trkR2(alphas.reduce(function(s,v){return s+v;},0)/alphas.length) : null,
+      alphaN:   alphas.length,
+      rows:     rows,
+    };
+  }
+
+  var h1 = horizonStats(v2, function(t){ return t.p1; });
+  var h2 = horizonStats(v2, function(t){ return t.p2; });
+
+  // 스탑 규율 반영 EV
+  var stopRows = [];
+  v2.forEach(function(t){
+    if(!t.p2 || !t.path || !t.path.final) return;
+    var gross = t.path.stopHit ? t.path.stopExitPct : t.p2.pct;
+    if(typeof gross !== 'number') return;
+    stopRows.push(gross - cost);
+  });
+  var stopAdj = null;
+  if(stopRows.length){
+    var sw = stopRows.filter(function(v){ return v>0; });
+    stopAdj = {
+      n: stopRows.length,
+      ev: _trkR2(stopRows.reduce(function(s,v){return s+v;},0)/stopRows.length),
+      winRate: sw.length/stopRows.length,
+    };
+  }
+
+  // 경로 분포
+  var paths = v2.map(function(t){ return t.path; }).filter(Boolean);
+  var pathStats = null;
+  if(paths.length){
+    var mfes = paths.map(function(p){ return p.mfe; });
+    var maes = paths.map(function(p){ return p.mae; });
+    var hits = paths.filter(function(p){ return p.stopHit; }).length;
+    pathStats = {
+      n:          paths.length,
+      mfeMedian:  _trkR2(_trkMedian(mfes)),
+      mfeP75:     _trkR2(_trkPctile(mfes, 0.75)),
+      maeMedian:  _trkR2(_trkMedian(maes)),
+      stopHitRate: _trkR2(hits / paths.length * 100),
+    };
+  }
+
+  // 점수 구간별
+  var byScore = [
+    { range:'50~59', lo:50, hi:60 },
+    { range:'60~69', lo:60, hi:70 },
+    { range:'70~79', lo:70, hi:80 },
+    { range:'80+',   lo:80, hi:1e9 },
+  ].map(function(b){
+    var items = (h1.rows||[]).filter(function(r){ return r.t.score >= b.lo && r.t.score < b.hi; });
+    if(!items.length) return { range:b.range, count:0 };
+    var w = items.filter(function(r){ return r.net > 0; });
+    return {
+      range:    b.range,
+      count:    items.length,
+      winRate:  w.length / items.length,
+      avgReturn:_trkR2(items.reduce(function(s,r){return s+r.net;},0)/items.length),
+      lowConf:  items.length < 10,
     };
   });
 
-  // 최근 30일 vs 전체 (최근 추세)
+  // scoreType별
+  function typeStats(type){
+    var items = v2.filter(function(t){ return (t.scoreType||'list') === type; });
+    return horizonStats(items, function(t){ return t.p1; });
+  }
+  var byType = { list: typeStats('list'), engine: typeStats('engine') };
+
+  // 최근 30일
   var thirtyAgo = Date.now() - 30*86400000;
-  var recent = done.filter(function(t){ return t.scannedAt >= thirtyAgo; });
-  var recentWins = recent.filter(function(t){ return finalPct(t)>0; });
-  var recentWR = recent.length ? recentWins.length/recent.length : null;
-  var recentEV = null;
-  if(recent.length){
-    var rW = recentWins.length ? recentWins.reduce(function(s,t){return s+finalPct(t);},0)/recentWins.length : 0;
-    var rL = (recent.length-recentWins.length) ? recent.filter(function(t){return finalPct(t)<=0;}).reduce(function(s,t){return s+finalPct(t);},0)/(recent.length-recentWins.length) : 0;
-    recentEV = recentWR*rW + (1-recentWR)*rL;
+  var recentRows = (h1.rows||[]).filter(function(r){ return r.t.scannedAt >= thirtyAgo; });
+  var recent30 = { count: recentRows.length, winRate: null, ev: null };
+  if(recentRows.length){
+    var rw = recentRows.filter(function(r){ return r.net > 0; });
+    recent30.winRate = rw.length / recentRows.length;
+    recent30.ev = _trkR2(recentRows.reduce(function(s,r){return s+r.net;},0)/recentRows.length);
   }
 
   return {
-    mode: mode,
-    total: track.length,
-    done: done.length,
-    wins: wins.length,
-    losses: losses.length,
-    flats: flats.length,
-    winRate: winRate,
-    avgWin: avgWin,
-    avgLoss: avgLoss,
-    ev: ev,
-    profitFactor: profitFactor,
-    byScore: byScore,
-    recent30: { count: recent.length, winRate: recentWR, ev: recentEV },
+    mode: mode, cost: cost,
+    // 하위호환 키
+    total: track.length, done: h1.n,
+    wins: h1.wins||0, losses: h1.losses||0, flats: h1.flats||0,
+    winRate: h1.winRate||0, avgWin: h1.avgWin||0, avgLoss: h1.avgLoss||0,
+    ev: h1.n ? h1.ev : null,
+    profitFactor: h1.n ? h1.profitFactor : null,
+    byScore: byScore, recent30: recent30,
+    // 신규
+    h1: h1, h2: h2, stopAdj: stopAdj, pathStats: pathStats,
+    byType: byType, legacy: legacy, errors: errors, v2Total: v2.length,
   };
 }
+
 
 function showPerformanceStats(){
   console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -3225,55 +3508,90 @@ function renderTrack(mode){
   }
 
   var l1 = cfg.labels[0], l2 = cfg.labels[1];
-
-  // C2: 고급 성과 통계 (기존 간이 통계 대체)
   var stats = calcPerformanceStats(mode);
   var statsHtml = '';
+
   if(stats && stats.done >= 3){
     var wr    = Math.round(stats.winRate*100);
     var wrCol = wr>=55?'var(--g)':wr>=45?'var(--gold)':'var(--r)';
     var evStr = stats.ev!=null ? (stats.ev>=0?'+':'')+stats.ev.toFixed(1)+'%' : '-';
     var evCol = stats.ev>=0 ? 'var(--g)' : 'var(--r)';
-    var pfStr = stats.profitFactor!=null ? stats.profitFactor.toFixed(1) : '-';
+    var pfStr = stats.profitFactor!=null && stats.profitFactor!==Infinity ? stats.profitFactor.toFixed(1) : '-';
     var pfCol = stats.profitFactor>=1.5 ? 'var(--g)' : stats.profitFactor>=1 ? 'var(--gold)' : 'var(--r)';
 
     statsHtml =
       '<div style="padding:8px 14px;border-bottom:1px solid var(--b);font-family:var(--mono);font-size:10px">'+
       '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:4px">'+
       '<span>추적 <b>'+stats.total+'</b></span>'+
-      '<span>검증 <b>'+stats.done+'</b></span>'+
+      '<span>검증('+l1+') <b>'+stats.done+'</b></span>'+
       '<span>승률 <b style="color:'+wrCol+'">'+wr+'%</b></span>'+
-      '<span>EV <b style="color:'+evCol+'">'+evStr+'</b></span>'+
+      '<span title="비용 '+stats.cost+'% 차감 평균 수익률">EV <b style="color:'+evCol+'">'+evStr+'</b></span>'+
       '<span title="Profit Factor: 총이익÷총손실 · 1.5+ 견고">PF <b style="color:'+pfCol+'">'+pfStr+'</b></span>'+
       '</div>';
 
-    // 점수 구간별 미니 바 (검증 2+ 있는 구간만)
+    var line2 = [];
+    if(stats.h2 && stats.h2.n >= 3){
+      line2.push(l2+': '+stats.h2.n+'건 · 승률 '+Math.round(stats.h2.winRate*100)+'% · EV '+(stats.h2.ev>=0?'+':'')+stats.h2.ev.toFixed(1)+'%');
+    }
+    if(stats.h1 && stats.h1.alpha != null){
+      line2.push('α(지수比) '+(stats.h1.alpha>=0?'+':'')+stats.h1.alpha.toFixed(1)+'%');
+    }
+    if(stats.stopAdj && stats.stopAdj.n >= 3){
+      line2.push('스탑반영 EV '+(stats.stopAdj.ev>=0?'+':'')+stats.stopAdj.ev.toFixed(1)+'% ('+stats.stopAdj.n+'건)');
+    }
+    if(line2.length){
+      statsHtml += '<div style="color:var(--t2);font-size:9px;margin-bottom:3px">'+line2.join(' · ')+'</div>';
+    }
+
+    if(stats.pathStats && stats.pathStats.n >= 5){
+      var ps = stats.pathStats;
+      statsHtml += '<div style="color:var(--t3);font-size:9px;margin-bottom:3px" '+
+        'title="MFE: 최대 순행폭 — T1 설계 근거 / MAE: 최대 역행폭 — 스탑폭 적정성 근거">'+
+        '경로 '+ps.n+'건 · MFE 중앙 +'+ps.mfeMedian+'% (p75 +'+ps.mfeP75+'%) · MAE 중앙 '+ps.maeMedian+'% · 스탑히트 '+ps.stopHitRate+'%'+
+        '</div>';
+    }
+
+    var bt = stats.byType;
+    if(bt && bt.engine && bt.engine.n >= 3){
+      statsHtml += '<div style="color:var(--t3);font-size:9px;margin-bottom:3px">'+
+        '리스트점수 '+(bt.list.n||0)+'건'+(bt.list.n?' EV '+(bt.list.ev>=0?'+':'')+bt.list.ev.toFixed(1)+'%':'')+
+        ' / 엔진점수 '+bt.engine.n+'건 EV '+(bt.engine.ev>=0?'+':'')+bt.engine.ev.toFixed(1)+'%'+
+        '</div>';
+    }
+
     var bucketsWithData = stats.byScore.filter(function(b){ return b.count>=2; });
     if(bucketsWithData.length >= 2){
       statsHtml += '<div style="margin-top:4px;padding-top:4px;border-top:1px dashed var(--b)">'+
-        '<div style="color:var(--t3);font-size:9px;margin-bottom:3px">점수 구간별 승률</div>'+
+        '<div style="color:var(--t3);font-size:9px;margin-bottom:3px">점수 구간별 승률 ('+l1+' · 비용차감 · n&lt;10 회색)</div>'+
         bucketsWithData.map(function(b){
           var wrb = Math.round(b.winRate*100);
-          var wrbCol = wrb>=55?'var(--g)':wrb>=45?'var(--gold)':'var(--r)';
+          var wrbCol = b.lowConf ? 'var(--t3)' : (wrb>=55?'var(--g)':wrb>=45?'var(--gold)':'var(--r)');
           return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:2px">'+
             '<span style="color:var(--t3);width:38px">'+b.range+'</span>'+
             '<div style="flex:1;height:3px;background:var(--bg3);border-radius:2px;overflow:hidden">'+
               '<div style="height:100%;width:'+wrb+'%;background:'+wrbCol+'"></div>'+
             '</div>'+
             '<span style="color:'+wrbCol+';width:32px;text-align:right">'+wrb+'%</span>'+
-            '<span style="color:var(--t3);width:20px;text-align:right">'+b.count+'건</span>'+
+            '<span style="color:var(--t3);width:24px;text-align:right">'+b.count+'건</span>'+
           '</div>';
         }).join('')+
         '</div>';
     }
 
-    // 최근 30일 vs 전체
     if(stats.recent30.count >= 3){
       var rWR = Math.round(stats.recent30.winRate*100);
       var rEV = stats.recent30.ev!=null ? (stats.recent30.ev>=0?'+':'')+stats.recent30.ev.toFixed(1)+'%' : '-';
       var trend = rWR > wr+5 ? '📈' : rWR < wr-5 ? '📉' : '→';
       statsHtml += '<div style="margin-top:4px;padding-top:4px;border-top:1px dashed var(--b);color:var(--t3);font-size:9px">'+
         '최근 30일: '+stats.recent30.count+'건 · 승률 '+rWR+'% · EV '+rEV+' '+trend+
+        '</div>';
+    }
+
+    if(stats.legacy || stats.errors){
+      statsHtml += '<div style="margin-top:3px;color:var(--t3);font-size:8px">'+
+        (stats.legacy ? '구버전 측정 '+stats.legacy+'건 통계 제외' : '')+
+        (stats.legacy && stats.errors ? ' · ' : '')+
+        (stats.errors ? '조회불가 '+stats.errors+'건 격리' : '')+
         '</div>';
     }
     statsHtml += '</div>';
@@ -3289,11 +3607,18 @@ function renderTrack(mode){
     '</div>';
 
   var rows = track.slice(0,30).map(function(t){
-    function fmtPct(v){ return v!=null?(v>=0?'<span style="color:var(--g)">+'+v+'%</span>':'<span style="color:var(--r)">'+v+'%</span>'):'<span style="color:var(--t3)">-</span>'; }
+    function fmtPct(v){
+      return v!=null
+        ? (v>=0?'<span style="color:var(--g)">+'+v+'%</span>':'<span style="color:var(--r)">'+v+'%</span>')
+        : '<span style="color:var(--t3)">-</span>';
+    }
+    var icon = t.status==='complete' ? '✓' : t.status==='error' ? '✕' : '⏳';
+    var stopMark = (t.path && t.path.stopHit) ? ' <span style="color:var(--r);font-size:9px" title="스탑선 터치 D+'+t.path.stopDay+'">⛔</span>' : '';
+    var typeMark = (t.scoreType==='engine') ? '<span style="color:var(--t3);font-size:8px">E</span> ' : '';
     return '<div style="display:flex;align-items:center;gap:6px;padding:6px 14px;border-bottom:1px solid var(--b);font-size:11px">'+
-      '<span style="font-family:var(--mono);min-width:14px;color:var(--t3)">'+(t.status==='complete'?'✓':'⏳')+'</span>'+
-      '<span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+t.name+'</span>'+
-      '<span style="font-family:var(--mono);font-size:10px;color:var(--t3);min-width:52px">'+t.scanDate+'</span>'+
+      '<span style="font-family:var(--mono);min-width:14px;color:var(--t3)">'+icon+'</span>'+
+      '<span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+typeMark+t.name+stopMark+'</span>'+
+      '<span style="font-family:var(--mono);font-size:10px;color:var(--t3);min-width:52px">'+(t.scanDate||'')+'</span>'+
       '<span style="font-family:var(--mono);min-width:26px;text-align:right;color:'+cfg.color+'">'+t.score+'</span>'+
       '<span style="font-family:var(--mono);min-width:44px;text-align:right">'+fmtPct(t.p1?t.p1.pct:null)+'</span>'+
       '<span style="font-family:var(--mono);min-width:44px;text-align:right">'+fmtPct(t.p2?t.p2.pct:null)+'</span>'+
@@ -3769,6 +4094,11 @@ function renderScreenerResults(mode){
     if(mode === 'swing' && s._score > 0){
       var remaining = 20; // Layer D 트리거 최대 20점
       predictBadge = '<div style="font-family:var(--mono);font-size:9px;color:var(--t3);margin-top:2px;text-align:right;opacity:0.7" title="리스트 점수는 Layer A+B+C(80pt 만점). 카드에서 Layer D(트리거) 최대 +20pt 추가 평가됨">+D(트리거) 카드서 ~+'+remaining+'pt</div>';
+    }
+    // ★ 2026-06: MOMO 리스트 점수(일봉구조 포함) ≠ 카드 엔진 점수(실시간 기반) — 괴리 고지
+    //   리스트는 정렬용 추정치, 카드는 momoEngine 실시간 판정. 사용자가 점수 차이에 놀라지 않도록 명시.
+    if(mode === 'momo' && s._score > 0){
+      predictBadge = '<div style="font-family:var(--mono);font-size:9px;color:var(--t3);margin-top:2px;text-align:right;opacity:0.7" title="리스트 점수는 일봉 구조 포함 정렬용 추정치입니다. 종목을 탭하면 실시간 기반 엔진 점수로 재평가되어 점수가 달라질 수 있습니다.">정렬용 추정 · 탭하면 실시간 재평가</div>';
     }
 
     html +=
@@ -6856,7 +7186,8 @@ function makePrompt(mode, ticker, ydata, swingData, openTrade, coreData){
 
   var kospiStat = G.spyIntraday
     ? 'KOSPI '+( G.spyIntraday.change_pct>=0?'+':'')+G.spyIntraday.change_pct+'% ('+G.spyIntraday.trend+')'
-      +( G.spyIntraday.vwap?' | VWAP ₩'+Math.round(G.spyIntraday.vwap).toLocaleString()+' '+(G.spyIntraday.aboveVwap?'위↑':'아래↓'):'')
+      +( G.spyIntraday.vwap?' | VWAP '+Math.round(G.spyIntraday.vwap).toLocaleString()+' '+(G.spyIntraday.aboveVwap?'위↑':'아래↓')
+        : G.spyIntraday.open?' | 시가 '+Math.round(G.spyIntraday.open).toLocaleString()+' '+(G.spyIntraday.aboveOpen?'위↑':'아래↓'):'')
     : '미확인 (데이터 없음)';
 
   var kospiMA120 = G.spyAboveMA200===true  ? 'KOSPI 경기선(120일) 위 → 정상 추세 장'
@@ -7385,7 +7716,7 @@ function getWhaleStage(r){
   var hasData = (r.price && r.price > 0) && (r.volume && r.volume > 0);
   if(!hasData){
     return { stage:'NORMAL', action:'WATCH',
-      label:'📊 데이터 없음 (장 마감)', warnings:[], cautions:[] };
+      label:(G.marketPhase==='PRE'?'📊 동시호가 — 체결 전':'📊 데이터 없음 (장 마감)'), warnings:[], cautions:[] };
   }
 
   // ── TOXIC: 즉시 BLOCK (불량 세력 확실) ──
@@ -7578,8 +7909,8 @@ function hardFilter(r, mode){
     if(spy.trend === 'down' && ws.action === 'ENTER'){
       r.warnings = (r.warnings||[]).concat(['[시장] KOSPI 하락 중 — 포지션 50% 이하 권고']);
     }
-    if(spy.aboveVwap === false && r.action === 'ENTER'){
-      r.warnings = (r.warnings||[]).concat(['[시장] KOSPI VWAP 아래 — 매도 구조 주의']);
+    if((spy.aboveOpen === false || spy.aboveVwap === false) && r.action === 'ENTER'){
+      r.warnings = (r.warnings||[]).concat(['[시장] KOSPI '+(spy.aboveOpen===false?'시가':'VWAP')+' 아래 — 당일 약세 주의']);
     }
   }
 
@@ -7735,8 +8066,9 @@ function momoEngine(ydata){
     } else {
       r.decision_path.push({gate:'시장',status:'pass',note:'KOSPI '+(kospiChg>=0?'+':'')+kospiChg.toFixed(1)+'%'});
     }
-    if(G.spyIntraday.aboveVwap === false){
-      r.warnings.push('[시장] KOSPI VWAP 아래 — 매도 구조');
+    var _kospiWeak = (G.spyIntraday.aboveOpen === false) || (G.spyIntraday.aboveVwap === false);
+    if(_kospiWeak){
+      r.warnings.push('[시장] KOSPI '+(G.spyIntraday.aboveOpen===false?'시가':'VWAP')+' 아래 — 당일 약세 구조');
     }
   } else {
     r.decision_path.push({gate:'시장',status:'pass',note:'KOSPI 데이터 없음'});
@@ -7827,12 +8159,18 @@ function momoEngine(ydata){
   // ══════════════════════════════════════════
   // 4. 액션 결정 — 단순 3단계
   // ══════════════════════════════════════════
-  if(_kospiWatchOnly){
+  if(_kospiWatchOnly && r.score >= 30){
+    // KOSPI 약하락 — ENTER 자격 있는 종목만 WATCH로 강등 (저점수는 아래 BLOCK 유지)
     r.action = 'WATCH';
-    r.decision_path.push({gate:'트리거',status:'watch',note:'KOSPI 강하락 — ENTER 금지'});
+    r.decision_path.push({gate:'트리거',status:'watch',note:'KOSPI 강하락 — ENTER 금지 ('+r.score+'pt)'});
   } else if(_chaseWatchFlag){
     r.action = 'WATCH';
     r.decision_path.push({gate:'트리거',status:'watch',note:'추격방지 +'+gap.toFixed(1)+'% — 점수 '+r.score+'pt이나 ENTER 금지'});
+  } else if(!_ta.allowMomoEntry){
+    // 장외 시간대 — 점수와 무관하게 신규 진입 불가 (분석은 참고용으로만)
+    r.action = 'WATCH';
+    r.warnings.push('[시간대] '+_ta.phase+' — 장외 시간, 신규 MOMO 진입 불가 (참고용 점수 '+r.score+'pt)');
+    r.decision_path.push({gate:'트리거',status:'watch',note:'장외('+_ta.phase+') — ENTER 불가'});
   } else if(r.score >= 60){
     // ── 단일 하드 트리거: ORB 저점 이탈 (가격 붕괴, 객관적) ──
     if(ph !== 'PRE' && ydata.orb_low && ydata.price && ydata.price < ydata.orb_low * 0.99){
@@ -8357,7 +8695,8 @@ function swingEngine(ydata, swingData){
     r.decision_path.push({gate:'액션',status:'enter',note:'ENTER B · '+r.score+'pt · 트리거 '+trigScore+'/10'});
   } else if(!hasLiveTrigger && hasStructure && structureScore >= 55){
     // 장외 + 구조 55+ → READY (다음 장에서 트리거 확인 대상)
-    r.action = 'WATCH';
+    // ★ 2026-06: READY를 정식 액션으로 승격 — WATCH와 시각적으로 구분
+    r.action = 'READY';
     r.swing_grade = null;
     r.wait_reason = 'market_closed';
     r.ready_for_next_session = true;
@@ -8793,7 +9132,10 @@ function coreEngine(ydata, coreData, babylonKR){
     var cStop, cTarget;
     if(r.core_mode==='A'){
       cStop   = parseFloat((cEntry*0.93).toFixed(2));
-      cTarget = fw&&fw>cEntry*1.15 ? parseFloat((fw*0.75).toFixed(2)) : parseFloat((cEntry*1.30).toFixed(2));
+      cTarget = Math.max(
+        fw&&fw>cEntry ? parseFloat((fw*0.75).toFixed(2)) : 0,
+        parseFloat((cEntry*1.30).toFixed(2))
+      ); // 항상 진입가 +30% 이상 보장 (52주고가×0.75가 진입가 아래로 가는 버그 방지)
     } else {
       var baseLow = coreData.recent6wHigh&&coreData.base_depth_pct ? coreData.recent6wHigh*(1+coreData.base_depth_pct/100) : null;
       cStop   = baseLow ? parseFloat((baseLow*0.98).toFixed(2)) : parseFloat((cEntry*0.93).toFixed(2));
@@ -9200,7 +9542,7 @@ function coreEngine(ydata, coreData, babylonKR){
 // Claude는 news_quality + 2줄 설명만 담당
 function makeExplainPrompt(mode, ticker, ydata, decision){
   var newsText = ydata.newsText || '관련 뉴스 없음';
-  var actionLabel = decision.action==='ENTER'?'진입 가능':decision.action==='WATCH'?'관망':decision.action==='BLOCK'?'차단':'관망';
+  var actionLabel = decision.action==='ENTER'?'진입 가능':decision.action==='READY'?'다음장 대기':decision.action==='WATCH'?'관망':decision.action==='BLOCK'?'차단':'관망';
 
   var modeContext = {
     momo:  '한국 당일 모멘텀 트레이딩',
@@ -9234,13 +9576,6 @@ async function runModeScan(mode){
 
   var raw = inputEl.value.trim().toUpperCase();
   if(!raw){ inputEl.focus(); return; }
-
-  var apiKey = localStorage.getItem('apexKey')||'';
-  if(!apiKey){
-    showToast('MOMO 설정에서 Claude API Key를 입력해주세요');
-    if(mode==='momo') switchSubTab('settings');
-    return;
-  }
 
   var tickers = raw.split(/[\s,]+/).filter(function(t){ return t.length>0; }).slice(0,3);
   inputEl.value = '';
@@ -9632,14 +9967,14 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
   }
 
   try{
-    var apiKey = localStorage.getItem('apexKey')||'';
-    var res = await fetch('https://api.anthropic.com/v1/messages',{
+    var res = await fetch(WORKER_URL + '/reconkr/ai', {
       method:'POST',
-      headers:{'Content-Type':'application/json','x-api-key':apiKey,
-        'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:'claude-sonnet-4-20250514',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        model:'claude-sonnet-4-20250514',
         max_tokens: openTrade ? 600 : 250,
-        messages:[{role:'user',content:prompt}]})
+        messages:[{role:'user',content:prompt}]
+      })
     });
     var data = await res.json();
     if(data.error) throw new Error(data.error.message);
@@ -9838,6 +10173,7 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
     }
 
     saveToHistory(mode, result);
+    if(!openTrade) trackFromAnalysis(mode, result);
     // 국면 변경 감지용 스냅샷
     G.lastAnalyzed[mode] = { ticker: ticker, phase: G.marketPhase, ts: Date.now() };
     hideStaleBanner(mode);
@@ -9932,20 +10268,12 @@ function applyHistory(r){
 // ── calcEntryAction: WATCH/BLOCK 카드에서 GO 신호 차단 ──
 // 엔진이 ENTER 자격을 주지 않은 종목에 GO 신호가 나오는 모순 방지
 function calcEntryAction(r){
-  var raw = _calcEntryActionInner(r);
-  // ENTER가 아닌데 GO 신호: 점수나 세력 조건 미충족 상태 → WAIT으로 강등
-  if(r.action !== 'ENTER' && raw.signal === 'GO'){
-    var watchReason = r.action === 'WATCH'
-      ? (r.score >= 70 ? '점수 '+r.score+'pt — 트리거 대기' : '점수 '+r.score+'pt — 기준 미달(70pt)')
-      : '['+r.whale_stage+'] 세력 단계 제한';
-    return {
-      signal:'WAIT', icon:'🟡', label:'기다려',
-      reason: raw.reason,
-      trigger: raw.trigger || watchReason,
-      css:'wait'
-    };
-  }
-  return raw;
+  // ★ 2026-06 신호 어휘 통일:
+  //   타이밍 신호(GO/WAIT/AVOID)는 엔진 액션이 ENTER일 때만 의미가 있음.
+  //   WATCH/BLOCK/READY 카드에서는 표시하지 않아 "ENTER인지 WATCH인지" 혼란 제거.
+  //   엔진 액션이 카드의 유일한 1차 상태이고, 타이밍은 ENTER 카드의 보조 라인.
+  if(r.action !== 'ENTER') return null;
+  return _calcEntryActionInner(r);
 }
 function _calcEntryActionInner(r){
   var price=r.price, vwap=r.vwap, pmHigh=r.pm_high, pmLow=r.pm_low, orbHigh=r.orb_high;
@@ -10039,8 +10367,8 @@ function _calcEntryActionInner(r){
   if(res1&&price<res1&&price>res1*0.985&&aboveVwap) return {
     signal:'WAIT',icon:'🟡',label:'기다려',
     reason:'['+phase+'] ₩'+Math.round(res1).toLocaleString()+' 저항 직전 — 눌림 대기',
-    trigger:sup1?'진입: $'+sup1.toFixed(2)+' 지지 확인 시 / 손절 $'+(sup1*0.97).toFixed(2):
-      vwap?'진입: VWAP $'+vwap.toFixed(2)+' 눌림 반등 확인 시':'눌림 후 지지 확인',
+    trigger:sup1?'진입: ₩'+Math.round(sup1).toLocaleString()+' 지지 확인 시 / 손절 ₩'+Math.round(sup1*0.97).toLocaleString():
+      vwap?'진입: VWAP ₩'+Math.round(vwap).toLocaleString()+' 눌림 반등 확인 시':'눌림 후 지지 확인',
     css:'wait'
   };
   // 3b. PM 고점 미돌파 — 눌림목 vs 하락 판별 후 신호
@@ -10050,7 +10378,7 @@ function _calcEntryActionInner(r){
       return {
         signal:'GO',icon:'🟢',label:'눌림목 진입',
         reason:'['+phase+'] 눌림목 확인 (score '+pbScore+') — '+sup1.toFixed(2)+' 지지 유지 중',
-        trigger:'진입: $'+sup1.toFixed(2)+' 반등 확인 / 손절 $'+(sup1*0.97).toFixed(2)+' / 목표 $'+pmHigh.toFixed(2),
+        trigger:'진입: ₩'+Math.round(sup1).toLocaleString()+' 반등 확인 / 손절 ₩'+Math.round(sup1*0.97).toLocaleString()+' / 목표 ₩'+Math.round(pmHigh).toLocaleString(),
         css:'go'
       };
     } else if(pbStatus==='dump'){
@@ -10063,9 +10391,9 @@ function _calcEntryActionInner(r){
     } else {
       return {
         signal:'WAIT',icon:'🟡',label:'기다려',
-        reason:'['+phase+'] PM 고점 $'+pmHigh.toFixed(2)+' 미돌파 — 눌림목 확인 중 (score '+pbScore+')',
-        trigger:sup1?'진입: $'+sup1.toFixed(2)+' 반등 확인 시 / 손절 $'+(sup1*0.97).toFixed(2):
-          vwap?'VWAP $'+vwap.toFixed(2)+' 눌림 반등 확인':'눌림 후 지지 확인',
+        reason:'['+phase+'] PM 고점 ₩'+Math.round(pmHigh).toLocaleString()+' 미돌파 — 눌림목 확인 중 (score '+pbScore+')',
+        trigger:sup1?'진입: ₩'+Math.round(sup1).toLocaleString()+' 반등 확인 시 / 손절 ₩'+Math.round(sup1*0.97).toLocaleString():
+          vwap?'VWAP ₩'+Math.round(vwap).toLocaleString()+' 눌림 반등 확인':'눌림 후 지지 확인',
         css:'wait'
       };
     }
@@ -10074,8 +10402,8 @@ function _calcEntryActionInner(r){
   if(pmHigh&&price>pmHigh*1.05&&price<=pmHigh*1.12&&aboveVwap) return {
     signal:'WAIT',icon:'🟡',label:'기다려',
     reason:'['+phase+'] PM 고점 대비 +'+((price/pmHigh-1)*100).toFixed(0)+'% 과확장 — 눌림 대기',
-    trigger:sup1?'진입: $'+sup1.toFixed(2)+' 지지 확인 시 / 손절 $'+(sup1*0.97).toFixed(2):
-      vwap?'진입: VWAP $'+vwap.toFixed(2)+' 눌림 반등':'눌림 후 지지 확인',
+    trigger:sup1?'진입: ₩'+Math.round(sup1).toLocaleString()+' 지지 확인 시 / 손절 ₩'+Math.round(sup1*0.97).toLocaleString():
+      vwap?'진입: VWAP ₩'+Math.round(vwap).toLocaleString()+' 눌림 반등':'눌림 후 지지 확인',
     css:'wait'
   };
   // 3d. VWAP 위 — 눌림목 vs 하락 판별
@@ -10083,8 +10411,8 @@ function _calcEntryActionInner(r){
     if(pbStatus==='pullback'&&sup1){
       return {
         signal:'GO',icon:'🟢',label:'눌림목 진입',
-        reason:'['+phase+'] 눌림목 확인 (score '+pbScore+') — $'+sup1.toFixed(2)+' 지지 유지',
-        trigger:'진입: $'+sup1.toFixed(2)+' 반등 확인 / 손절 $'+(sup1*0.97).toFixed(2)+' / 목표 $'+res1.toFixed(2),
+        reason:'['+phase+'] 눌림목 확인 (score '+pbScore+') — ₩'+Math.round(sup1).toLocaleString()+' 지지 유지',
+        trigger:'진입: ₩'+Math.round(sup1).toLocaleString()+' 반등 확인 / 손절 ₩'+Math.round(sup1*0.97).toLocaleString()+' / 목표 ₩'+Math.round(res1).toLocaleString(),
         css:'go'
       };
     } else if(pbStatus==='dump'){
@@ -10098,8 +10426,8 @@ function _calcEntryActionInner(r){
     return {
       signal:'WAIT',icon:'🟡',label:'기다려',
       reason:'['+phase+'] VWAP 위 — 눌림목 확인 중 (score '+pbScore+')',
-      trigger:sup1?'진입: $'+sup1.toFixed(2)+' 반등 확인 / 손절 $'+(sup1*0.97).toFixed(2):
-        vwap?'VWAP $'+vwap.toFixed(2)+' 눌림 반등 확인':'지지 확인',
+      trigger:sup1?'진입: ₩'+Math.round(sup1).toLocaleString()+' 반등 확인 / 손절 ₩'+Math.round(sup1*0.97).toLocaleString():
+        vwap?'VWAP ₩'+Math.round(vwap).toLocaleString()+' 눌림 반등 확인':'지지 확인',
       css:'wait'
     };
   }
@@ -10107,17 +10435,17 @@ function _calcEntryActionInner(r){
   // Default — 상황별로 가장 유용한 정보 표시
   var vwapLabel=vwap?(r._vwapEstimated?'VWAP 추정':'VWAP ')+(aboveVwap?'위':'아래')+' ₩'+Math.round(vwap).toLocaleString():'VWAP 미계산 (KIS 재연결 확인)';
   var defaultReason='['+phase+'] '+vwapLabel;
-  if(pmHigh) defaultReason+=' / PM고점 $'+pmHigh.toFixed(2);
-  if(sup1) defaultReason+=' / 지지 $'+sup1.toFixed(2);
+  if(pmHigh) defaultReason+=' / PM고점 ₩'+Math.round(pmHigh).toLocaleString();
+  if(sup1) defaultReason+=' / 지지 ₩'+Math.round(sup1).toLocaleString();
   var defaultTrigger;
   if(vwap&&!aboveVwap){
     // VWAP 아래 → VWAP 탈환 먼저
     defaultTrigger='VWAP ₩'+Math.round(vwap).toLocaleString()+' 탈환 후 → '+(sup1?'₩'+Math.round(sup1).toLocaleString()+' 눌림 반등':pmHigh?'₩'+Math.round(pmHigh).toLocaleString()+' 돌파':'재판단');
   } else if(sup1&&pmHigh){
     // VWAP 위 or VWAP 없음 → 지지선 눌림 기다림
-    defaultTrigger='진입: $'+sup1.toFixed(2)+' 눌림 반등 확인 / 목표 $'+pmHigh.toFixed(2);
+    defaultTrigger='진입: ₩'+Math.round(sup1).toLocaleString()+' 눌림 반등 확인 / 목표 ₩'+Math.round(pmHigh).toLocaleString();
   } else if(pmHigh){
-    defaultTrigger='PM고점 $'+pmHigh.toFixed(2)+' 미돌파 — 눌림 대기';
+    defaultTrigger='PM고점 ₩'+Math.round(pmHigh).toLocaleString()+' 미돌파 — 눌림 대기';
   } else {
     defaultTrigger=null;
   }
@@ -10170,10 +10498,12 @@ function calcSellTargets(r){
     if(lvls2.length>0) t2=parseFloat(lvls2[0].toFixed(2));
     else t2=parseFloat((t1*1.15).toFixed(2)); // 레벨 없으면 T1+15%
   } else {
-    // SWING/CORE — 52주 고가 사용 가능
-    if(r.fiftyTwoWeekHigh&&r.fiftyTwoWeekHigh>entry&&r.fiftyTwoWeekHigh<t2base)
+    // SWING/CORE — 52주 고가 사용 가능 (단 T1보다 높을 때만 — T2<T1 역전 방지)
+    if(r.fiftyTwoWeekHigh&&r.fiftyTwoWeekHigh>t1&&r.fiftyTwoWeekHigh<t2base)
       t2=parseFloat(r.fiftyTwoWeekHigh.toFixed(2));
   }
+  // 최종 안전장치: T2는 항상 T1보다 높아야 함
+  if(t2<=t1) t2=parseFloat((t1*1.10).toFixed(2));
   var parabolic=r.price&&entry&&r.price>entry*1.30;
   var overextended=r.pm_high&&r.price&&r.price>r.pm_high*1.15;
   return {t1,t2,risk:parseFloat(risk.toFixed(2)),parabolic,overextended};
@@ -10361,7 +10691,7 @@ function momoCardHTML(r){
   var st  = calcSellTargets(r);
 
   // 판정 배지
-  var vcC = {ENTER:'mc-verdict-enter',WATCH:'mc-verdict-watch',BLOCK:'mc-verdict-block'}[ac];
+  var vcC = {ENTER:'mc-verdict-enter',WATCH:'mc-verdict-watch',READY:'mc-verdict-ready',BLOCK:'mc-verdict-block'}[ac]||'mc-verdict-watch';
 
   // 가격
   var price    = r.price?'₩'+Math.round(r.price).toLocaleString():'--';
@@ -10457,8 +10787,9 @@ function momoCardHTML(r){
     '</div>';
   }
 
-  // 액션 시그널
-  var signalHtml=ac!=='BLOCK'?
+  // 액션 시그널 — ENTER 카드에서만 타이밍 신호(GO 등) 표시 (ea null이면 미표시)
+  // WATCH/BLOCK은 아래 별도 안내(watchNoteHtml/blockHtml)로 처리 → 어휘 혼용 제거
+  var signalHtml = ea ?
     '<div class="action-signal '+ea.css+'">'+
       '<div class="as-icon">'+ea.icon+'</div>'+
       '<div class="as-body">'+
@@ -10468,7 +10799,17 @@ function momoCardHTML(r){
         (r.action_reason?'<div style="font-family:var(--mono);font-size:10px;color:var(--t2);margin-top:5px;padding:4px 8px;background:rgba(255,255,255,.04);border-radius:6px">📋 '+r.action_reason+'</div>':'')+ 
         (r.entry_reason?'<div style="font-size:10px;color:var(--t3);margin-top:4px">Claude: '+r.entry_reason+'</div>':'')+
       '</div>'+
-    '</div>':'';
+    '</div>' : '';
+
+  // WATCH 카드 안내 — 타이밍 신호 대신 "왜 대기인지" 한 줄 (어휘 통일)
+  var watchNoteHtml = (ac==='WATCH') ?
+    '<div class="action-signal wait" style="opacity:.92">'+
+      '<div class="as-icon">⏳</div>'+
+      '<div class="as-body">'+
+        '<div class="as-label wait">관망 — 아직 진입 시점 아님</div>'+
+        '<div class="as-reason">'+(r.action_reason || (r.warnings&&r.warnings[0]) || '점수 '+(r.score||0)+'pt — 트리거/조건 보완 대기')+'</div>'+
+      '</div>'+
+    '</div>' : '';
 
   // 뉴스
   var newsHtml=r.news?'<div class="news-line">'+r.news+'</div>':'';
@@ -10600,7 +10941,7 @@ function momoCardHTML(r){
     '</div>':'';
 
   // 카드 CSS — WATCH는 모드별 색상
-  var cardC = {ENTER:'enter', WATCH:'watch', BLOCK:'block'}[ac] || 'watch';
+  var cardC = {ENTER:'enter', WATCH:'watch', READY:'ready', BLOCK:'block'}[ac] || 'watch';
   var _modeBorderStyle = '';
   if(ac === 'WATCH'){
     var _wc = r._mode==='swing' ? 'rgba(43,159,255,.25)'
@@ -10643,6 +10984,7 @@ function momoCardHTML(r){
     dpHtml+
     // 액션 시그널 박스
     signalHtml+
+    watchNoteHtml+
     // BLOCK 이유
     blockHtml+
     // 레벨 그리드
@@ -10807,7 +11149,7 @@ function _compatibilityFooter(currentMode, compatScores, marketPhase){
   }
 
   var rowsHtml = rows.map(function(x){
-    var actClr = x.action==='ENTER' ? 'var(--g)' : x.action==='WATCH' ? 'var(--a)' : x.action==='BLOCK' ? 'var(--r)' : 'var(--t3)';
+    var actClr = x.action==='ENTER' ? 'var(--g)' : x.action==='READY' ? 'var(--bl)' : x.action==='WATCH' ? 'var(--a)' : x.action==='BLOCK' ? 'var(--r)' : 'var(--t3)';
     var modeClr = modeColors[x.mode];
     var star = (x.mode === topMode) ? ' <span style="color:var(--gold);font-size:11px">★</span>' : '';
     if(x.blocked){
@@ -10828,7 +11170,7 @@ function _compatibilityFooter(currentMode, compatScores, marketPhase){
 
   return '<div style="margin:14px 0 0;padding:10px 12px;background:rgba(255,255,255,.02);border:1px solid var(--b);border-radius:10px">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'+
-      '<span style="font-family:var(--mono);font-size:9px;color:var(--t2);letter-spacing:.1em">🔄 다른 엔진 적합성</span>'+
+      '<span style="font-family:var(--mono);font-size:9px;color:var(--t2);letter-spacing:.08em">🔄 참고 · 다른 전략 기준 (위 판정과 별개)</span>'+
       (topMode ? '<span style="font-family:var(--mono);font-size:9px;color:var(--gold)">★ '+labels[topMode]+' 점수 최고</span>' : '')+
     '</div>'+
     rowsHtml+
@@ -10842,8 +11184,8 @@ function _compatibilityFooter(currentMode, compatScores, marketPhase){
 // ─────────────────────────────────────────
 function swingCardHTML(r){
   var ac    = r.action || 'WATCH';
-  var abC   = {'ENTER':'ab-enter','WATCH':'ab-watch','BLOCK':'ab-block'}[ac];
-  var cardC = {'ENTER':'enter','WATCH':'watch','BLOCK':'block'}[ac];
+  var abC   = {'ENTER':'ab-enter','WATCH':'ab-watch','READY':'ab-ready','BLOCK':'ab-block'}[ac]||'ab-watch';
+  var cardC = {'ENTER':'enter','WATCH':'watch','READY':'ready','BLOCK':'block'}[ac]||'watch';
   var ea    = calcEntryAction(r);
   var st    = calcSellTargets(r);
 
@@ -10957,10 +11299,15 @@ function swingCardHTML(r){
       // BLOCK/WATCH/ENTER A/B 메인 라벨 유지, 게이트BLOCK은 (게이트) 부가 라벨
       (function(){
         var bt = _classifyBlock(r);
-        var sbColor = ac === 'ENTER' ? 'sb-enter' : ac === 'WATCH' ? 'sb-watch' : 'sb-block';
+        var sbColor = ac === 'ENTER' ? 'sb-enter' : ac === 'READY' ? 'sb-ready' : ac === 'WATCH' ? 'sb-watch' : 'sb-block';
         var scoreExtra = bt === 'gate' ? ' sb-score-blocked' : '';
-        var label = r.swing_grade ? 'ENTER '+r.swing_grade : ac;
-        var subLabel = bt === 'gate' ? '<div class="sb-action-sub">게이트</div>' : '';
+        // 액션 한글 라벨 — READY는 "다음장 대기"로 WATCH와 구분
+        var label = r.swing_grade ? 'ENTER '+r.swing_grade
+                  : ac === 'READY' ? '다음장 대기'
+                  : ac === 'WATCH' ? '관망'
+                  : ac === 'BLOCK' ? '차단' : ac;
+        var subLabel = bt === 'gate' ? '<div class="sb-action-sub">게이트</div>'
+                     : ac === 'READY' ? '<div class="sb-action-sub">트리거 대기</div>' : '';
         return '<div class="split-badge">'+
           '<div class="sb-score '+sbColor+scoreExtra+'">'+r.score+'</div>'+
           '<div class="sb-action '+sbColor+'">'+label+subLabel+'</div>'+
@@ -10973,7 +11320,7 @@ function swingCardHTML(r){
       '<span class="card-gap '+(r.gap_pct<0?'red':'')+'">'+gap+'</span>'+
     '</div>'+
 
-    (ac!=='BLOCK' ?
+    (ea ?
       '<div class="action-signal '+ea.css+'">'+
         '<div class="as-icon">'+ea.icon+'</div>'+
         '<div class="as-body">'+
@@ -10981,6 +11328,22 @@ function swingCardHTML(r){
           '<div class="as-reason">'+ea.reason+'</div>'+
           (ea.trigger?'<div class="as-trigger">'+ea.trigger+'</div>':'')+
           (r.entry_reason?'<div style="font-size:10px;color:var(--t3);margin-top:4px">Claude: '+r.entry_reason+'</div>':'')+
+        '</div>'+
+      '</div>'
+    : ac==='READY' ?
+      '<div class="action-signal" style="background:rgba(43,159,255,.07);border:1.5px solid rgba(43,159,255,.20)">'+
+        '<div class="as-icon">📋</div>'+
+        '<div class="as-body">'+
+          '<div class="as-label" style="color:var(--bl)">다음장 대기 — 구조 양호, 트리거만 미확인</div>'+
+          '<div class="as-reason">'+(r.warnings&&r.warnings.find(function(w){return w.indexOf('[READY]')>=0;})||'장중 양봉/거래량/고가돌파 확인 후 진입').replace('[READY] ','')+'</div>'+
+        '</div>'+
+      '</div>'
+    : ac==='WATCH' ?
+      '<div class="action-signal wait" style="opacity:.92">'+
+        '<div class="as-icon">⏳</div>'+
+        '<div class="as-body">'+
+          '<div class="as-label wait">관망 — 아직 진입 시점 아님</div>'+
+          '<div class="as-reason">'+(r.wait_reason==='trigger'?'구조 양호 — 트리거 대기':(r.warnings&&r.warnings[0])||'조건 보완 관찰 중')+'</div>'+
         '</div>'+
       '</div>'
     : '')+
@@ -11076,8 +11439,8 @@ function _swingLayersBlock(r){
 // ─────────────────────────────────────────
 function coreCardHTML(r){
   var ac    = r.action || 'WATCH';
-  var abC   = {'ENTER':'ab-enter','WATCH':'ab-watch','BLOCK':'ab-block'}[ac];
-  var cardC = {'ENTER':'enter','WATCH':'watch','BLOCK':'block'}[ac];
+  var abC   = {'ENTER':'ab-enter','WATCH':'ab-watch','READY':'ab-ready','BLOCK':'ab-block'}[ac]||'ab-watch';
+  var cardC = {'ENTER':'enter','WATCH':'watch','READY':'ready','BLOCK':'block'}[ac]||'watch';
 
   // ── 태그 (CORE 전용) ──
   var tags='';
@@ -12026,7 +12389,7 @@ function playBeep(success){
 // ═══════════════════════════════════════
 // 설정 + 유틸
 // ═══════════════════════════════════════
-function save(k,v){ localStorage.setItem(k,v); if(k==='apexKey'){ G.apiKey=v; updateKeyStatus(); } if(k==='ntfyCh') G.ntfy=v; }
+function save(k,v){ localStorage.setItem(k,v); if(k==='ntfyCh') G.ntfy=v; }
 
 function cycle(id,vals){
   var el=document.getElementById(id);
@@ -16292,72 +16655,122 @@ function loadAllMarket(){
   checkMarketRegime();
 }
 
-// KOSPI MA200 + 당일 방향 + 시장 국면 통합 판단
+// KOSPI 120일선 + 당일 방향 + 시장 국면 통합 판단
+// ★ 2026-06: KIS 우선 전환 — 폭락 BLOCK 게이트가 실시간 데이터로 작동
+//   야후는 KIS 미연결/실패 시 폴백 (지연 ~20분, _src 마커로 표시)
 async function checkMarketRegime(){
-  // ── 1. KOSPI MA200 (일봉 1년치) ──
-  try{
-    var dc = await fetchWithProxy(
-      'https://query1.finance.yahoo.com/v8/finance/chart/^KS11?interval=1d&range=1y'
-    );
-    var closes = dc?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || [];
-    closes = closes.filter(function(v){return v&&v>0;});
-    if(closes.length >= 120){
-      var ma120 = closes.slice(-120).reduce(function(a,b){return a+b;},0)/120; // 한국 경기선 = 120일
-      G.spyAboveMA200 = closes[closes.length-1] > ma120;
-    }
-  }catch(e){}
+  var _kisOk = !!(KIS.appKey && KIS.appSecret);
 
-  // ── 2. 당일 KOSPI 방향 (1분봉) — 장중에만 ──
+  // ── 1. KOSPI 120일선 (경기선) — KIS 일봉 우선 ──
+  var _ma120Done = false;
+  if(_kisOk){
+    try{
+      var dcK = await fetchKisSectorDailyChart('0001', 130); // KOSPI 지수, 최신 index 0
+      var closesK = dcK.map(function(x){ return parseFloat(x.bstp_nmix_prpr)||0; })
+                       .filter(function(v){ return v>0; });
+      if(closesK.length >= 120){
+        var ma120k = closesK.slice(0,120).reduce(function(a,b){return a+b;},0)/120;
+        G.spyAboveMA200 = closesK[0] > ma120k;
+        _ma120Done = true;
+      }
+    }catch(e){ console.warn('[regime] KIS 일봉 실패 → Yahoo 폴백:', e.message); }
+  }
+  if(!_ma120Done){
+    try{
+      var dc = await fetchWithProxy(
+        'https://query1.finance.yahoo.com/v8/finance/chart/^KS11?interval=1d&range=1y'
+      );
+      var closes = dc?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || [];
+      closes = closes.filter(function(v){return v&&v>0;});
+      if(closes.length >= 120){
+        var ma120 = closes.slice(-120).reduce(function(a,b){return a+b;},0)/120;
+        G.spyAboveMA200 = closes[closes.length-1] > ma120;
+      }
+    }catch(e){}
+  }
+
+  // ── 2. 당일 KOSPI 방향 — KIS 업종현재지수(FHPUP02100000) 우선, 실시간 ──
   var kstNow2 = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Seoul'}));
   var hm2 = kstNow2.getHours()*100 + kstNow2.getMinutes();
   var day2 = kstNow2.getDay();
   var isMarketOpen = day2>0 && day2<6 && hm2>=830 && hm2<1800;
   if(isMarketOpen){
-    try{
-      var di = await fetchWithProxy(
-        'https://query1.finance.yahoo.com/v8/finance/chart/^KS11?interval=1m&range=1d&includePrePost=false'
-      );
-      var iRes = di?.chart?.result?.[0];
-      if(iRes){
-        var iQ  = iRes.indicators?.quote?.[0]||{};
-        var iTs = iRes.timestamp||[];
-        var iC  = iQ.close||[], iO=iQ.open||[], iH=iQ.high||[], iL=iQ.low||[], iV=iQ.volume||[];
-        var validC = iC.filter(function(v){return v&&v>0;});
-        var validO = iO.filter(function(v){return v&&v>0;});
-        if(validC.length>=2){
-          var kospiOpen    = validO[0]||validC[0];
-          var kospiNow     = validC[validC.length-1];
-          // 전일 종가 대비 (정확한 당일 수익률) — 시가 대비는 갭이 큰 날 왜곡됨
-          var kospiPrevCls = iRes.meta?.chartPreviousClose || iRes.meta?.previousClose || 0;
-          var kospiChg     = kospiPrevCls > 0
-            ? (kospiNow - kospiPrevCls) / kospiPrevCls * 100
-            : (kospiNow - kospiOpen)    / kospiOpen    * 100; // fallback: 시가대비
-          var kospiTrend= kospiChg<=-1.5?'crash':kospiChg<=-0.5?'down':kospiChg>=0.5?'up':'neutral';
-          var vNum=0, vDen=0;
-          iTs.forEach(function(stamp,idx){
-            var h=iH[idx],l=iL[idx],c=iC[idx],v=iV[idx];
-            if(h&&l&&c&&v&&v>0){ var tp=(h+l+c)/3; vNum+=tp*v; vDen+=v; }
-          });
-          var kospiVwap = vDen>0 ? vNum/vDen : null;
+    var _intradayDone = false;
+    if(_kisOk){
+      try{
+        var hdrIdx = await kisAuthHeaders('FHPUP02100000');
+        var dIdx = await kisGet('/uapi/domestic-stock/v1/quotations/inquire-index-price', {
+          FID_COND_MRKT_DIV_CODE: 'U',
+          FID_INPUT_ISCD:         '0001',   // KOSPI
+        }, hdrIdx);
+        var oIdx = dIdx && dIdx.output;
+        if(dIdx && dIdx.rt_cd === '0' && oIdx && parseFloat(oIdx.bstp_nmix_prpr) > 0){
+          var pxK  = parseFloat(oIdx.bstp_nmix_prpr);
+          var chgK = parseFloat(oIdx.bstp_nmix_prdy_ctrt) || 0;  // 전일대비율 %
+          var opK  = parseFloat(oIdx.bstp_nmix_oprc) || 0;       // 당일 시가
+          var trK  = chgK<=-1.5?'crash':chgK<=-0.5?'down':chgK>=0.5?'up':'neutral';
           G.spyIntraday = {
-            change_pct: parseFloat(kospiChg.toFixed(2)),
-            trend:       kospiTrend,
-            open:        parseFloat(kospiOpen.toFixed(0)),
-            price:       parseFloat(kospiNow.toFixed(0)),
-            vwap:        kospiVwap ? parseFloat(kospiVwap.toFixed(0)) : null,
-            aboveVwap:   kospiVwap ? kospiNow >= kospiVwap : null
+            change_pct: parseFloat(chgK.toFixed(2)),
+            trend:      trK,
+            open:       opK ? parseFloat(opK.toFixed(0)) : null,
+            price:      parseFloat(pxK.toFixed(0)),
+            vwap:       null,                       // 지수 단위 VWAP은 KIS 미제공
+            aboveVwap:  null,
+            aboveOpen:  opK > 0 ? pxK >= opK : null, // 시가 대비 — VWAP 대체 레짐 신호
+            _src:       'KIS',
           };
+          _intradayDone = true;
         }
-      }
-    }catch(e){}
+      }catch(e){ console.warn('[regime] KIS 지수 실패 → Yahoo 폴백:', e.message); }
+    }
+    if(!_intradayDone){
+      try{
+        var di = await fetchWithProxy(
+          'https://query1.finance.yahoo.com/v8/finance/chart/^KS11?interval=1m&range=1d&includePrePost=false'
+        );
+        var iRes = di?.chart?.result?.[0];
+        if(iRes){
+          var iQ  = iRes.indicators?.quote?.[0]||{};
+          var iTs = iRes.timestamp||[];
+          var iC  = iQ.close||[], iO=iQ.open||[], iH=iQ.high||[], iL=iQ.low||[], iV=iQ.volume||[];
+          var validC = iC.filter(function(v){return v&&v>0;});
+          var validO = iO.filter(function(v){return v&&v>0;});
+          if(validC.length>=2){
+            var kospiOpen    = validO[0]||validC[0];
+            var kospiNow     = validC[validC.length-1];
+            var kospiPrevCls = iRes.meta?.chartPreviousClose || iRes.meta?.previousClose || 0;
+            var kospiChg     = kospiPrevCls > 0
+              ? (kospiNow - kospiPrevCls) / kospiPrevCls * 100
+              : (kospiNow - kospiOpen)    / kospiOpen    * 100;
+            var kospiTrend= kospiChg<=-1.5?'crash':kospiChg<=-0.5?'down':kospiChg>=0.5?'up':'neutral';
+            var vNum=0, vDen=0;
+            iTs.forEach(function(stamp,idx){
+              var h=iH[idx],l=iL[idx],cc=iC[idx],v=iV[idx];
+              if(h&&l&&cc&&v&&v>0){ var tp=(h+l+cc)/3; vNum+=tp*v; vDen+=v; }
+            });
+            var kospiVwap = vDen>0 ? vNum/vDen : null;
+            G.spyIntraday = {
+              change_pct: parseFloat(kospiChg.toFixed(2)),
+              trend:       kospiTrend,
+              open:        parseFloat(kospiOpen.toFixed(0)),
+              price:       parseFloat(kospiNow.toFixed(0)),
+              vwap:        kospiVwap ? parseFloat(kospiVwap.toFixed(0)) : null,
+              aboveVwap:   kospiVwap ? kospiNow >= kospiVwap : null,
+              aboveOpen:   kospiOpen > 0 ? kospiNow >= kospiOpen : null,
+              _src:        'Yahoo(지연)',
+            };
+          }
+        }
+      }catch(e){}
+    }
   }
 
   // ── 3. 대시보드 업데이트 ──
   var el = document.getElementById('marketRegimeEl');
   if(el){
-    var kospiStr = G.spyIntraday ? ' · KOSPI '+(G.spyIntraday.change_pct>=0?'+':'')+G.spyIntraday.change_pct+'%' : '';
+    var kospiStr = G.spyIntraday ? ' · KOSPI '+(G.spyIntraday.change_pct>=0?'+':'')+G.spyIntraday.change_pct+'%'+(G.spyIntraday._src==='Yahoo(지연)'?' ⏱':'') : '';
     var phaseStr = {'PRE':'동시호가','ORB':'ORB형성중','EARLY':'골든윈도우','PRIME':'2차모멘텀','LATE':'오후페이드','CLOSED':'장마감','NXT_AFTER':'NXT시간외'}[G.marketPhase]||'';
-    var aboveStr = G.spyAboveMA200===true?'KOSPI MA200 위':G.spyAboveMA200===false?'KOSPI MA200 아래':'';
+    var aboveStr = G.spyAboveMA200===true?'KOSPI 120일선 위':G.spyAboveMA200===false?'KOSPI 120일선 아래':'';
     el.textContent = (aboveStr?aboveStr+kospiStr:'--')+(phaseStr?' · '+phaseStr:'');
     var trendColor = G.spyIntraday?.trend==='crash'?'var(--r)':
                      G.spyIntraday?.trend==='down' ?'var(--r)':
