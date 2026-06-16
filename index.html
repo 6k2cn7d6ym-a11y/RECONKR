@@ -1306,6 +1306,35 @@ var WORKER_URL = 'https://recon.miinonnnn.workers.dev';
 var DART_URL   = 'https://dart.minon.kr';
 var KIS_URL    = 'https://dart.minon.kr'; // KIS도 Oracle VM 경유 (Cloudflare IP 차단 대응) // Oracle DART 프록시
 
+// ── 안전한 포지션 날짜 파서 (2026-06) ──
+// 저장 형식이 toLocaleDateString('ko-KR') = "2026. 6. 12." 이라
+// 일부 브라우저(Safari/iOS)에서 new Date()가 "did not match the expected pattern" 예외.
+// 모든 trade.date 파싱은 이 함수를 거침.
+function parseTradeDate(s){
+  if(!s) return null;
+  if(s instanceof Date) return isNaN(s) ? null : s;
+  var str = String(s).trim();
+  // "2026. 6. 12." | "2026.6.12" | "2026-6-12" | "2026/6/12"
+  var m = str.match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
+  if(m){
+    var d = new Date(parseInt(m[1],10), parseInt(m[2],10)-1, parseInt(m[3],10));
+    return isNaN(d) ? null : d;
+  }
+  // "20260612"
+  var m2 = str.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if(m2){
+    var d2 = new Date(parseInt(m2[1],10), parseInt(m2[2],10)-1, parseInt(m2[3],10));
+    return isNaN(d2) ? null : d2;
+  }
+  var d3 = new Date(str);
+  return isNaN(d3) ? null : d3;
+}
+function tradeHoldDays(s){
+  var d = parseTradeDate(s);
+  if(!d) return 0;
+  return Math.max(0, Math.round((Date.now() - d.getTime())/86400000));
+}
+
 async function fetchWithProxy(url){
   var bust = '&_t='+Date.now(); // 캐시 버스팅
   var fetchP = fetch(WORKER_URL + '?url=' + encodeURIComponent(url) + bust, {cache:'no-store'})
@@ -7289,7 +7318,7 @@ function makePrompt(mode, ticker, ydata, swingData, openTrade, coreData){
     var curP   = ydata.price || entryP;
     var pnlPct = ((curP-entryP)/entryP*100).toFixed(2);
     var pnlAmt = openTrade.shares ? Math.round((curP-entryP)*openTrade.shares).toLocaleString()+'원' : null;
-    var holdDays = openTrade.date ? Math.round((Date.now()-new Date(openTrade.date))/(86400000)) : null;
+    var holdDays = openTrade.date ? tradeHoldDays(openTrade.date) : null;
 
     var holdBase =
       '=== 📌 보유 포지션 ===\n' +
@@ -9788,7 +9817,16 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
   }
 
   // ── [2] Yahoo (1분봉 차트 + 뉴스) ──
-  var ydata = await fetchYahooData(ticker);
+  var ydata;
+  try {
+    ydata = await fetchYahooData(ticker);
+  } catch(e){
+    console.error('[fetchYahooData]', ticker, e);
+    analyzeEl.innerHTML='';
+    resultEl.innerHTML='<div class="alert-card" style="margin:4px 0 10px"><div class="alert-msg" style="color:var(--r)">'+
+      ticker+' 데이터 조회 오류: '+e.message+'</div></div>';
+    return;
+  }
 
   // ── [2-b] 종목 유효성 검증 ──
   // 6자리.KS/.KQ 형식이면 내장 목록 검증된 종목 → 바로 통과
@@ -10025,7 +10063,10 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
       })
     });
     var data = await res.json();
-    if(data.error) throw new Error(data.error.message);
+    if(data.error) throw new Error((data.error && data.error.message) || JSON.stringify(data.error));
+    if(!data.content || !data.content[0] || typeof data.content[0].text !== 'string'){
+      throw new Error('AI 응답 형식 오류: ' + JSON.stringify(data).slice(0, 200));
+    }
 
     if(data.usage){
       var inp=data.usage.input_tokens||0, out=data.usage.output_tokens||0;
@@ -10212,7 +10253,14 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
       rFb.displayName = (_mEntryF && _mEntryF.name) || (ydata && ydata.shortName) || ticker;
       resultEl.innerHTML = holdCardHTML(rFb, mode, openTrade);
     } else {
-      resultEl.innerHTML='<div class="alert-card" style="margin:4px 0 10px"><div class="alert-msg" style="color:var(--r)">'+ticker+' 오류: '+e.message+'</div></div>';
+      console.error('[runSingleScan]', ticker, mode, e);
+      var _stage = (typeof prompt === 'undefined' || prompt === undefined) ? '데이터/엔진 단계'
+                 : (typeof data === 'undefined') ? 'AI 호출 단계'
+                 : '응답 처리/렌더 단계';
+      var _hint = /did not match|expected pattern/i.test(e.message)
+        ? ' (URL/날짜 형식 오류 추정)' : '';
+      resultEl.innerHTML='<div class="alert-card" style="margin:4px 0 10px"><div class="alert-msg" style="color:var(--r)">'+
+        ticker+' 오류 ['+_stage+']: '+e.message+_hint+'</div></div>';
     }
   }
 }
@@ -11856,11 +11904,7 @@ function exitEngine(mode, trade, ctx){
     return r;
   }
   var pnlPct   = (price/entry - 1) * 100;
-  var holdDays = 0;
-  if(trade.date){
-    var dEntry = new Date(trade.date);
-    if(!isNaN(dEntry)) holdDays = Math.max(0, Math.round((Date.now() - dEntry.getTime())/86400000));
-  }
+  var holdDays = tradeHoldDays(trade.date);
   var hm = ctx.hm != null ? ctx.hm : (function(){
     var k = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Seoul'}));
     return k.getHours()*100 + k.getMinutes();
@@ -12227,7 +12271,7 @@ function holdCardHTML(r, mode, trade){
     (mode==='swing'?(function(){
       var swDays=parseInt((document.getElementById('swingHoldDays')||{textContent:'10'}).textContent||'10');
       if(!trade.date) return '';
-      var entryTs=new Date(trade.date.replace(/\./g,'-')).getTime();
+      var entryTs=(parseTradeDate(trade.date)||new Date()).getTime();
       var heldDays=Math.floor((Date.now()-entryTs)/(1000*60*60*24));
       if(heldDays<=0) return '';
       var over=heldDays>=swDays;
