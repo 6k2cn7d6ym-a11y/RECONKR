@@ -725,14 +725,9 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
 
   <div class="sg-title">KIS API (한국투자증권)</div>
   <div class="sg-row" style="flex-direction:column;align-items:flex-start">
-    <div><div class="sg-label">App Key</div><div class="sg-sub">KIS 개발자센터 발급</div></div>
-    <input class="key-input" type="password" id="kisAppKeyInput" placeholder="발급 후 입력" oninput="saveKis()">
+    <div><div class="sg-label">App Key / Secret</div><div class="sg-sub">서버(Oracle VM)에서 안전하게 관리 — 앱 입력 불필요</div></div>
   </div>
-  <div class="sg-row" style="flex-direction:column;align-items:flex-start">
-    <div><div class="sg-label">App Secret</div></div>
-    <input class="key-input" type="password" id="kisAppSecretInput" placeholder="발급 후 입력" oninput="saveKis()">
-  </div>
-  <div class="sg-row"><div><div class="sg-label">계좌번호</div><div class="sg-sub">앞 8자리 (스크리너 연동)</div></div><div style="font-family:var(--mono);font-size:11px;color:var(--gold)" id="kisConnStatus">미연결</div></div>
+  <div class="sg-row"><div><div class="sg-label">연결 상태</div><div class="sg-sub">서버 토큰 발급 기반</div></div><div style="font-family:var(--mono);font-size:11px;color:var(--gold)" id="kisConnStatus">미연결</div></div>
   <div class="sg-row" style="cursor:pointer" onclick="testKisConnection()"><div><div class="sg-label">KIS 연결 테스트</div><div class="sg-sub" id="kisTestResult">토큰 발급 확인</div></div><div style="font-family:var(--mono);font-size:11px;color:var(--bl)">테스트 →</div></div>
   <div class="sg-row"><div><div class="sg-label">스크리너 자동실행</div><div class="sg-sub">MOMO 장중 5분마다</div></div><button class="toggle" id="tgAutoScan" onclick="toggleAutoScan()"></button></div>
 
@@ -959,6 +954,56 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
 </div>
 
 <script>
+// ═══════════════════════════════════════
+// localStorage 네임스페이스 격리 (2026-06)
+// ═══════════════════════════════════════
+// 문제: RECON(미국)과 ReconKR(한국)이 같은 도메인(6k2cn7d6ym-a11y.github.io)에
+//   /RECON/ , /RECONKR/ 경로로 배포돼 localStorage 를 공유 → reconJournal 등
+//   같은 키 이름이 섞여 미국 종목이 ReconKR 에 표시되는 사고 발생.
+// 해결: ReconKR 의 모든 localStorage 키에 'kr_' 접두사를 자동으로 붙여 격리.
+//   기존 코드는 한 줄도 수정하지 않는다 (이 shim 이 get/set/remove 를 가로챈다).
+//   단, 진짜 전역 키 몇 개(브라우저 자체/서드파티)는 격리에서 제외.
+(function(){
+  var NS = 'kr_';
+  var RAW = window.localStorage;
+  // 격리 제외 키 (접두사 안 붙임) — 필요 시 여기에 추가
+  var SKIP = {};  // 현재 전부 격리
+  function k(key){
+    if(key == null) return key;
+    key = String(key);
+    if(key.indexOf(NS) === 0) return key;      // 이미 접두사 있음
+    if(SKIP[key]) return key;                   // 제외 목록
+    return NS + key;
+  }
+  // 네이티브 메서드를 RAW 바인딩으로 보존
+  var _get = RAW.getItem.bind(RAW);
+  var _set = RAW.setItem.bind(RAW);
+  var _rem = RAW.removeItem.bind(RAW);
+  window.__kisGetRaw = _get;  // (디버그용) 원본 접근 필요 시
+  // localStorage 프록시로 교체
+  try {
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      get: function(){
+        return {
+          getItem:    function(key){ return _get(k(key)); },
+          setItem:    function(key, val){ return _set(k(key), val); },
+          removeItem: function(key){ return _rem(k(key)); },
+          clear:      function(){ return RAW.clear(); },
+          key:        function(i){ return RAW.key(i); },
+          get length(){ return RAW.length; },
+        };
+      }
+    });
+  } catch(e){
+    // defineProperty 실패 환경 폴백: 직접 메서드 교체
+    try {
+      RAW.getItem    = function(key){ return _get(k(key)); };
+      RAW.setItem    = function(key, val){ return _set(k(key), val); };
+      RAW.removeItem = function(key){ return _rem(k(key)); };
+    } catch(e2){}
+  }
+})();
 // ═══════════════════════════════════════
 // 전역 상태
 // ═══════════════════════════════════════
@@ -1364,12 +1409,18 @@ async function fetchTextWithProxy(url){
 // ═══════════════════════════════════════════════════════════════
 
 // ── KIS 상태 ──
+// ── KIS 상태 ──
+// 2026-06: 키는 Oracle VM(dart-proxy) .env 에서만 관리. 브라우저는 키를 보유/전송하지 않음.
+//   서버가 /kis/oauth2/tokenP 가로채 토큰 발급 + appkey/appsecret 헤더 주입.
+//   appKey/appSecret 은 "서버 관리중" 표식(SERVER) — 기존 `KIS.appKey && KIS.appSecret`
+//   게이트들이 그대로 통과하도록 truthy 값을 유지한다. 실제 키 값이 아니다.
 var KIS = {
-  appKey:    localStorage.getItem('kisAppKey')    || '',
-  appSecret: localStorage.getItem('kisAppSecret') || '',
+  appKey:    'SERVER',   // 서버 관리 (실제 키 아님 — 게이트 통과용 표식)
+  appSecret: 'SERVER',   // 서버 관리 (실제 키 아님)
+  serverManaged: true,
   token:     null,
   tokenExp:  0,
-  connected: false,
+  connected: true,       // 서버가 키를 보유하므로 항상 연결 가능 상태
 };
 
 // ── 스크리너 상태 ──
@@ -1413,15 +1464,12 @@ async function getKisToken(){
   if(KIS.token && KIS.tokenExp > now + 60*1000){
     return KIS.token;
   }
-  if(!KIS.appKey || !KIS.appSecret){
-    throw new Error('KIS 키 미설정');
-  }
+  // 2026-06: 키 체크 불필요 — 서버(dart-proxy)가 /kis/oauth2/tokenP 를 가로채
+  //   .env 의 키로 토큰 발급. 브라우저는 키 없이 빈 body 로 요청한다.
   // 이미 발급 중이면 같은 Promise 재사용 (동시 tokenP 요청 방지)
   if(_kisTokenPromise) return _kisTokenPromise;
   _kisTokenPromise = kisPost('/oauth2/tokenP', {
     grant_type: 'client_credentials',
-    appkey:     KIS.appKey,
-    appsecret:  KIS.appSecret,
   }).then(function(data){
     if(!data.access_token) throw new Error('토큰 발급 실패: ' + JSON.stringify(data));
     KIS.token    = data.access_token;
@@ -1438,12 +1486,12 @@ async function getKisToken(){
 }
 
 // ── 공통 인증 헤더 ──
+// 2026-06: appkey/appsecret 은 서버(dart-proxy)가 주입. 브라우저는 토큰만 전달.
+//   (서버는 브라우저가 보낸 appkey/appsecret 을 무시하고 .env 값을 쓴다)
 async function kisAuthHeaders(trId){
   var token = await getKisToken();
   return {
     'Authorization': 'Bearer ' + token,
-    'appkey':        KIS.appKey,
-    'appsecret':     KIS.appSecret,
     'tr_id':         trId,
     'custtype':      'P',  // 개인
   };
@@ -2417,24 +2465,15 @@ async function loadFearGreed(){
 // ═══════════════════════════════════════════════════════════════
 
 // ── KIS 저장 ──
+// 2026-06: 키는 서버(.env)에서 관리. 브라우저 입력/저장 폐지. (호출부 호환 위해 빈 함수 유지)
 function saveKis(){
-  KIS.appKey    = document.getElementById('kisAppKeyInput').value.trim();
-  KIS.appSecret = document.getElementById('kisAppSecretInput').value.trim();
-  localStorage.setItem('kisAppKey',    KIS.appKey);
-  localStorage.setItem('kisAppSecret', KIS.appSecret);
-  KIS.token    = null; // 키 바뀌면 토큰 초기화
-  KIS.tokenExp = 0;
-  KIS.connected = false;
-  updateKisStatus();
+  // no-op: KIS 키는 Oracle VM(dart-proxy) .env 에만 존재. 브라우저는 키를 다루지 않음.
 }
 
 async function testKisConnection(){
   var el = document.getElementById('kisTestResult');
   var st = document.getElementById('kisConnStatus');
-  if(!KIS.appKey || !KIS.appSecret){
-    if(el) el.textContent = '⚠ App Key / Secret 먼저 입력';
-    return;
-  }
+  // 2026-06: 키 입력 체크 불필요 — 서버가 키 보유. 토큰 발급 자체로 연결 확인.
   if(el) el.textContent = '토큰 요청 중...';
   try{
     var token = await getKisToken();
@@ -17530,10 +17569,12 @@ setInterval(function(){
 
 
 (function initKis(){
-  var k = localStorage.getItem('kisAppKey')||'';
-  var s = localStorage.getItem('kisAppSecret')||'';
-  if(k) { KIS.appKey=k; var el=document.getElementById('kisAppKeyInput'); if(el) el.value=k; }
-  if(s) { KIS.appSecret=s; var el=document.getElementById('kisAppSecretInput'); if(el) el.value=s; }
+  // 2026-06: 키는 서버(.env) 관리. 브라우저는 키를 읽지 않는다.
+  //   과거에 평문으로 저장됐던 키가 있으면 정리(보안).
+  try {
+    localStorage.removeItem('kisAppKey');
+    localStorage.removeItem('kisAppSecret');
+  } catch(e){}
   updateKisStatus();
 
   // KIS 연결돼 있으면 종목명 캐시 빌드
