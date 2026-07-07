@@ -11525,6 +11525,10 @@ function swingCardHTML(r){
     levelsBlock+
     sellHtml+
     _cardSignalLines(r)+
+    // 진입 기록 버튼 (2026-07: 기록 = 자동 감시 등록 — BLOCK 포함 항상 표시)
+    '<div style="display:flex;gap:6px;margin-top:10px">'+
+      '<button class="mc-trade-btn" style="flex:1;margin-top:0" onclick="openTradeFromCard(\''+r.ticker+'\')">+ 거래 기록</button>'+
+    '</div>'+
     _compatibilityFooter('swing', r._compatScores, r._marketPhase || G.marketPhase)+
   '</div>';
 }
@@ -11599,10 +11603,6 @@ function _swingLayersBlock(r){
     '</div>'+
     layerRows+
     decisionPath+
-    // 진입 기록 버튼 (2026-07: 기록 = 자동 감시 등록)
-    '<div style="display:flex;gap:6px;margin-top:10px">'+
-      '<button class="mc-trade-btn" style="flex:1;margin-top:0" onclick="openTradeFromCard(\''+r.ticker+'\')">+ 거래 기록</button>'+
-    '</div>'+
   '</div>';
 }
 
