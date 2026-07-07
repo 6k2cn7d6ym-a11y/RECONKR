@@ -1016,6 +1016,7 @@ var _jwTimer = null;  // 감시 투영 디바운스
 function saveJournal(){
   localStorage.setItem(RECONKR_JOURNAL_KEY, JSON.stringify(G_journal));
   scheduleJournalSync(G.currentMode);
+  scheduleJournalPush(G.currentMode);   // 2026-07: 일지 본체도 서버 push (기기간 동기화)
 }
 function scheduleJournalSync(mode){
   if(_jwTimer) clearTimeout(_jwTimer);
@@ -1071,6 +1072,68 @@ function journalUnwatch(code, mode){
   }catch(e){}
 }
 
+// ═══════════════════════════════════════
+// 저널 기기간 동기화 (2026-07: US RECON 검증 패턴 이식)
+//   - 워커 /reconkr/journal 사용 (worker v2에서 추가)
+//   - id별 머지, updatedAt/deletedAt 최신 승, tombstone 모델
+//   - saveJournal 한 번이 watch 투영 + 일지 push 둘 다 트리거
+//   - 경로(/reconkr/journal)와 키(RECONKR_JOURNAL_KEY)만 US와 다름
+// ═══════════════════════════════════════
+var _jpTimer = null;                 // push 디바운스 타이머
+var _journalLastPull = {};           // mode → 마지막 pull 시각 (throttle)
+var _journalPullDone = {};           // mode → 첫 pull 완료 여부
+
+function scheduleJournalPush(mode){
+  if(_jpTimer) clearTimeout(_jpTimer);
+  var m = mode || (typeof G!=='undefined' && G.currentMode) || 'momo';
+  _jpTimer = setTimeout(function(){ pushJournal(m); }, 800);
+}
+
+async function pushJournal(mode){
+  mode = mode || (typeof G!=='undefined' && G.currentMode) || 'momo';
+  // 해당 모드의 거래만 추출 (tombstone 포함 — 삭제 전파 필요)
+  var trades = (G_journal || []).filter(function(t){
+    return t && t.id != null && ((t.mode || 'momo') === mode);
+  });
+  if(!trades.length) return;
+  try{
+    await fetch(WORKER_URL + '/reconkr/journal', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ mode:mode, trades:trades })
+    });
+  }catch(e){ /* 오프라인이면 다음 변경 때 재시도 */ }
+}
+
+async function pullJournal(mode){
+  mode = mode || (typeof G!=='undefined' && G.currentMode) || 'momo';
+  try{
+    var res = await fetch(WORKER_URL + '/reconkr/journal?mode=' + encodeURIComponent(mode));
+    if(!res.ok) return false;
+    var data = await res.json();
+    var serverTrades = (data && data.trades) || [];
+    mergeJournalLocal(serverTrades, mode);
+    _journalLastPull[mode] = Date.now();
+    _journalPullDone[mode] = true;
+    return true;
+  }catch(e){ return false; }
+}
+
+function mergeJournalLocal(serverList, mode){
+  // 서버 거래 배열을 G_journal에 머지 (id별 max(updatedAt, deletedAt) 최신 승)
+  // localStorage 직접 갱신 (saveJournal 호출 안 함 → push 루프 방지)
+  var stamp = function(r){ return Math.max(r.updatedAt || 0, r.deletedAt || 0); };
+  var byId = {};
+  (G_journal || []).forEach(function(r){ if(r && r.id != null) byId[r.id] = r; });
+  (serverList || []).forEach(function(r){
+    if(!r || r.id == null) return;
+    if((r.mode || 'momo') !== mode) return;  // 다른 모드는 이 호출이 책임 안 짐
+    var ex = byId[r.id];
+    if(!ex || stamp(r) >= stamp(ex)) byId[r.id] = r;
+  });
+  G_journal = Object.values(byId);
+  localStorage.setItem(RECONKR_JOURNAL_KEY, JSON.stringify(G_journal));
+}
+
 // ── 텔레그램 연결 테스트 (2026-07: 설정탭 — 구 hold 패널에서 이식) ──
 async function testTelegramKR(){
   showToast('텔레그램 전송 중...');
@@ -1094,6 +1157,7 @@ try{
   var _kept = [];
   (G_journal||[]).forEach(function(t){
     if(!t || !t.ticker){ _kept.push(t); return; }
+    if(t.deleted){ _kept.push(t); return; }  // tombstone은 병합 대상 아님, 그대로 보존(삭제 전파용)
     var open = (t.status==='open'||t.status==='partial');
     if(!open){ _kept.push(t); return; }
     var key = t.ticker + '|' + (t.mode||'momo');
@@ -1198,9 +1262,13 @@ function rescanOpenTrade(mode, ticker){
 function closeOpenPosition(tradeId){
   var trade = G_journal.find(function(t){return t.id===tradeId;});
   if(!trade) return;
-  if(!confirm(trade.ticker+' 포지션을 보유아님으로 처리할까요? (일지에서 삭제됩니다)')) return;
-  G_journal = G_journal.filter(function(t){return t.id!==tradeId;});
+  if(!confirm(trade.ticker+' 포지션을 보유아님으로 처리할까요? (일지 + 감시 모두 제거)')) return;
+  // 2026-07: hard-delete 대신 tombstone (기기간 삭제 동기화 위해)
+  trade.deleted = true;
+  trade.deletedAt = Date.now();
+  trade.updatedAt = Date.now();
   saveJournal();
+  journalUnwatch(trade.ticker, trade.mode);
   renderOpenPositions(G.currentMode);
   renderJournal(G.currentMode);
   showToast(trade.ticker+' 포지션 제거됨');
@@ -1213,6 +1281,7 @@ function renderOpenPositions(mode){
   var el = document.getElementById(mode+'OpenArea');
   if(!el) return;
   var openTrades = G_journal.filter(function(t){
+    if(t.deleted) return false;  // tombstone 제외
     return (t.status==='open'||t.status==='partial') && (t.mode===mode||(t.mode==='momo'&&mode==='momo')||(!t.mode&&mode==='momo'));
   });
   if(!openTrades.length){ el.innerHTML=''; return; }
@@ -12620,7 +12689,7 @@ function saveTradeLog(ticker){
   // ── 중복 방지 (2026-07): 같은 종목·모드의 열린 포지션이 이미 있으면 새 레코드가 아니라 추가매수로 병합 ──
   //   한 종목 = 한 보유 카드 원칙. 두 번 진입 기록해도 가중평균으로 합쳐짐.
   var _existing = G_journal.find(function(t){
-    return t && t.ticker === ticker && (t.mode||'momo') === _mode &&
+    return t && !t.deleted && t.ticker === ticker && (t.mode||'momo') === _mode &&
            (t.status === 'open' || t.status === 'partial');
   });
   if(_existing){
@@ -13044,6 +13113,7 @@ function getFilteredJournal(mode){
   var weekAgoTs = Date.now() - 7*24*60*60*1000;
   var f = G_jFilters[mode] || 'today';
   return G_journal.filter(function(t){
+    if(t.deleted) return false;  // tombstone 제외
     var modeMatch = !t.mode || t.mode === mode;
     if(!modeMatch) return false;
     if(f==='today') return t.date === today;
@@ -13365,9 +13435,16 @@ function editBuyEntry(tradeId, idx){
 
 function deleteTradeLog(id){
   if(!confirm('이 거래 기록을 삭제할까요?')) return;
-  G_journal = G_journal.filter(function(t){return t.id!==id;});
+  var t = G_journal.find(function(x){return x.id===id;});
+  if(!t) return;
+  // 2026-07: hard-delete 대신 tombstone (기기간 삭제 동기화 위해)
+  t.deleted = true;
+  t.deletedAt = Date.now();
+  t.updatedAt = Date.now();
   saveJournal();
+  journalUnwatch(t.ticker, t.mode);
   renderJournal(G.currentMode);
+  renderOpenPositions(G.currentMode);
 }
 
 function clearAllData(){
@@ -17600,6 +17677,30 @@ setInterval(function(){
     });
   });
 }, 5*60*1000);
+
+// ═══════════════════════════════════════
+// 저널 PC↔모바일 동기화 초기화 (2026-07: US RECON 패턴 이식)
+//   - 앱 로드 시 3모드 모두 pull → 3모드 모두 push (로컬 전용 거래 업로드)
+//   - 탭 복귀(visibilitychange) 시 현재 모드 재pull (30초 쓰로틀)
+// ═══════════════════════════════════════
+(async function _initJournalSync(){
+  try{
+    await Promise.all(['momo','swing','core'].map(function(m){ return pullJournal(m); }));
+    await Promise.all(['momo','swing','core'].map(function(m){ return pushJournal(m); }));
+    var cm = (typeof G !== 'undefined' && G.currentMode) || 'momo';
+    if(typeof renderOpenPositions === 'function') renderOpenPositions(cm);
+  }catch(e){ /* 오프라인이면 다음 saveJournal 때 자연 복구 */ }
+})();
+
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState !== 'visible') return;
+  var cm = (typeof G !== 'undefined' && G.currentMode) || 'momo';
+  var last = _journalLastPull[cm] || 0;
+  if(Date.now() - last < 30000) return;   // 30초 이내 재pull 방지
+  pullJournal(cm).then(function(ok){
+    if(ok && typeof renderOpenPositions === 'function') renderOpenPositions(cm);
+  });
+});
 
 
 (function initKis(){
