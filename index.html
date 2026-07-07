@@ -12496,9 +12496,15 @@ function openTradeFromCard(ticker){
   }
   if(!r){ openTradeLog(ticker, 0, {}); return; }  // 못 찾으면 빈 모달 (수동 입력)
   var st = (typeof calcSellTargets === 'function') ? calcSellTargets(r) : null;
-  openTradeLog(ticker, r.price || 0, {
+  var _px   = r.price || r.entry || 0;
+  var _stop = r.stop || 0;
+  // ── prefill 정합 보정 (2026-07): 엔진의 stop은 '계획 진입가(r.entry)' 기준.
+  //   급락일엔 현재가 < 계획 진입가라 stop이 현재가보다 위에 올 수 있음 (예: MA20 눌림목).
+  //   진입가 칸은 실제 체결 기록용으로 현재가를 쓰므로, stop이 그 이상이면 하드스톱 -3.5%로 보정.
+  if(_stop && _px && _stop >= _px) _stop = Math.round(_px * 0.965);
+  openTradeLog(ticker, _px, {
     name: r.displayName || r.shortName || r.ticker,
-    stop: r.stop || 0,
+    stop: _stop,
     t1:   (st && st.t1) || r.target1 || r.t1 || 0,
     t2:   (st && st.t2) || r.target2 || r.t2 || 0,
   });
@@ -12534,6 +12540,8 @@ function openTradeLog(ticker, price, opts){
         '<div><div style="font-size:11px;color:var(--t2);margin-bottom:4px">T2</div>'+
           '<input id="tl_t2" type="number" step="1" value="'+_pT2+'" placeholder="0" style="width:100%;background:var(--bg2);border:1px solid var(--b);border-radius:8px;padding:10px;font-family:var(--mono);font-size:14px;color:var(--t);outline:none"></div>'+
       '</div>'+
+      '<div><div style="font-size:11px;color:var(--t2);margin-bottom:4px">진입일 <span style="color:var(--t3)">(예전 매수 등록 시 실제 매수일로 변경)</span></div>'+
+        '<input id="tl_date" type="date" value="'+new Date().toISOString().slice(0,10)+'" max="'+new Date().toISOString().slice(0,10)+'" style="width:100%;background:var(--bg2);border:1px solid var(--b);border-radius:8px;padding:10px;font-family:var(--mono);font-size:14px;color:var(--t);outline:none"></div>'+
       '<div><div style="font-size:11px;color:var(--t2);margin-bottom:4px">메모</div>'+
         '<input id="tl_memo" type="text" placeholder="예: ORB 브레이크아웃 진입" style="width:100%;background:var(--bg2);border:1px solid var(--b);border-radius:8px;padding:10px;font-size:13px;color:var(--t);outline:none"></div>'+
     '</div>'+
@@ -12554,6 +12562,11 @@ function saveTradeLog(ticker){
   var t2     = parseFloat((document.getElementById('tl_t2')  ||{}).value) || 0;
   var name   = ((document.getElementById('tl_name')||{}).value || '').trim();
   var _mode  = G.currentMode || 'momo';
+  // 진입일 (백필 지원 — 기본 오늘). 기존 포맷(ko-KR)과 통일해 parseTradeDate/보유일수 계산 정합 유지.
+  var _dRaw  = ((document.getElementById('tl_date')||{}).value || '').trim();
+  var _dObj  = _dRaw ? new Date(_dRaw+'T00:00:00') : new Date();
+  if(isNaN(_dObj)) _dObj = new Date();
+  var _dStr  = _dObj.toLocaleDateString('ko-KR');
 
   // ── 고스트 포지션 방지: 진입 기록 무결성 검증 (2026-07 US 이식) ──
   //   감시(watch:true) 대상이 되므로 0주·손절0 같은 유령 포지션을 막아야 함.
@@ -12568,7 +12581,7 @@ function saveTradeLog(ticker){
   }
 
   var record = {
-    id: Date.now(), date: new Date().toLocaleDateString('ko-KR'),
+    id: Date.now(), date: _dStr,
     ticker: ticker,
     name: name || ticker,   // 워커 텔레그램 알림 표시용
     entry: entry,       // 가중평균 진입가 (추가매수 시 자동 갱신)
@@ -12577,7 +12590,7 @@ function saveTradeLog(ticker){
     stop: stop, t1: t1, t2: t2,   // 감시 가격선 (syncJournalWatch 투영이 그대로 사용)
     watch: true,                  // open이면 텔레그램 감시 대상
     buys: [{            // 매수 내역
-      date: new Date().toLocaleDateString('ko-KR'),
+      date: _dStr,
       price: entry, shares: shares, memo: memo||'1차 진입'
     }],
     sells: [], exit: null, pnl: null, pnl_pct: null, memo: memo,
