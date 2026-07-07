@@ -1086,6 +1086,40 @@ async function testTelegramKR(){
 try{
   ['momo','swing','core'].forEach(function(m){ localStorage.removeItem('holdPositions_'+m); });
 }catch(e){}
+
+// ── 중복 열린 포지션 1회 병합 (2026-07: 같은 종목·모드 중복 → 가중평균 하나로) ──
+//   병합 로직 도입 전 생긴 중복 레코드 정리. 실행 후 저장.
+try{
+  var _seen = {}, _merged = false;
+  var _kept = [];
+  (G_journal||[]).forEach(function(t){
+    if(!t || !t.ticker){ _kept.push(t); return; }
+    var open = (t.status==='open'||t.status==='partial');
+    if(!open){ _kept.push(t); return; }
+    var key = t.ticker + '|' + (t.mode||'momo');
+    if(_seen[key]){
+      // 기존 포지션에 병합
+      var base = _seen[key];
+      if(!base.buys) base.buys = [{ date:base.date, price:base.entry, shares:base.shares, memo:'기존 진입' }];
+      if(t.buys && t.buys.length) base.buys = base.buys.concat(t.buys);
+      else base.buys.push({ date:t.date, price:t.entry, shares:t.shares, memo:'병합' });
+      var tv = base.buys.reduce(function(s,b){ return s + (b.price||0)*(b.shares||0); }, 0);
+      var ts = base.buys.reduce(function(s,b){ return s + (b.shares||0); }, 0);
+      if(ts>0){ base.entry = parseFloat((tv/ts).toFixed(2)); base.shares = ts; }
+      base.remaining = (base.remaining||0) + (t.remaining!==undefined?t.remaining:(t.shares||0));
+      base.updatedAt = Date.now();
+      _merged = true;
+    } else {
+      _seen[key] = t;
+      _kept.push(t);
+    }
+  });
+  if(_merged){
+    G_journal = _kept;
+    saveJournal();
+    console.log('[journal] 중복 열린 포지션 병합 완료');
+  }
+}catch(e){}
 var G_jFilters = { momo:'today', swing:'today', core:'today' };
 
 // 초기값 로드
@@ -12507,6 +12541,7 @@ function openTradeFromCard(ticker){
     stop: _stop,
     t1:   (st && st.t1) || r.target1 || r.t1 || 0,
     t2:   (st && st.t2) || r.target2 || r.t2 || 0,
+    mode: r._mode || (typeof G!=='undefined' && G.currentMode) || 'momo',  // 카드 모드로 고정 (currentMode 어긋남 방지)
   });
 }
 
@@ -12515,6 +12550,7 @@ function openTradeLog(ticker, price, opts){
   //   진입 기록 = 자동 텔레그램 감시 등록 (별도 보유 등록 불필요)
   opts = opts || {};
   var _pName = (opts.name || '').replace(/"/g,'&quot;');
+  var _pMode = (opts.mode || (typeof G!=='undefined' && G.currentMode) || 'momo');
   var _pStop = (opts.stop && opts.stop > 0) ? Math.round(opts.stop) : '';
   var _pT1   = (opts.t1   && opts.t1   > 0) ? Math.round(opts.t1)   : '';
   var _pT2   = (opts.t2   && opts.t2   > 0) ? Math.round(opts.t2)   : '';
@@ -12532,6 +12568,7 @@ function openTradeLog(ticker, price, opts){
           '<input id="tl_shares" type="number" placeholder="100" style="width:100%;background:var(--bg2);border:1px solid var(--b);border-radius:8px;padding:10px;font-family:var(--mono);font-size:14px;color:var(--t);outline:none"></div>'+
       '</div>'+
       '<input id="tl_name" type="hidden" value="'+_pName+'">'+
+      '<input id="tl_mode" type="hidden" value="'+_pMode+'">'+
       '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">'+
         '<div><div style="font-size:11px;color:var(--t2);margin-bottom:4px">손절</div>'+
           '<input id="tl_stop" type="number" step="1" value="'+_pStop+'" placeholder="0" style="width:100%;background:var(--bg2);border:1px solid var(--b);border-radius:8px;padding:10px;font-family:var(--mono);font-size:14px;color:var(--t);outline:none"></div>'+
@@ -12561,7 +12598,7 @@ function saveTradeLog(ticker){
   var t1     = parseFloat((document.getElementById('tl_t1')  ||{}).value) || 0;
   var t2     = parseFloat((document.getElementById('tl_t2')  ||{}).value) || 0;
   var name   = ((document.getElementById('tl_name')||{}).value || '').trim();
-  var _mode  = G.currentMode || 'momo';
+  var _mode  = ((document.getElementById('tl_mode')||{}).value || '').trim() || G.currentMode || 'momo';
   // 진입일 (백필 지원 — 기본 오늘). 기존 포맷(ko-KR)과 통일해 parseTradeDate/보유일수 계산 정합 유지.
   var _dRaw  = ((document.getElementById('tl_date')||{}).value || '').trim();
   var _dObj  = _dRaw ? new Date(_dRaw+'T00:00:00') : new Date();
@@ -12578,6 +12615,36 @@ function saveTradeLog(ticker){
     if(stop >= entry){
       if(!confirm('손절가(₩'+Math.round(stop).toLocaleString()+')가 진입가(₩'+Math.round(entry).toLocaleString()+') 이상입니다.\n이익보호선(트레일 후 상향)이 아니라면 잘못된 값일 수 있습니다.\n\n그대로 기록할까요?')) return;
     }
+  }
+
+  // ── 중복 방지 (2026-07): 같은 종목·모드의 열린 포지션이 이미 있으면 새 레코드가 아니라 추가매수로 병합 ──
+  //   한 종목 = 한 보유 카드 원칙. 두 번 진입 기록해도 가중평균으로 합쳐짐.
+  var _existing = G_journal.find(function(t){
+    return t && t.ticker === ticker && (t.mode||'momo') === _mode &&
+           (t.status === 'open' || t.status === 'partial');
+  });
+  if(_existing){
+    var _msg = ticker+' 은(는) 이미 '+_mode.toUpperCase()+' 보유 중입니다.\n\n[확인] 추가매수로 합치기 (평균단가 재계산)\n[취소] 기록 안 함';
+    if(!confirm(_msg)) return;
+    if(!_existing.buys) _existing.buys = [{ date:_existing.date, price:_existing.entry, shares:_existing.shares, memo:'기존 진입' }];
+    _existing.buys.push({ date:_dStr, price:entry, shares:shares, memo:memo || (_existing.buys.length+1)+'차 추가' });
+    var _tv = _existing.buys.reduce(function(s,b){ return s + b.price*b.shares; }, 0);
+    var _ts = _existing.buys.reduce(function(s,b){ return s + b.shares; }, 0);
+    _existing.entry     = parseFloat((_tv/_ts).toFixed(2));
+    _existing.shares    = _ts;
+    _existing.remaining = (_existing.remaining||0) + shares;
+    // 손절/목표는 새로 입력한 값이 있으면 갱신 (재진입 시 계획 재조정 반영)
+    if(stop) _existing.stop = stop;
+    if(t1)   _existing.t1   = t1;
+    if(t2)   _existing.t2   = t2;
+    _existing.watch = true;
+    _existing.updatedAt = Date.now();
+    saveJournal();
+    document.querySelector('div[style*=fixed]')?.remove();
+    showToast('📌 '+ticker+' +'+shares+'주 추가매수 · 평균 ₩'+Math.round(_existing.entry).toLocaleString());
+    renderJournal(G.currentMode);
+    if(typeof renderOpenPositions === 'function') renderOpenPositions(_mode);
+    return;
   }
 
   var record = {
@@ -12602,6 +12669,7 @@ function saveTradeLog(ticker){
   document.querySelector('div[style*=fixed]')?.remove();
   showToast('📌 '+ticker+' 진입 기록 + 감시 등록 · ₩'+Math.round(entry).toLocaleString()+(shares?' · '+shares+'주':''));
   renderJournal(G.currentMode);
+  if(typeof renderOpenPositions === 'function') renderOpenPositions(_mode);  // 메인 '보유 중' 카드 즉시 반영
 }
 
 // 분할 매도 모달
