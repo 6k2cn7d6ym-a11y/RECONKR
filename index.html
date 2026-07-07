@@ -719,6 +719,8 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
   <div class="sg-row"><div><div class="sg-label">API Key</div><div class="sg-sub">서버(Oracle VM)에서 관리 — 입력 불필요</div></div><div style="font-family:var(--mono);font-size:11px;color:var(--gold)">서버 관리 ✓</div></div>
   <div class="sg-row"><div><div class="sg-label">DART 연결 상태</div><div class="sg-sub" id="dartTestResult">공시 자동 조회 연동</div></div><div style="font-family:var(--mono);font-size:11px;color:var(--gold)" id="dartConnStatus">서버 관리 ✓</div></div>
   <div class="sg-row" style="cursor:pointer" onclick="testDartConnection()"><div><div class="sg-label">DART 연결 테스트</div></div><div style="font-family:var(--mono);font-size:11px;color:var(--bl)">테스트 →</div></div>
+  <div class="sg-title">텔레그램 알림</div>
+  <div class="sg-row" style="cursor:pointer" onclick="testTelegramKR()"><div><div class="sg-label">텔레그램 연결 테스트</div><div class="sg-sub">손절/T1/T2 감시 알림 채널</div></div><div style="font-family:var(--mono);font-size:11px;color:var(--bl)">테스트 →</div></div>
 
   <div class="sg-title">KIS API (한국투자증권)</div>
   <div class="sg-row" style="flex-direction:column;align-items:flex-start">
@@ -897,34 +899,7 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
   </div>
 </div>
 
-<!-- ─── 보유 종목 패널 ─── -->
-<div class="hold-panel-wrap" id="holdPanelWrap" style="display:none">
-  <div style="display:flex;align-items:center;padding:env(safe-area-inset-top,16px) 20px 10px;background:rgba(6,8,9,.92);border-bottom:1px solid rgba(255,106,0,.15);flex-shrink:0"><button onclick="switchSubTab('search')" style="background:none;border:none;color:var(--gold);font-family:var(--mono);font-size:13px;cursor:pointer;padding:4px 0">← 뒤로</button><span style="flex:1;text-align:center;font-family:var(--mono);font-size:12px;color:var(--gold);letter-spacing:.1em">보유 종목</span></div>
-  <div class="hold-panel-scroll">
-    <div class="hold-section-title">보유 종목 등록</div>
-    <div class="hold-input-row">
-      <input class="hold-input" id="holdCode" placeholder="종목코드 (예: 005930)" maxlength="6" inputmode="numeric" style="max-width:130px">
-      <input class="hold-input" id="holdName" placeholder="종목명">
-    </div>
-    <div class="hold-input-row">
-      <input class="hold-input" id="holdPrice" placeholder="진입가 (원)" inputmode="decimal">
-      <input class="hold-input" id="holdStop"  placeholder="스톱 (원)"  inputmode="decimal">
-    </div>
-    <div class="hold-input-row" style="margin-bottom:10px">
-      <input class="hold-input" id="holdT1"    placeholder="T1 목표 (원)" inputmode="decimal">
-      <input class="hold-input" id="holdT2"    placeholder="T2 목표 (원)" inputmode="decimal">
-    </div>
-    <button class="hold-add-btn" onclick="holdAdd()">+ 종목 추가</button>
-    <div class="hold-section-title">보유 중</div>
-    <div class="hold-list" id="holdList"><div class="hold-empty" id="holdEmpty">등록된 종목 없음</div></div>
-    <div class="hold-section-title">알림 설정</div>
-    <div class="hold-sync-row">
-      <button class="hold-sync-btn" onclick="holdSync()">☁️ 서버 저장<br><span style="font-size:9px;opacity:.7">5분마다 자동 감시</span></button>
-      <button class="hold-test-btn" onclick="holdTestTg()">📲 텔레그램<br><span style="font-size:9px;opacity:.7">연결 테스트</span></button>
-    </div>
-    <div id="holdStatus" style="display:none" class="hold-status"></div>
-  </div>
-</div>
+<!-- 보유 종목 패널 제거 (2026-07: 저널 통합 — 진입 기록 = 자동 감시) -->
 
 <!-- ─── 하단 탭 ─── -->
 <div class="bottom-tabs" id="bottomTabs">
@@ -944,10 +919,7 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     설정
   </button>
-  <button class="btab hold-tab" id="btabHold" onclick="switchSubTab('hold')">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-    보유
-  </button>
+  
 </div>
 
 <script>
@@ -1028,7 +1000,92 @@ var G = {
   lastAnalyzed: { momo:null, swing:null, core:null },
 };
 
-var G_journal = JSON.parse(localStorage.getItem('reconJournal')||'[]');
+// 2026-07: RECON(US)과 같은 도메인 다른 경로로 배포돼 localStorage 공유 →
+//   저널 키를 reconkrJournal 로 분리 (US는 reconJournal). 개인 KR 거래 없어 마이그레이션 불필요.
+var RECONKR_JOURNAL_KEY = 'reconkrJournal';
+var G_journal = JSON.parse(localStorage.getItem(RECONKR_JOURNAL_KEY)||'[]');
+
+// ═══════════════════════════════════════
+// 저널 중앙 저장 + 감시 투영 (2026-07: RECON US 구조 이식)
+//   saveJournal() 한 번이 localStorage 저장 + syncJournalWatch(텔레그램 감시 투영)를 트리거.
+//   저널의 open/partial 거래를 워커 감시 포맷(positions_${mode})으로 투영 →
+//   checkKRPositions 크론이 손절/T1/T2 터치 시 텔레그램 발송.
+//   별도 '보유 등록' 개념 없음 — 거래 기록 = 자동 감시.
+// ═══════════════════════════════════════
+var _jwTimer = null;  // 감시 투영 디바운스
+function saveJournal(){
+  localStorage.setItem(RECONKR_JOURNAL_KEY, JSON.stringify(G_journal));
+  scheduleJournalSync(G.currentMode);
+}
+function scheduleJournalSync(mode){
+  if(_jwTimer) clearTimeout(_jwTimer);
+  var m = mode || (typeof G!=='undefined' && G.currentMode) || 'momo';
+  _jwTimer = setTimeout(function(){ syncJournalWatch(m); }, 800);
+}
+async function syncJournalWatch(mode){
+  mode = mode || (typeof G!=='undefined' && G.currentMode) || 'momo';
+  var byC = {};
+  (G_journal || []).forEach(function(t){
+    if(!t || !t.ticker) return;
+    if((t.mode || 'momo') !== mode) return;
+    // KR 워커 감시는 종목코드(6자리) 기준 — .KS/.KQ/.KN 제거
+    var code = String(t.ticker).replace(/\.(KS|KQ|KN)$/i,'');
+    if(!/^\d{6}$/.test(code)) return;
+    var stamp = t.updatedAt || t.id || Date.now();
+    var live = (t.status === 'open' || t.status === 'partial') && t.watch !== false && !t.deleted;
+    var ex = byC[code];
+    if(live){
+      var pos = { code:code, name:t.name || t.ticker, entryPrice:t.entry || 0,
+                  stop:t.stop || 0, t1:t.t1 || 0, t2:t.t2 || 0, updatedAt:stamp };
+      if(!ex || ex.deleted || stamp >= (ex.updatedAt || 0)) byC[code] = pos;
+    } else {
+      if(!ex) byC[code] = { code:code, deleted:true, deletedAt:stamp, updatedAt:stamp };
+    }
+  });
+  var positions = Object.values(byC);
+  if(!positions.length) return;
+  try{
+    await fetch(WORKER_URL + '/reconkr/positions', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ mode:mode, positions:positions })
+    });
+  }catch(e){ /* 오프라인이면 다음 변경 때 재시도 */ }
+}
+function journalUnwatch(code, mode){
+  if(!code) return;
+  mode = mode || (typeof G!=='undefined' && G.currentMode) || 'momo';
+  code = String(code).replace(/\.(KS|KQ|KN)$/i,'');
+  // 같은 코드에 아직 live 거래 남아있으면 해제 안 함 (한 로트만 청산 시 오발 방지)
+  var stillLive = (G_journal || []).some(function(t){
+    var c = String(t.ticker||'').replace(/\.(KS|KQ|KN)$/i,'');
+    return t && c === code && (t.mode || 'momo') === mode &&
+           (t.status === 'open' || t.status === 'partial') && t.watch !== false && !t.deleted;
+  });
+  if(stillLive) return;
+  var now = Date.now();
+  try{
+    fetch(WORKER_URL + '/reconkr/positions', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ mode:mode, positions:[{ code:code, deleted:true, deletedAt:now, updatedAt:now }] })
+    });
+  }catch(e){}
+}
+
+// ── 텔레그램 연결 테스트 (2026-07: 설정탭 — 구 hold 패널에서 이식) ──
+async function testTelegramKR(){
+  showToast('텔레그램 전송 중...');
+  try{
+    var resp = await fetch(WORKER_URL + '/reconkr/test-telegram');
+    var data = await resp.json();
+    if(data.ok) showToast('✅ 텔레그램 전송 성공');
+    else throw new Error('전송 실패');
+  }catch(e){ showToast('❌ 텔레그램 실패: '+e.message); }
+}
+
+// ── 구 holdPositions_* localStorage 1회 정리 (2026-07: 저널 통합으로 폐기) ──
+try{
+  ['momo','swing','core'].forEach(function(m){ localStorage.removeItem('holdPositions_'+m); });
+}catch(e){}
 var G_jFilters = { momo:'today', swing:'today', core:'today' };
 
 // 초기값 로드
@@ -1109,7 +1166,7 @@ function closeOpenPosition(tradeId){
   if(!trade) return;
   if(!confirm(trade.ticker+' 포지션을 보유아님으로 처리할까요? (일지에서 삭제됩니다)')) return;
   G_journal = G_journal.filter(function(t){return t.id!==tradeId;});
-  localStorage.setItem('reconJournal', JSON.stringify(G_journal));
+  saveJournal();
   renderOpenPositions(G.currentMode);
   renderJournal(G.currentMode);
   showToast(trade.ticker+' 포지션 제거됨');
@@ -1173,20 +1230,15 @@ function switchSubTab(sub){
   if(target) target.style.display = '';
 
   document.querySelectorAll('.btab').forEach(function(b){ b.classList.remove('on'); });
-  var map = { search:'btabSearch', history:'btabHistory', journal:'btabJournal', settings:'btabSettings', hold:'btabHold' };
+  var map = { search:'btabSearch', history:'btabHistory', journal:'btabJournal', settings:'btabSettings' };
   var btn = document.getElementById(map[sub]);
   if(btn) btn.classList.add('on');
-
-  // 보유 종목 패널 오버레이 처리
-  var holdWrap = document.getElementById('holdPanelWrap');
-  if(holdWrap) holdWrap.style.display = (sub === 'hold') ? '' : 'none';
 
   G.activeSubTab = sub;
 
   if(sub === 'history') renderHistory(G.currentMode);
   if(sub === 'journal') renderJournal(G.currentMode);
   if(sub === 'search')  renderOpenPositions(G.currentMode);
-  if(sub === 'hold')    holdRender();
 }
 
 function updateKeyStatus(){
@@ -11119,10 +11171,9 @@ function momoCardHTML(r){
     detailHtml+
     // DART 공시 목록 (있을 때만)
     renderDartDisclosures(r)+
-    // 거래 기록 + 보유 등록 버튼
+    // 진입 기록 버튼 (2026-07: 기록 = 자동 감시 등록 — 📌 보유 버튼 통합 제거)
     '<div style="display:flex;gap:6px;margin-top:10px">'+
-      '<button class="mc-trade-btn" style="flex:2;margin-top:0" onclick="openTradeLog(\''+r.ticker+'\','+(r.price||0)+')">✓ 거래 기록</button>'+
-      '<button onclick="holdFromAnalysis(\''+r.ticker+'\')" style="flex:1;background:rgba(255,106,0,.08);border:1px solid rgba(255,106,0,.25);border-radius:10px;padding:10px;font-family:var(--mono);font-size:11px;color:var(--gold);cursor:pointer;letter-spacing:.06em">📌 보유</button>'+
+      '<button class="mc-trade-btn" style="flex:1;margin-top:0" onclick="openTradeFromCard(\''+r.ticker+'\')">+ 거래 기록</button>'+
     '</div>'+
     _compatibilityFooter('momo', r._compatScores, r._marketPhase || G.marketPhase)+
   '</div>';
@@ -11548,6 +11599,10 @@ function _swingLayersBlock(r){
     '</div>'+
     layerRows+
     decisionPath+
+    // 진입 기록 버튼 (2026-07: 기록 = 자동 감시 등록)
+    '<div style="display:flex;gap:6px;margin-top:10px">'+
+      '<button class="mc-trade-btn" style="flex:1;margin-top:0" onclick="openTradeFromCard(\''+r.ticker+'\')">+ 거래 기록</button>'+
+    '</div>'+
   '</div>';
 }
 
@@ -11797,6 +11852,10 @@ function coreCardHTML(r){
     coreValuationHtml+
     levelsBlock+
     _cardSignalLines(r)+
+    // 진입 기록 버튼 (2026-07: 기록 = 자동 감시 등록)
+    '<div style="display:flex;gap:6px;margin-top:10px">'+
+      '<button class="mc-trade-btn" style="flex:1;margin-top:0" onclick="openTradeFromCard(\''+r.ticker+'\')">+ 거래 기록</button>'+
+    '</div>'+
     _compatibilityFooter('core', r._compatScores, r._marketPhase || G.marketPhase)+
   '</div>';
 }
@@ -11927,7 +11986,7 @@ function initExitState(trade, mode){
 }
 
 function persistExitState(){
-  try{ localStorage.setItem('reconJournal', JSON.stringify(G_journal)); }catch(e){}
+  saveJournal();
 }
 
 // ── 메인 엔진 ──
@@ -12401,10 +12460,12 @@ function holdCardHTML(r, mode, trade){
       '<div style="font-size:10px;color:var(--t3);margin-bottom:10px;padding:7px 10px;background:rgba(255,255,255,.025);border:1px solid var(--b);border-radius:8px;line-height:1.5">'+
         '<span style="font-family:var(--mono);font-size:8px;color:var(--t3);letter-spacing:.06em">CLAUDE 해설 (참고용 · 판정과 무관)</span><br>'+r.ai_note+'</div>':'')+
 
-    // 버튼
+    // 버튼 — 보유탭과 동일하게 추가매수/분할매도/재분석 (2026-07: RECON과 동작 통일)
     '<div style="display:flex;gap:6px">'+
-      '<button onclick="markTradeClosed('+trade.id+')" '+
-        'style="flex:2;background:rgba(255,45,78,.1);border:1px solid rgba(255,45,78,.3);border-radius:8px;padding:9px;font-family:var(--mono);font-size:11px;color:var(--r);cursor:pointer">+ 분할 매도</button>'+
+      '<button onclick="openPartialBuy('+trade.id+')" '+
+        'style="flex:1;background:rgba(43,159,255,.1);border:1px solid rgba(43,159,255,.3);border-radius:8px;padding:9px;font-family:var(--mono);font-size:11px;color:var(--bl);cursor:pointer">+ 추가 매수</button>'+
+      '<button onclick="openPartialSell('+trade.id+')" '+
+        'style="flex:1;background:rgba(255,45,78,.1);border:1px solid rgba(255,45,78,.3);border-radius:8px;padding:9px;font-family:var(--mono);font-size:11px;color:var(--r);cursor:pointer">+ 분할 매도</button>'+
       '<button onclick="rerunCard(\''+r.ticker+'\',\''+mode+'\')" '+
         'style="flex:1;background:none;border:1px solid var(--b);border-radius:8px;padding:9px;font-family:var(--mono);font-size:11px;color:var(--t2);cursor:pointer">↻ 재분석</button>'+
     '</div>'+
@@ -12414,19 +12475,64 @@ function holdCardHTML(r, mode, trade){
 // ═══════════════════════════════════════
 // 거래 일지 — 분할 매도 지원
 // ═══════════════════════════════════════
-function openTradeLog(ticker, price){
+// ── 카드에서 원클릭 진입 기록 (2026-07) ──
+//   분석 결과(스크리너/히스토리)에서 r을 찾아 name/stop/T1/T2를 openTradeLog에 prefill.
+//   기존 holdFromAnalysis의 조회 로직 재활용 — 저장은 저널 하나로 (감시 자동).
+function openTradeFromCard(ticker){
+  var r = null;
+  var modes = ['momo','swing','core','hold'];
+  for(var i=0;i<modes.length;i++){
+    var arr = (G.screenerResults && G.screenerResults[modes[i]]) || [];
+    r = arr.find(function(x){ return x && x.ticker===ticker; });
+    if(r) break;
+  }
+  if(!r){
+    var histKeys = ['momoHistory','swingHistory','coreHistory'];
+    for(var i=0;i<histKeys.length;i++){
+      var arr2 = G[histKeys[i]] || [];
+      r = arr2.find(function(x){ return x && x.ticker===ticker; });
+      if(r) break;
+    }
+  }
+  if(!r){ openTradeLog(ticker, 0, {}); return; }  // 못 찾으면 빈 모달 (수동 입력)
+  var st = (typeof calcSellTargets === 'function') ? calcSellTargets(r) : null;
+  openTradeLog(ticker, r.price || 0, {
+    name: r.displayName || r.shortName || r.ticker,
+    stop: r.stop || 0,
+    t1:   (st && st.t1) || r.target1 || r.t1 || 0,
+    t2:   (st && st.t2) || r.target2 || r.t2 || 0,
+  });
+}
+
+function openTradeLog(ticker, price, opts){
+  // 2026-07: RECON US 구조 이식 — 카드에서 stop/t1/t2/name을 opts로 넘겨 prefill.
+  //   진입 기록 = 자동 텔레그램 감시 등록 (별도 보유 등록 불필요)
+  opts = opts || {};
+  var _pName = (opts.name || '').replace(/"/g,'&quot;');
+  var _pStop = (opts.stop && opts.stop > 0) ? Math.round(opts.stop) : '';
+  var _pT1   = (opts.t1   && opts.t1   > 0) ? Math.round(opts.t1)   : '';
+  var _pT2   = (opts.t2   && opts.t2   > 0) ? Math.round(opts.t2)   : '';
   var modal = document.createElement('div');
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:999;display:flex;align-items:flex-end;justify-content:center';
   modal.innerHTML =
     '<div style="background:var(--bg1);border:1px solid var(--b);border-radius:20px 20px 0 0;padding:20px;width:100%;max-width:480px;padding-bottom:max(20px,env(safe-area-inset-bottom))">'+
     '<div style="font-family:var(--mono);font-size:15px;color:var(--t);margin-bottom:4px">'+ticker+' 진입 기록</div>'+
-    '<div style="font-size:11px;color:var(--t2);margin-bottom:14px">진입 기록 후 분할 매도를 따로 입력할 수 있습니다</div>'+
+    '<div style="font-size:11px;color:var(--t2);margin-bottom:14px">진입 기록 시 손절/T1/T2 텔레그램 감시 자동 등록</div>'+
     '<div style="display:flex;flex-direction:column;gap:10px">'+
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+
         '<div><div style="font-size:11px;color:var(--t2);margin-bottom:4px">진입가</div>'+
-          '<input id="tl_entry" type="number" step="0.01" value="'+(price||'')+'" placeholder="0.00" style="width:100%;background:var(--bg2);border:1px solid var(--b);border-radius:8px;padding:10px;font-family:var(--mono);font-size:14px;color:var(--t);outline:none"></div>'+
+          '<input id="tl_entry" type="number" step="1" value="'+(price?Math.round(price):'')+'" placeholder="0" style="width:100%;background:var(--bg2);border:1px solid var(--b);border-radius:8px;padding:10px;font-family:var(--mono);font-size:14px;color:var(--t);outline:none"></div>'+
         '<div><div style="font-size:11px;color:var(--t2);margin-bottom:4px">총 주수</div>'+
           '<input id="tl_shares" type="number" placeholder="100" style="width:100%;background:var(--bg2);border:1px solid var(--b);border-radius:8px;padding:10px;font-family:var(--mono);font-size:14px;color:var(--t);outline:none"></div>'+
+      '</div>'+
+      '<input id="tl_name" type="hidden" value="'+_pName+'">'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">'+
+        '<div><div style="font-size:11px;color:var(--t2);margin-bottom:4px">손절</div>'+
+          '<input id="tl_stop" type="number" step="1" value="'+_pStop+'" placeholder="0" style="width:100%;background:var(--bg2);border:1px solid var(--b);border-radius:8px;padding:10px;font-family:var(--mono);font-size:14px;color:var(--t);outline:none"></div>'+
+        '<div><div style="font-size:11px;color:var(--t2);margin-bottom:4px">T1</div>'+
+          '<input id="tl_t1" type="number" step="1" value="'+_pT1+'" placeholder="0" style="width:100%;background:var(--bg2);border:1px solid var(--b);border-radius:8px;padding:10px;font-family:var(--mono);font-size:14px;color:var(--t);outline:none"></div>'+
+        '<div><div style="font-size:11px;color:var(--t2);margin-bottom:4px">T2</div>'+
+          '<input id="tl_t2" type="number" step="1" value="'+_pT2+'" placeholder="0" style="width:100%;background:var(--bg2);border:1px solid var(--b);border-radius:8px;padding:10px;font-family:var(--mono);font-size:14px;color:var(--t);outline:none"></div>'+
       '</div>'+
       '<div><div style="font-size:11px;color:var(--t2);margin-bottom:4px">메모</div>'+
         '<input id="tl_memo" type="text" placeholder="예: ORB 브레이크아웃 진입" style="width:100%;background:var(--bg2);border:1px solid var(--b);border-radius:8px;padding:10px;font-size:13px;color:var(--t);outline:none"></div>'+
@@ -12443,24 +12549,45 @@ function saveTradeLog(ticker){
   var entry  = parseFloat(document.getElementById('tl_entry').value);
   var shares = parseInt(document.getElementById('tl_shares').value)||0;
   var memo   = document.getElementById('tl_memo').value.trim();
-  if(!entry){ showToast('진입가를 입력하세요'); return; }
+  var stop   = parseFloat((document.getElementById('tl_stop')||{}).value) || 0;
+  var t1     = parseFloat((document.getElementById('tl_t1')  ||{}).value) || 0;
+  var t2     = parseFloat((document.getElementById('tl_t2')  ||{}).value) || 0;
+  var name   = ((document.getElementById('tl_name')||{}).value || '').trim();
+  var _mode  = G.currentMode || 'momo';
+
+  // ── 고스트 포지션 방지: 진입 기록 무결성 검증 (2026-07 US 이식) ──
+  //   감시(watch:true) 대상이 되므로 0주·손절0 같은 유령 포지션을 막아야 함.
+  if(!entry || entry <= 0){ showToast('⚠ 진입가를 입력하세요 (필수)'); return; }
+  if(!shares || shares <= 0){ showToast('⚠ 보유 수량을 입력하세요 (0주 기록 불가)'); return; }
+  // 손절선: SWING/MOMO는 필수(리스크 관리 핵심), CORE는 선택(펀더 기준이라 가격손절 약함)
+  if(_mode !== 'core'){
+    if(!stop || stop <= 0){ showToast('⚠ 손절가를 입력하세요 ('+_mode.toUpperCase()+'는 필수)'); return; }
+    if(stop >= entry){
+      if(!confirm('손절가(₩'+Math.round(stop).toLocaleString()+')가 진입가(₩'+Math.round(entry).toLocaleString()+') 이상입니다.\n이익보호선(트레일 후 상향)이 아니라면 잘못된 값일 수 있습니다.\n\n그대로 기록할까요?')) return;
+    }
+  }
+
   var record = {
     id: Date.now(), date: new Date().toLocaleDateString('ko-KR'),
     ticker: ticker,
+    name: name || ticker,   // 워커 텔레그램 알림 표시용
     entry: entry,       // 가중평균 진입가 (추가매수 시 자동 갱신)
     shares: shares,     // 총 매수 주수
     remaining: shares,
+    stop: stop, t1: t1, t2: t2,   // 감시 가격선 (syncJournalWatch 투영이 그대로 사용)
+    watch: true,                  // open이면 텔레그램 감시 대상
     buys: [{            // 매수 내역
       date: new Date().toLocaleDateString('ko-KR'),
       price: entry, shares: shares, memo: memo||'1차 진입'
     }],
     sells: [], exit: null, pnl: null, pnl_pct: null, memo: memo,
-    mode: G.currentMode || 'momo', status: 'open'
+    mode: _mode, status: 'open',
+    updatedAt: Date.now()         // 머지/투영용
   };
   G_journal.unshift(record);
-  localStorage.setItem('reconJournal', JSON.stringify(G_journal));
+  saveJournal();
   document.querySelector('div[style*=fixed]')?.remove();
-  showToast(ticker+' 진입 기록 완료 · $'+entry+(shares?' · '+shares+'주':''));
+  showToast('📌 '+ticker+' 진입 기록 + 감시 등록 · ₩'+Math.round(entry).toLocaleString()+(shares?' · '+shares+'주':''));
   renderJournal(G.currentMode);
 }
 
@@ -12572,7 +12699,7 @@ function confirmPartialSell(tradeId){
       trade.exitState.highWater = Math.max(trade.exitState.highWater||trade.entry, trade.exit||trade.entry);
     }
   }
-  localStorage.setItem('reconJournal',JSON.stringify(G_journal));
+  saveJournal();
   document.querySelector('div[style*=fixed]')?.remove();
   var msg=trade.ticker+' '+qty+'주 매도 · '+(pnl>=0?'+':'')+pnl+'원';
   if(trade.remaining<=0) msg+=' · 포지션 종료'; else msg+=' · 잔여 '+trade.remaining+'주';
@@ -12681,7 +12808,7 @@ function confirmPartialBuy(tradeId){
   trade.shares  = totalSh;
   trade.remaining = (trade.remaining||0) + shares;
 
-  localStorage.setItem('reconJournal', JSON.stringify(G_journal));
+  saveJournal();
   document.querySelector('div[style*=fixed]')?.remove();
   showToast(trade.ticker+' +'+shares+'주 추가 · 평균단가 $'+trade.entry);
   renderJournal(G.currentMode);
@@ -13056,7 +13183,7 @@ function deleteSellEntry(tradeId, idx){
   if(!confirm('이 매도 기록을 삭제할까요?')) return;
   trade.sells.splice(idx,1);
   recalcTrade(trade);
-  localStorage.setItem('reconJournal',JSON.stringify(G_journal));
+  saveJournal();
   renderJournal(G.currentMode);
   renderOpenPositions(G.currentMode);
   showToast('매도 기록 삭제됨');
@@ -13069,7 +13196,7 @@ function deleteBuyEntry(tradeId, idx){
   if(!confirm('이 매수 기록을 삭제할까요?')) return;
   trade.buys.splice(idx,1);
   recalcTrade(trade);
-  localStorage.setItem('reconJournal',JSON.stringify(G_journal));
+  saveJournal();
   renderJournal(G.currentMode);
   renderOpenPositions(G.currentMode);
   showToast('매수 기록 삭제됨');
@@ -13106,7 +13233,7 @@ function editSellEntry(tradeId, idx){
     if(!price||!shares||price<=0||shares<=0){ showToast('가격과 수량을 확인하세요'); return; }
     s.price=price; s.shares=shares; s.memo=memo;
     recalcTrade(trade);
-    localStorage.setItem('reconJournal',JSON.stringify(G_journal));
+    saveJournal();
     modal.remove();
     renderJournal(G.currentMode);
     renderOpenPositions(G.currentMode);
@@ -13146,7 +13273,7 @@ function editBuyEntry(tradeId, idx){
     if(!price||!shares||price<=0||shares<=0){ showToast('가격과 수량을 확인하세요'); return; }
     b.price=price; b.shares=shares; b.memo=memo;
     recalcTrade(trade);
-    localStorage.setItem('reconJournal',JSON.stringify(G_journal));
+    saveJournal();
     modal.remove();
     renderJournal(G.currentMode);
     renderOpenPositions(G.currentMode);
@@ -13158,13 +13285,13 @@ function editBuyEntry(tradeId, idx){
 function deleteTradeLog(id){
   if(!confirm('이 거래 기록을 삭제할까요?')) return;
   G_journal = G_journal.filter(function(t){return t.id!==id;});
-  localStorage.setItem('reconJournal',JSON.stringify(G_journal));
+  saveJournal();
   renderJournal(G.currentMode);
 }
 
 function clearAllData(){
   if(!confirm('모든 데이터를 삭제할까요?')) return;
-  ['apexAlerts','momoHistory','swingHistory','coreHistory','reconJournal'].forEach(function(k){localStorage.removeItem(k);});
+  ['apexAlerts','momoHistory','swingHistory','coreHistory',RECONKR_JOURNAL_KEY].forEach(function(k){localStorage.removeItem(k);});
   G.momoHistory=[]; G.swingHistory=[]; G.coreHistory=[]; G.alerts=[]; G.unread=0;
   updateBadge();
   showToast('모든 데이터 삭제 완료');
@@ -17364,191 +17491,8 @@ setTimeout(function(){
   }
 }, 3000);
 
-// ── 보유 종목 관리 ──
-var holdPositions = [];
+// ── 보유 종목 관리 시스템 제거 (2026-07: 저널 통합 — saveTradeLog가 감시까지 등록) ──
 
-function holdGetKey() {
-  return 'holdPositions_' + (G.currentMode || 'momo');
-}
-
-function holdLoad() {
-  holdPositions = JSON.parse(localStorage.getItem(holdGetKey()) || '[]');
-}
-
-function holdRender() {
-  holdLoad();
-  var list  = document.getElementById('holdList');
-  if (!list) return;
-  if (!holdPositions.length) {
-    list.innerHTML = '<div class="hold-empty">등록된 종목 없음</div>';
-    return;
-  }
-  var fmt = function(v){ return v ? Number(v).toLocaleString() : '─'; };
-  list.innerHTML = holdPositions.map(function(p, i) {
-    return '<div class="hold-item" style="display:block;padding:10px 12px">' +
-      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">' +
-        '<div>' +
-          '<span class="hold-item-code" style="font-family:var(--mono);font-size:13px;color:var(--t);font-weight:700">' + p.code + '</span>' +
-          '<span class="hold-item-name" style="font-size:10px;color:var(--t2);margin-left:6px">' + (p.name || '─') + '</span>' +
-        '</div>' +
-        '<span class="hold-item-del" onclick="holdDelete(' + i + ')" style="cursor:pointer;color:var(--t3);font-size:14px;padding:2px 6px">✕</span>' +
-      '</div>' +
-      '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;font-family:var(--mono);font-size:10px">' +
-        '<div><div style="color:var(--t3);font-size:9px;letter-spacing:.04em">진입</div><div style="color:var(--t)">' + fmt(p.entryPrice) + '</div></div>' +
-        '<div><div style="color:var(--t3);font-size:9px;letter-spacing:.04em">스톱</div><div style="color:var(--r)">' + fmt(p.stop) + '</div></div>' +
-        '<div><div style="color:var(--t3);font-size:9px;letter-spacing:.04em">T1</div><div style="color:var(--a)">' + fmt(p.t1) + '</div></div>' +
-        '<div><div style="color:var(--t3);font-size:9px;letter-spacing:.04em">T2</div><div style="color:var(--g)">' + fmt(p.t2) + '</div></div>' +
-      '</div>' +
-    '</div>';
-  }).join('');
-}
-
-function holdAdd() {
-  var code  = (document.getElementById('holdCode')  || {}).value || '';
-  var name  = (document.getElementById('holdName')  || {}).value || '';
-  var price = (document.getElementById('holdPrice') || {}).value || '';
-  var stop  = (document.getElementById('holdStop')  || {}).value || '';
-  var t1    = (document.getElementById('holdT1')    || {}).value || '';
-  var t2    = (document.getElementById('holdT2')    || {}).value || '';
-  code = code.trim();
-  if (!code) { alert('종목코드를 입력하세요'); return; }
-  holdLoad();
-  holdPositions.push({
-    code:       code,
-    name:       name.trim(),
-    entryPrice: parseFloat(price) || 0,
-    stop:       parseFloat(stop)  || 0,
-    t1:         parseFloat(t1)    || 0,
-    t2:         parseFloat(t2)    || 0,
-  });
-  localStorage.setItem(holdGetKey(), JSON.stringify(holdPositions));
-  ['holdCode','holdName','holdPrice','holdStop','holdT1','holdT2'].forEach(function(id){
-    var el = document.getElementById(id); if(el) el.value='';
-  });
-  holdRender();
-}
-
-// ── 분석 카드에서 원클릭 보유 등록 ──
-// r.entry/r.stop + calcSellTargets(r)의 t1/t2 를 자동으로 담아서 저장 + 서버 동기화
-function holdFromAnalysis(ticker){
-  // 모든 모드 결과에서 ticker 찾기 (momo/swing/core + hold)
-  var r = null;
-  var modes = ['momo','swing','core','hold'];
-  // [1] 스크리너 결과 (screener 카드에서 누른 경우)
-  for(var i=0;i<modes.length;i++){
-    var arr = (G.screenerResults && G.screenerResults[modes[i]]) || [];
-    r = arr.find(function(x){ return x && x.ticker===ticker; });
-    if(r) break;
-  }
-  // [2] 분석 히스토리 (분석탭에서 단일 분석 후 누른 경우)
-  //     saveToHistory가 momoHistory/swingHistory/coreHistory 에 최신 unshift
-  if(!r){
-    var histKeys = ['momoHistory','swingHistory','coreHistory'];
-    for(var i=0;i<histKeys.length;i++){
-      var arr = G[histKeys[i]] || [];
-      r = arr.find(function(x){ return x && x.ticker===ticker; });
-      if(r) break;
-    }
-  }
-  if(!r){ showToast && showToast('분석 결과를 찾을 수 없습니다'); return; }
-  // 종목코드: 005930.KS → 005930
-  var code = (r.ticker||'').replace(/\.(KS|KQ|KN)$/i,'');
-  if(!/^\d{6}$/.test(code)){ showToast && showToast('종목코드 형식 오류: '+r.ticker); return; }
-
-  var st = (typeof calcSellTargets === 'function') ? calcSellTargets(r) : null;
-  var entry = r.entry || r.price || 0;
-  var stop  = r.stop  || 0;
-  var t1    = (st && st.t1) || r.target1 || r.t1 || 0;
-  var t2    = (st && st.t2) || r.target2 || r.t2 || 0;
-
-  holdLoad();
-  // 이미 있으면 업데이트, 없으면 추가
-  var idx = holdPositions.findIndex(function(p){ return p.code===code; });
-  var item = {
-    code:       code,
-    name:       r.displayName || r.shortName || r.ticker,
-    entryPrice: Math.round(entry),
-    stop:       Math.round(stop),
-    t1:         Math.round(t1),
-    t2:         Math.round(t2),
-  };
-  if(idx>=0) holdPositions[idx] = item;
-  else       holdPositions.push(item);
-  localStorage.setItem(holdGetKey(), JSON.stringify(holdPositions));
-
-  if(showToast) showToast('📌 보유 등록: '+item.name+' (T1 '+item.t1.toLocaleString()+'/T2 '+item.t2.toLocaleString()+')');
-
-  // 서버 즉시 동기화 (5분 기다릴 필요 없이)
-  if(typeof holdSync === 'function'){
-    try{ holdSync(); }catch(e){}
-  }
-
-  // 보유 패널이 열려있으면 리렌더링
-  if(typeof holdRender === 'function') holdRender();
-}
-
-function holdDelete(i) {
-  holdLoad();
-  var removed = holdPositions[i];
-  if(!confirm((removed && (removed.name || removed.code))+' 을(를) 보유 목록에서 제거할까요?\n\n매도 완료 후에 삭제하세요. 삭제 후에는 스톱/T1/T2 알림이 오지 않습니다.')) return;
-  holdPositions.splice(i, 1);
-  localStorage.setItem(holdGetKey(), JSON.stringify(holdPositions));
-  holdRender();
-  // Worker KV 즉시 동기화 — 그래야 서버에서도 이 종목 감시 중단
-  if(typeof holdSync === 'function'){
-    try{ holdSync(); }catch(e){}
-  }
-}
-
-function holdShowStatus(msg, type) {
-  var el = document.getElementById('holdStatus');
-  if (!el) return;
-  el.style.display = '';
-  el.className = 'hold-status ' + (type || '');
-  el.textContent = msg;
-}
-
-async function holdSync() {
-  holdLoad();
-  holdShowStatus('저장 중...', '');
-  try {
-    var resp = await fetch(WORKER_URL + '/reconkr/positions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        mode:         G.currentMode || 'momo',
-        positions:    holdPositions,
-        kisAppKey:    KIS.appKey    || '',
-        kisAppSecret: KIS.appSecret || '',
-      })
-    });
-    var data = await resp.json();
-    if (data.ok) {
-      holdShowStatus('✅ 저장 완료 — 장 중 5분마다 자동 감시', 'ok');
-    } else {
-      throw new Error('저장 실패');
-    }
-  } catch(e) {
-    holdShowStatus('❌ 저장 실패: ' + e.message, 'err');
-  }
-}
-
-async function holdTestTg() {
-  holdShowStatus('전송 중...', '');
-  try {
-    var resp = await fetch(WORKER_URL + '/reconkr/test-telegram');
-    var data = await resp.json();
-    if (data.ok) {
-      holdShowStatus('✅ 텔레그램 전송 성공', 'ok');
-    } else {
-      throw new Error('전송 실패');
-    }
-  } catch(e) {
-    holdShowStatus('❌ 실패: ' + e.message, 'err');
-  }
-}
-
-holdRender();
 
 // ─────────────────────────────────────────────────────────────
 // ★ Plan B (2026-05-27): TRACK 클라우드 동기화 초기화
