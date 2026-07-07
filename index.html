@@ -2672,14 +2672,15 @@ function toggleAutoScan(){
 }
 function startAutoScan(){
   stopAutoScan();
-  G.autoScanTimer = setInterval(function(){
+  G.autoScanTimer = setInterval(async function(){
     var kst   = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Seoul'}));
     var day   = kst.getDay();
     var hm    = kst.getHours()*100 + kst.getMinutes();
     var inMomo= day>0&&day<6&&hm>=900&&hm<1300;
     var atClose=day>0&&day<6&&hm>=1530&&hm<1545;
-    if(inMomo)  runScreener('momo');
-    if(atClose) { runScreener('swing'); runScreener('core'); }
+    if(inMomo)  await runScreener('momo');
+    // 장 마감: swing → core 순차 실행 (동시 호출 시 KIS 유량초과 EGW00201 발생)
+    if(atClose){ await runScreener('swing'); await runScreener('core'); }
   }, 5*60*1000);
 }
 function stopAutoScan(){
@@ -3946,8 +3947,26 @@ function score_core(s){
   reasons.push('※ A/D·OBV·RS·베이스 → 분석 탭에서 확인');
   return { score: Math.min(100, Math.max(0, score)), reasons };
 }
+// 스캔 종료 처리 + 대기열 소비 (순차 실행 보장)
+function _finishScan(){
+  G.screenerRunning = false;
+  var q = G.screenerQueue || [];
+  if(q.length){
+    var next = q.shift();
+    setTimeout(function(){ runScreener(next); }, 300);  // 짧은 텀 후 다음 스캔
+  }
+}
+
 async function runScreener(mode){
-  if(G.screenerRunning){ showToast('스캔 진행 중입니다'); return; }
+  // 진행 중이면 거부하지 않고 대기열에 넣어 순차 실행 (KIS 유량초과 방지)
+  if(G.screenerRunning){
+    G.screenerQueue = G.screenerQueue || [];
+    if(G.screenerQueue.indexOf(mode) === -1 && G.screenerMode !== mode){
+      G.screenerQueue.push(mode);
+      showToast(mode.toUpperCase()+' 스캔 대기열 추가 — 진행 중인 스캔 후 자동 실행');
+    }
+    return;
+  }
   G.screenerRunning = true;
   G.screenerMode    = mode;
 
@@ -3970,7 +3989,7 @@ async function runScreener(mode){
       if(bar) { bar.classList.remove('indeterminate'); bar.style.width='0%'; }
       if(dot) dot.classList.remove('scanning');
       if(btn) { btn.disabled=false; btn.textContent='스캔'; }
-      G.screenerRunning = false;
+      _finishScan();
       return;
     }
     if(area) area.innerHTML = '<div class="sc-status">'+pool.length+'개 후보 필터링 중...</div>';
@@ -4005,7 +4024,7 @@ async function runScreener(mode){
       if(bar){ bar.classList.remove('indeterminate'); bar.style.width='0%'; }
       if(dot) dot.classList.remove('scanning');
       if(btn){ btn.disabled=false; btn.textContent='스캔'; }
-      G.screenerRunning = false;
+      _finishScan();
       return;
     }
     if(area) area.innerHTML = '<div class="sc-status">'+pool.length+'개 수집 → '+passed.length+'개 통과'+(mode==='momo'?' · 일봉 분석 중...':' · 점수 계산 중...')+'</div>';
@@ -4162,7 +4181,7 @@ async function runScreener(mode){
       if(bar){ bar.classList.remove('indeterminate'); bar.style.width='0%'; }
       if(dot) dot.classList.remove('scanning');
       if(btn){ btn.disabled=false; btn.textContent='스캔'; }
-      G.screenerRunning = false;
+      _finishScan();
       return;
     }
 
@@ -4190,7 +4209,7 @@ async function runScreener(mode){
   }finally{
     if(dot) dot.classList.remove('scanning');
     if(btn) { btn.disabled=false; btn.textContent='스캔'; }
-    G.screenerRunning = false;
+    _finishScan();
   }
 } // end runScreener
 
