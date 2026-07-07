@@ -716,11 +716,8 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
   </div>
 
   <div class="sg-title">DART API (금융감독원 전자공시)</div>
-  <div class="sg-row" style="flex-direction:column;align-items:flex-start">
-    <div><div class="sg-label">API Key</div><div class="sg-sub">opendart.fss.or.kr 발급</div></div>
-    <input class="key-input" type="password" id="dartApiKeyInput" placeholder="발급 후 입력" oninput="saveDart()">
-  </div>
-  <div class="sg-row"><div><div class="sg-label">DART 연결 상태</div><div class="sg-sub" id="dartTestResult">공시 자동 조회 연동</div></div><div style="font-family:var(--mono);font-size:11px;color:var(--gold)" id="dartConnStatus">미설정</div></div>
+  <div class="sg-row"><div><div class="sg-label">API Key</div><div class="sg-sub">서버(Oracle VM)에서 관리 — 입력 불필요</div></div><div style="font-family:var(--mono);font-size:11px;color:var(--gold)">서버 관리 ✓</div></div>
+  <div class="sg-row"><div><div class="sg-label">DART 연결 상태</div><div class="sg-sub" id="dartTestResult">공시 자동 조회 연동</div></div><div style="font-family:var(--mono);font-size:11px;color:var(--gold)" id="dartConnStatus">서버 관리 ✓</div></div>
   <div class="sg-row" style="cursor:pointer" onclick="testDartConnection()"><div><div class="sg-label">DART 연결 테스트</div></div><div style="font-family:var(--mono);font-size:11px;color:var(--bl)">테스트 →</div></div>
 
   <div class="sg-title">KIS API (한국투자증권)</div>
@@ -1008,7 +1005,10 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
 // 전역 상태
 // ═══════════════════════════════════════
 var G = {
-  dartApiKey: localStorage.getItem('dartApiKey') || '',
+  // 2026-07: DART 키도 Oracle VM(dart-proxy) .env 로 이관. 브라우저는 키 미보유.
+  //   서버가 /dart/ 요청에 crtfc_key 주입. 'SERVER'는 게이트 통과용 truthy 표식(실제 키 아님).
+  //   기존 if(G.dartApiKey) 게이트 수십 곳이 그대로 통과하도록 유지 (KIS 'SERVER' 패턴과 동일).
+  dartApiKey: 'SERVER',
   ntfy:     localStorage.getItem('ntfyCh') || '',
   alerts:   JSON.parse(localStorage.getItem('apexAlerts')||'[]'),
   unread:   0,
@@ -1033,7 +1033,7 @@ var G_jFilters = { momo:'today', swing:'today', core:'today' };
 
 // 초기값 로드
 if(G.ntfy)  { document.getElementById('ntfyChInput').value = G.ntfy; }
-if(G.dartApiKey){ var _di=document.getElementById('dartApiKeyInput'); if(_di) _di.value=G.dartApiKey; }
+// DART 키는 서버 관리 (2026-07) — 입력칸 복원 불필요
 
 // ═══════════════════════════════════════
 // 모드/탭 전환
@@ -4247,11 +4247,12 @@ function scCandidateTap(ticker, mode){
 // Worker: /dart/{path}?{query} → https://opendart.fss.or.kr/{path}?{query}
 // Oracle 서버 직접 경유 (Cloudflare IP 차단 우회)
 async function fetchDart(apiPath, params){
-  var qs = '?crtfc_key='+encodeURIComponent(G.dartApiKey);
+  // crtfc_key 는 서버(dart-proxy)가 주입 — 프론트는 파라미터만 전달 (2026-07)
+  var qs = '?_t='+Date.now();
   Object.keys(params||{}).forEach(function(k){
     qs += '&'+k+'='+encodeURIComponent(params[k]);
   });
-  var url = DART_URL + '/dart' + apiPath + qs + '&_t='+Date.now();
+  var url = DART_URL + '/dart' + apiPath + qs;
   var resp = await fetch(url, {cache:'no-store'});
   if(!resp.ok) throw new Error('DART HTTP '+resp.status);
   return resp.json();
@@ -4259,8 +4260,7 @@ async function fetchDart(apiPath, params){
 
 // ── DART 저장 / 상태 ──
 function saveDart(){
-  G.dartApiKey = document.getElementById('dartApiKeyInput').value.trim();
-  localStorage.setItem('dartApiKey', G.dartApiKey);
+  // 2026-07: DART 키 서버 이관 — 입력칸 제거됨. 하위호환용 no-op.
   updateDartStatus();
 }
 
@@ -5537,14 +5537,13 @@ async function fetchBabylonKR(stockCode){
 function updateDartStatus(){
   var el = document.getElementById('dartConnStatus');
   if(!el) return;
-  if(G.dartApiKey){ el.textContent='키 설정됨 ✓'; el.style.color='var(--gold)'; }
-  else             { el.textContent='미설정';      el.style.color='var(--t3)'; }
+  // 2026-07: 서버 관리 — 항상 활성
+  el.textContent='서버 관리 ✓'; el.style.color='var(--gold)';
 }
 
 async function testDartConnection(){
   var el = document.getElementById('dartTestResult');
   var st = document.getElementById('dartConnStatus');
-  if(!G.dartApiKey){ if(el) el.textContent='⚠ API 키를 먼저 입력하세요'; return; }
   if(el) el.textContent='연결 확인 중...';
   try{
     var data = await fetchDart('/api/list.json', { page_count:'1' });
@@ -10092,16 +10091,26 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
   }
 
   try{
-    var res = await fetch(WORKER_URL + '/reconkr/ai', {
+    // ── FIX 2026-07: 워커 라우트/모델 정합 ──
+    //   워커 2026-06 리팩토링에서 AI 프록시가 /recon/claude + 모델 허용목록으로 변경됨.
+    //   기존 /reconkr/ai + claude-sonnet-4-20250514 는 catch-all("RECON Worker OK")로 떨어져 JSON 파싱 오류.
+    //   워커 ALLOWED_MODELS: claude-sonnet-4-6 / claude-sonnet-4-5 / claude-haiku-4-5 계열만 통과.
+    var res = await fetch(WORKER_URL + '/recon/claude', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
-        model:'claude-sonnet-4-20250514',
+        model:'claude-sonnet-4-6',
         max_tokens: openTrade ? 350 : 250,  // 보유는 해설 전용 (판정은 exitEngine)
         messages:[{role:'user',content:prompt}]
       })
     });
-    var data = await res.json();
+    // ── 비-JSON 응답 방어: 프론트/워커 라우트 드리프트 시 명확한 에러 메시지 ──
+    var _rawBody = await res.text();
+    var data;
+    try{ data = JSON.parse(_rawBody); }
+    catch(_pe){
+      throw new Error('워커 응답이 JSON 아님 (HTTP '+res.status+'): "'+_rawBody.slice(0,80)+'" — 프론트/워커 라우트 불일치 가능성 (워커 배포 후 경로 확인)');
+    }
     if(data.error) throw new Error((data.error && data.error.message) || JSON.stringify(data.error));
     if(!data.content || !data.content[0] || typeof data.content[0].text !== 'string'){
       throw new Error('AI 응답 형식 오류: ' + JSON.stringify(data).slice(0, 200));
@@ -17590,8 +17599,7 @@ setInterval(function(){
 
 // ── DART 초기화 ──
 (function initDart(){
-  var k = localStorage.getItem('dartApiKey')||'';
-  if(k){ G.dartApiKey=k; var el=document.getElementById('dartApiKeyInput'); if(el) el.value=k; }
+  // 2026-07: DART 키 서버 관리 — localStorage 로드 불필요. 상태 표시만.
   updateDartStatus();
 })();
 
