@@ -1,0 +1,30 @@
+# 캐시·런타임 데이터
+data/
+signals/
+orders/
+ledger.csv
+fills.csv
+positions.json
+
+# 시크릿
+.env
+*.env
+
+# 시스템
+.DS_Store
+node_modules/
+
+# 아카이브 (로컬 전용)
+archive/
+_inbox/
+
+# Wrangler 로컬 캐시
+.wrangler/
+
+# sandbox (개발팀 실험 공간)
+sandbox/
+
+# macOS 개인 문서
+*.pages
+*.numbers
+*.key

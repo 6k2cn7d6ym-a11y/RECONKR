@@ -1,0 +1,7 @@
+name = "recon"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+[[kv_namespaces]]
+binding = "RECONKR_KV"
+id = "287041ba0f6a410aaf483ba018d4c5ac"

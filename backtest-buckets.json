@@ -1,0 +1,92 @@
+[
+  {
+    "variant": "V1",
+    "total": 1046,
+    "buckets": [
+      {
+        "bucket": "<1.5%",
+        "n": 1,
+        "ev": 11.44,
+        "winRate": 100.0
+      },
+      {
+        "bucket": "1.5~2.5%",
+        "n": 9,
+        "ev": 2.38,
+        "winRate": 33.3
+      },
+      {
+        "bucket": "2.5~3.5%",
+        "n": 21,
+        "ev": -0.38,
+        "winRate": 33.3
+      },
+      {
+        "bucket": "≥3.5%",
+        "n": 1015,
+        "ev": 1.05,
+        "winRate": 43.8
+      }
+    ]
+  },
+  {
+    "variant": "V2",
+    "total": 308,
+    "buckets": [
+      {
+        "bucket": "<1.5%",
+        "n": 0,
+        "ev": null,
+        "winRate": null
+      },
+      {
+        "bucket": "1.5~2.5%",
+        "n": 0,
+        "ev": null,
+        "winRate": null
+      },
+      {
+        "bucket": "2.5~3.5%",
+        "n": 5,
+        "ev": 0.19,
+        "winRate": 40.0
+      },
+      {
+        "bucket": "≥3.5%",
+        "n": 303,
+        "ev": 1.55,
+        "winRate": 44.9
+      }
+    ]
+  },
+  {
+    "variant": "V3",
+    "total": 59,
+    "buckets": [
+      {
+        "bucket": "<1.5%",
+        "n": 0,
+        "ev": null,
+        "winRate": null
+      },
+      {
+        "bucket": "1.5~2.5%",
+        "n": 1,
+        "ev": 14.37,
+        "winRate": 100.0
+      },
+      {
+        "bucket": "2.5~3.5%",
+        "n": 1,
+        "ev": 12.79,
+        "winRate": 100.0
+      },
+      {
+        "bucket": "≥3.5%",
+        "n": 57,
+        "ev": 0.46,
+        "winRate": 38.6
+      }
+    ]
+  }
+]

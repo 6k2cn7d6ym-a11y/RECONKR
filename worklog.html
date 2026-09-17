@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RECON KR 작업 로그 — 2026-04-10</title>
+<style>
+:root{
+  --bg:#060809;--bg1:#0c1015;--bg2:#111820;--bg3:#18222e;
+  --b:#1c2a38;--b2:#253646;
+  --t:#dde8f0;--t2:#5a7a95;--t3:#2d4a60;
+  --g:#00f07a;--g2:#00ff88;--gd:#00a050;
+  --r:#ff2d4e;--a:#ffaa00;--bl:#2b9fff;--pu:#9f7aff;
+  --mono:'Fira Mono','Courier New',monospace;--sans:system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--t);font-family:var(--sans);padding:24px 20px 60px;max-width:780px;margin:0 auto;line-height:1.6}
+h1{font-size:18px;font-family:var(--mono);color:var(--g);letter-spacing:.1em;margin-bottom:4px}
+.subtitle{font-size:11px;color:var(--t2);font-family:var(--mono);margin-bottom:32px;letter-spacing:.06em}
+
+/* timeline */
+.timeline{position:relative;padding-left:28px}
+.timeline::before{content:'';position:absolute;left:10px;top:0;bottom:0;width:1px;background:var(--b2)}
+.step{position:relative;margin-bottom:32px}
+.step-dot{position:absolute;left:-22px;top:4px;width:10px;height:10px;border-radius:50%;border:2px solid var(--b2);background:var(--bg)}
+.step-dot.done{background:var(--g);border-color:var(--g)}
+.step-dot.bug{background:var(--r);border-color:var(--r)}
+.step-dot.change{background:var(--a);border-color:var(--a)}
+.step-dot.keep{background:var(--t3);border-color:var(--t3)}
+
+.step-tag{display:inline-block;font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.1em;padding:2px 7px;border-radius:4px;margin-bottom:7px}
+.tag-check{background:rgba(0,240,122,.1);color:var(--g);border:1px solid rgba(0,240,122,.25)}
+.tag-bug{background:rgba(255,45,78,.1);color:var(--r);border:1px solid rgba(255,45,78,.25)}
+.tag-fix{background:rgba(255,170,0,.1);color:var(--a);border:1px solid rgba(255,170,0,.25)}
+.tag-keep{background:rgba(45,74,96,.2);color:var(--t2);border:1px solid var(--b)}
+.tag-dart{background:rgba(43,159,255,.1);color:var(--bl);border:1px solid rgba(43,159,255,.25)}
+.tag-output{background:rgba(159,122,255,.1);color:var(--pu);border:1px solid rgba(159,122,255,.25)}
+
+h2{font-size:14px;font-weight:700;color:var(--t);margin-bottom:8px}
+p{font-size:13px;color:var(--t2);margin-bottom:8px}
+code{font-family:var(--mono);font-size:11px;background:var(--bg2);padding:1px 5px;border-radius:3px;color:var(--t)}
+
+pre{background:var(--bg2);border:1px solid var(--b);border-radius:8px;padding:12px 14px;font-family:var(--mono);font-size:11px;line-height:1.7;overflow-x:auto;margin:8px 0 10px;color:var(--t)}
+pre .c{color:var(--t3)}
+pre .ok{color:var(--g)}
+pre .bad{color:var(--r)}
+pre .warn{color:var(--a)}
+pre .kw{color:var(--bl)}
+pre .str{color:var(--pu)}
+
+table{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+th{text-align:left;padding:6px 10px;background:var(--bg2);color:var(--t2);font-family:var(--mono);font-size:10px;letter-spacing:.06em;border-bottom:1px solid var(--b2)}
+td{padding:7px 10px;border-bottom:1px solid var(--b);color:var(--t)}
+tr:last-child td{border-bottom:none}
+td.before{color:var(--r);font-family:var(--mono);font-size:11px}
+td.after{color:var(--g);font-family:var(--mono);font-size:11px}
+td.reason{color:var(--t2);font-size:11px}
+
+.note{background:var(--bg2);border-left:3px solid var(--b2);border-radius:0 6px 6px 0;padding:10px 14px;font-size:12px;color:var(--t2);margin:8px 0}
+.note.warn{border-color:var(--a)}
+.note.ok{border-color:var(--g)}
+.note.info{border-color:var(--bl)}
+
+.divider{border:none;border-top:1px solid var(--b);margin:0 0 32px}
+
+/* section header */
+.s-num{font-family:var(--mono);font-size:11px;color:var(--t3);margin-right:8px}
+
+/* unchanged list */
+.unchanged{display:flex;flex-direction:column;gap:6px;margin:8px 0}
+.unchg-row{display:flex;align-items:flex-start;gap:8px;font-size:12px;color:var(--t2)}
+.unchg-row .lock{color:var(--t3);font-family:var(--mono);font-size:10px;flex-shrink:0;padding-top:1px}
+
+/* next steps */
+.next{display:flex;flex-direction:column;gap:8px;margin:10px 0}
+.next-row{display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg2);border:1px solid var(--b);border-radius:7px;font-size:12px}
+.next-n{font-family:var(--mono);font-size:10px;color:var(--t3);flex-shrink:0;width:18px}
+</style>
+</head>
+<body>
+
+<h1>RECON KR — 작업 로그</h1>
+<div class="subtitle">2026-04-10 · KIS + DART Worker 연동 + MA20 완화</div>
+
+<div class="timeline">
+
+  <!-- STEP 1 -->
+  <div class="step">
+    <div class="step-dot done"></div>
+    <span class="step-tag tag-check">SETUP</span>
+    <h2><span class="s-num">1.</span>GitHub 클론 & 파일 구조 확인</h2>
+    <p>GitHub 리포에서 파일 상태 확인. <code>recon_kr.html</code> / <code>worker.js</code> 는 미업로드 상태.</p>
+    <pre><span class="c">$ git clone https://github.com/6k2cn7d6ym-a11y/RECON.git</span>
+<span class="ok">✓ main 브랜치 1개 | 커밋 5개</span>
+<span class="ok">✓ index.html (289KB), sw.js (1.5KB)</span>
+<span class="warn">⚠ recon_kr.html / worker.js → GitHub 미업로드 확인</span></pre>
+    <div class="note info">유저가 직접 파일 업로드 & 붙여넣기로 제공</div>
+  </div>
+
+  <!-- STEP 2 -->
+  <div class="step">
+    <div class="step-dot bug"></div>
+    <span class="step-tag tag-bug">BUG FOUND</span>
+    <h2><span class="s-num">2.</span>worker.js 수신 & 코드 리뷰</h2>
+    <p>3개 라우팅 블록 확인: <code>/kis/*</code> → KIS API, <code>/dart/*</code> → DART API, <code>?url=</code> → Yahoo/Finviz/CNN 원본 유지</p>
+    <pre><span class="c">// ── /kis/ 처리 — 정상 ──</span>
+<span class="kw">const</span> kisPath = url.pathname.<span class="ok">slice(4)</span>;
+<span class="c">// "/kis/oauth2/token" → slice(4) → "/oauth2/token"  ✓</span>
+
+<span class="c">// ── /dart/ 처리 — 버그 ──</span>
+<span class="kw">const</span> dartPath = url.pathname.<span class="bad">slice(6)</span>;   <span class="bad">← BUG</span>
+<span class="c">// "/dart/api/list.json"</span>
+<span class="c">//  [0123456]</span>
+<span class="c">// slice(6) → "api/list.json"  ← '/' 없음</span>
+<span class="bad">// → https://opendart.fss.or.krapi/list.json  ← URL 깨짐</span></pre>
+    <p>원인: <code>/dart</code>는 5글자. <code>slice(5)</code>로 해야 이후 <code>/api/...</code>가 그대로 붙음.</p>
+  </div>
+
+  <!-- STEP 3 -->
+  <div class="step">
+    <div class="step-dot done"></div>
+    <span class="step-tag tag-fix">FIX</span>
+    <h2><span class="s-num">3.</span>worker.js 버그 수정</h2>
+    <pre><span class="c">// 수정 전</span>
+<span class="kw">const</span> dartPath = url.pathname.<span class="bad">slice(6)</span>;
+
+<span class="c">// 수정 후</span>
+<span class="kw">const</span> dartPath = url.pathname.<span class="ok">slice(5)</span>;
+<span class="c">// "/dart/api/list.json" → slice(5) → "/api/list.json"  ✓</span>
+<span class="ok">// → https://opendart.fss.or.kr/api/list.json  ✓</span></pre>
+  </div>
+
+  <!-- STEP 4 -->
+  <div class="step">
+    <div class="step-dot done"></div>
+    <span class="step-tag tag-dart">ANALYSIS</span>
+    <h2><span class="s-num">4.</span>recon_kr.html 구조 분석 (6,424 라인)</h2>
+    <p>KIS + DART 연동 현황 전수 확인:</p>
+    <table>
+      <tr><th>분류</th><th>함수/변수</th><th>역할</th></tr>
+      <tr><td>KIS 토큰</td><td><code>getKisToken()</code></td><td>OAuth2 발급 & 캐싱, 만료 60초 전 갱신</td></tr>
+      <tr><td>KIS 조회</td><td><code>kisGet() / kisPost()</code></td><td>Worker /kis/ 경유 요청</td></tr>
+      <tr><td>KIS 설정</td><td><code>saveKisKeys()</code></td><td>AppKey/AppSecret localStorage 저장</td></tr>
+      <tr><td>KIS tr_id</td><td><code>FHKST01010100</code></td><td>현재가 조회</td></tr>
+      <tr><td>KIS tr_id</td><td><code>FHPST01710000</code></td><td>거래대금 랭킹</td></tr>
+      <tr><td>KIS tr_id</td><td><code>FHPST01730000</code></td><td>등락률 랭킹</td></tr>
+      <tr><td>DART 기업</td><td><code>fetchDartCorpCode()</code></td><td>종목코드 → 기업코드, 캐시(_dartCorpCache)</td></tr>
+      <tr><td>DART 공시</td><td><code>fetchDartDisclosures()</code></td><td>종목별 공시 목록</td></tr>
+      <tr><td>DART 피드</td><td><code>loadDartFeed()</code></td><td>실시간 공시 피드 섹션</td></tr>
+      <tr><td>DART 공통</td><td><code>fetchDart(apiPath, params)</code></td><td>Worker /dart/ 경유 기저 함수</td></tr>
+    </table>
+    <p style="margin-top:10px">세력 스테이지 엔진 <code>getWhaleStage(r)</code> 확인:</p>
+    <pre><span class="ok">BREAKOUT</span>    <span class="c">팩트공시 + 거래대금5배+ + 갭3~20% + isoK 상한</span>
+<span class="ok">EARLY_MOVE</span>  <span class="c">거래대금3배+ + 갭3%+ + isoK 상한 + VWAP 위 + rvol≥2</span>
+<span class="warn">NO_NEWS_SURGE</span> <span class="c">공시없음 + 거래대금3배 → WATCH 전용</span>
+<span class="warn">SHAKEOUT</span>    <span class="c">전일 급등 후 거래량 감소 + 5일선 지지</span>
+<span class="warn">ACCUMULATING</span> <span class="c">2~3배 + 공시없음 + 이격 5% 미만</span>
+<span class="c">NORMAL</span>      <span class="c">일반 수급</span></pre>
+  </div>
+
+  <!-- STEP 5 -->
+  <div class="step">
+    <div class="step-dot change"></div>
+    <span class="step-tag tag-fix">CHANGE</span>
+    <h2><span class="s-num">5.</span>BREAKOUT / EARLY_MOVE MA20 이격 조건 완화</h2>
+    <p>DART 공시 품질 검증이 가능해짐 → MA20 이격 상한 완화해도 팩트공시로 리스크 보완 가능</p>
+
+    <table>
+      <tr><th>스테이지</th><th>항목</th><th class="before">변경 전</th><th class="after">변경 후</th><th>이유</th></tr>
+      <tr>
+        <td>BREAKOUT</td><td>isoK 상한</td>
+        <td class="before">≤ 20%</td><td class="after">≤ 30%</td>
+        <td class="reason">팩트공시 확인 시 분출 중반도 진입 가능</td>
+      </tr>
+      <tr>
+        <td>BREAKOUT</td><td>경고 발동</td>
+        <td class="before">&gt; 15%</td><td class="after">&gt; 22%</td>
+        <td class="reason">완화된 상한에 맞게 조정</td>
+      </tr>
+      <tr>
+        <td>BREAKOUT</td><td>코멘트</td>
+        <td class="before">이격 20% 이내</td><td class="after">이격 30% 이내 (DART 완화)</td>
+        <td class="reason">문서 일관성</td>
+      </tr>
+      <tr>
+        <td>EARLY_MOVE</td><td>isoK 상한</td>
+        <td class="before">≤ 12%</td><td class="after">≤ 18%</td>
+        <td class="reason">DART 공시 품질 보완 가능</td>
+      </tr>
+      <tr>
+        <td>EARLY_MOVE</td><td>코멘트</td>
+        <td class="before">DART 전까지 유지</td><td class="after">DART 연동 후 완화</td>
+        <td class="reason">문서 일관성</td>
+      </tr>
+    </table>
+
+    <pre><span class="c">// BREAKOUT 전</span>
+<span class="kw">var</span> isBreakout = tv >= 5 && news === <span class="str">'factual'</span> && gap >= 3 && gap <= 20 && isoK <= <span class="bad">20</span>;
+<span class="bad">isoK > 15</span> ? <span class="str">'MA20 이격 +isoK% — ...'</span> : null,
+
+<span class="c">// BREAKOUT 후</span>
+<span class="kw">var</span> isBreakout = tv >= 5 && news === <span class="str">'factual'</span> && gap >= 3 && gap <= 20 && isoK <= <span class="ok">30</span>;
+<span class="ok">isoK > 22</span> ? <span class="str">'MA20 이격 +isoK% — ...'</span> : null,
+
+<span class="c">// EARLY_MOVE 전</span>
+<span class="c">// 필수: tv>=3 + gap>=3 + isoK<=12 (DART 전까지 유지)</span>
+<span class="kw">var</span> emBase = tv >= 3 && gap >= 3 && isoK <= <span class="bad">12</span> && (news !== <span class="str">'none'</span> || turn < 15);
+
+<span class="c">// EARLY_MOVE 후</span>
+<span class="c">// 필수: tv>=3 + gap>=3 + isoK<=18 (DART 연동 후 완화)</span>
+<span class="kw">var</span> emBase = tv >= 3 && gap >= 3 && isoK <= <span class="ok">18</span> && (news !== <span class="str">'none'</span> || turn < 15);</pre>
+  </div>
+
+  <!-- STEP 6 -->
+  <div class="step">
+    <div class="step-dot keep"></div>
+    <span class="step-tag tag-keep">NO CHANGE</span>
+    <h2><span class="s-num">6.</span>의도적으로 변경하지 않은 것</h2>
+    <div class="unchanged">
+      <div class="unchg-row">
+        <span class="lock">🔒</span>
+        <span><code>scoreScreener</code> — MA20 &gt; 30% → 즉시 0점 BLOCK<br><span style="color:var(--t3);font-size:11px">BREAKOUT 최대 허용치(30%)와 맞닿아 있어 일관성 유지</span></span>
+      </div>
+      <div class="unchg-row">
+        <span class="lock">🔒</span>
+        <span><code>hardFilter</code> — MA20 &gt; 30% → BLOCK (전체 모드)<br><span style="color:var(--t3);font-size:11px">시스템 내 3곳 기준 통일: scoreScreener / hardFilter / BREAKOUT 상한 모두 30%</span></span>
+      </div>
+      <div class="unchg-row">
+        <span class="lock">🔒</span>
+        <span><code>EARLY_MOVE</code> 내부 조건 — VWAP 위 필수, rvol≥2 필수, vwap_pct&lt;15 OR wick&lt;0.5<br><span style="color:var(--t3);font-size:11px">isoK 완화했으므로 품질 필터는 그대로 유지해야 균형</span></span>
+      </div>
+    </div>
+    <div class="note ok">MA20 30% 라인이 시스템 전체의 경계선 — 완화는 스테이지 판단 안에서만, 최종 차단은 동일</div>
+  </div>
+
+  <!-- STEP 7 -->
+  <div class="step">
+    <div class="step-dot done"></div>
+    <span class="step-tag tag-output">OUTPUT</span>
+    <h2><span class="s-num">7.</span>최종 파일 출력</h2>
+    <table>
+      <tr><th>파일</th><th>변경 수</th><th>주요 변경</th></tr>
+      <tr><td><code>worker.js</code></td><td>1곳</td><td>/dart/ slice 버그 수정 (6→5)</td></tr>
+      <tr><td><code>recon_kr.html</code></td><td>4곳</td><td>BREAKOUT isoK 20→30, 경고 15→22, EARLY_MOVE isoK 12→18, 코멘트 2건</td></tr>
+    </table>
+  </div>
+
+</div>
+
+<hr class="divider">
+<h2 style="font-size:13px;color:var(--t2);margin-bottom:12px;font-family:var(--mono);letter-spacing:.08em">// 다음 할 것</h2>
+<div class="next">
+  <div class="next-row"><span class="next-n">01</span><span>Worker 배포 → <code>recon.miinonnnn.workers.dev</code> 에 worker.js 업데이트</span></div>
+  <div class="next-row"><span class="next-n">02</span><span>설정 탭 → DART API Key 입력 → DART 연결 테스트 버튼</span></div>
+  <div class="next-row"><span class="next-n">03</span><span>설정 탭 → KIS AppKey / AppSecret 입력 → KIS 연결 테스트</span></div>
+  <div class="next-row"><span class="next-n">04</span><span>장 중 종목 스캔 → BREAKOUT/EARLY_MOVE 발동 확인 (완화된 isoK 기준)</span></div>
+  <div class="next-row"><span class="next-n">05</span><span>recon_kr.html / worker.js GitHub 업로드</span></div>
+</div>
+
+</body>
+</html>

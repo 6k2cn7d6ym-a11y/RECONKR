@@ -1,0 +1,51 @@
+{
+  "V1 T1-50%": {
+    "label": "V1 T1-50%",
+    "capital0": 1000000,
+    "finalCapital": 1184943,
+    "totalReturnPct": 18.49,
+    "takenCount": 157,
+    "rejectedCount": 871,
+    "mddPct": -14.32,
+    "yearlyReturn": {
+      "2023": 8.36,
+      "2024": 18.09,
+      "2025": -3.28,
+      "2026": -1.27
+    },
+    "yearlyTrades": {
+      "2023": 23,
+      "2024": 58,
+      "2025": 53,
+      "2026": 23
+    },
+    "passMDD": true,
+    "passTrainReturn": true,
+    "passCumul2325": true,
+    "passAll": true
+  },
+  "V1 T1-100%": {
+    "label": "V1 T1-100%",
+    "capital0": 1000000,
+    "finalCapital": 1321173,
+    "totalReturnPct": 32.12,
+    "takenCount": 76,
+    "rejectedCount": 976,
+    "mddPct": -6.13,
+    "yearlyReturn": {
+      "2023": 6.74,
+      "2024": 11.3,
+      "2025": 7.73,
+      "2026": 0
+    },
+    "yearlyTrades": {
+      "2023": 23,
+      "2024": 40,
+      "2025": 13
+    },
+    "passMDD": true,
+    "passTrainReturn": true,
+    "passCumul2325": true,
+    "passAll": true
+  }
+}

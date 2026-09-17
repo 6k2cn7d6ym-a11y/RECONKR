@@ -1,0 +1,43 @@
+{
+  "ranAt": "2026-09-16T07:26:05.461Z",
+  "mode": "--no-index (KOSPI 게이트 중립)",
+  "universeSize": 219,
+  "results": [
+    {
+      "label": "T1 50%",
+      "n": 339,
+      "winRate": 26.25,
+      "avg": -0.55,
+      "pf": 0.73,
+      "cum": -187.01,
+      "mdd": -188.47,
+      "t1Rate": 26.55,
+      "byReason": {
+        "stop": 248,
+        "trail": 29,
+        "t2": 20,
+        "ma5_close": 17,
+        "stop_be": 22,
+        "time": 1,
+        "t1+t2": 2
+      }
+    },
+    {
+      "label": "T1 100%",
+      "n": 340,
+      "winRate": 26.47,
+      "avg": -0.57,
+      "pf": 0.72,
+      "cum": -193.21,
+      "mdd": -220.22,
+      "t1Rate": 26.47,
+      "byReason": {
+        "stop": 249,
+        "t1_full": 88,
+        "time": 1,
+        "t2": 2
+      }
+    }
+  ],
+  "note": "판정 없음 — 대표 검수용"
+}
