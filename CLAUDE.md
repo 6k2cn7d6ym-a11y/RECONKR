@@ -38,6 +38,7 @@ ReconKR/
 ├── *.js / universe.json      ★ 루트 = 실행·캐시·정본 (cron·봇·백테스트 전부 여기서)
 │   ├── swingEval.js          백테스트·봇 공통 진입 평가 모듈
 │   ├── bot-live.js           라이브 봇 (신호 JSON 생성)
+│   ├── executor.js           paper 실행기 (orders/YYYYMMDD.json → 체결·ledger·halt · live stub)
 │   ├── backtest-swing-kr.js  로컬 백테스트 (Node 전용 · node backtest-swing-kr.js --universe universe.json)
 │   ├── portfolio-sim.js      포트폴리오 시뮬
 │   ├── momoEngine.js / swingEngine.js / coreEngine.js / exitEngine.js
@@ -236,6 +237,7 @@ validateTVGate()             // 거래대금 게이트 정당성
 - **표시 버그 7건** — CORE 음수RR / T2<T1 / 장외ENTER / $표기 / MA200라벨 / NXT배지 / PRE오표시.
 - **엔진 모듈 분리** (루트 `*.js`) — momoEngine·swingEngine·coreEngine·exitEngine·indicatorEngine·engineUtil·kisData 파일로 추출, `engineTests.js` + `verifyEngines.node.js`로 회귀.
 - **백테스트 인프라** — 루트 `backtest-swing-kr.js` Node 실행 가능. `node backtest-swing-kr.js --universe universe.json`으로 219종목 또는 지정 종목 시뮬.
+- **executor.js (paper 모드)** — orders/YYYYMMDD.json 일별 집행, ledger/fills/positions 관리, halt(-10% drawdown) + 킬스위치(ops/killswitch), 텔레그램 alert. 343줄. 자연 halt 재현 검증 완료 (002070 20260731 시가 -50% · drawdown -16.19% · Worker POST HTTP 200).
 
 ### ⏳ 진행 중 / 부분
 
