@@ -228,6 +228,7 @@ validateTVGate()             // 거래대금 게이트 정당성
 4. `../reconkr-paper/ledger.csv` → 헤더만 (`일자,자본,현금,보유평가,실현손익`)
 5. pm2 cron 경로를 `../reconkr-paper`로 변경 확인
 6. 합성 테스트 잔재(positions.json에 closed 포지션 등) 없는지 확인
+7. 첫 영업일 15:40 bot-live 실행 후 signals 파일 대표께 첨부 — 첫날 신호로 파이프라인 정합 확인
 
 ---
 
