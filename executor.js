@@ -58,7 +58,7 @@ var CFG = {
   ledgerFile:      path.join(__dirname, 'ledger.csv'),
   fillsFile:       path.join(__dirname, 'fills.csv'),
   alertConfigFile: path.join(os.homedir(), '.config', 'minon', 'alert.json'),
-  staleOrderDays:  7,
+  staleOrderDays:  3,   // 직전 영업일 근사 (금→월 주말 3일 커버, 그 이상 스킵)
 };
 
 // ── 유틸 ──────────────────────────────────────────────────
