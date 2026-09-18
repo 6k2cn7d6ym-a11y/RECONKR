@@ -283,21 +283,42 @@ async function main(){
   var exits = orders.exits || [];
   for(var ei = 0; ei < exits.length; ei++){
     var exOrder  = exits[ei];
+    if(exOrder._filled || exOrder._skipped){ console.log('  [RESUME] SELL ' + exOrder.code + ' 이미 처리됨 — 건너뜀'); continue; }
     var exCandle = null;
     try{
       var exRaw = await loadCandles(exOrder.code, 5);
       var exF   = asOfCandles(exRaw, date);
       exCandle  = exF.length ? exF[0] : null;
-    }catch(e){ console.warn('[SKIP SELL] ' + exOrder.code + ' 봉 로드 실패: ' + e.message); continue; }
+    }catch(e){
+      console.warn('[SKIP SELL] ' + exOrder.code + ' 봉 로드 실패: ' + e.message);
+      exOrder._skipped = '봉 로드 실패: ' + e.message;
+      fs.writeFileSync(ordersFile, JSON.stringify(orders, null, 2));
+      continue;
+    }
     var exResult = paperFillPrice(exOrder, exCandle);
-    if(exResult.skip){ console.log('[SKIP SELL] ' + exOrder.code + ' — ' + exResult.reason); continue; }
+    if(exResult.skip){
+      console.log('[SKIP SELL] ' + exOrder.code + ' — ' + exResult.reason);
+      exOrder._skipped = exResult.reason;
+      fs.writeFileSync(ordersFile, JSON.stringify(orders, null, 2));
+      continue;
+    }
     var exNotional = exResult.price * exOrder.qty;
     var exCost     = calcCost('SELL', exNotional);
     var exPos = null;
     for(var pi = 0; pi < openPos.length; pi++){ if(openPos[pi].code === exOrder.code){ exPos = openPos[pi]; break; } }
-    if(!exPos){ console.log('[SKIP SELL] ' + exOrder.code + ' — open 포지션 없음 (유령 매도 방지)'); continue; }
+    if(!exPos){
+      console.log('[SKIP SELL] ' + exOrder.code + ' — open 포지션 없음 (유령 매도 방지)');
+      exOrder._skipped = 'open 포지션 없음';
+      fs.writeFileSync(ordersFile, JSON.stringify(orders, null, 2));
+      continue;
+    }
     var exRemaining = exPos.remaining != null ? exPos.remaining : exPos.shares;
-    if(exOrder.qty > exRemaining){ console.log('[SKIP SELL] ' + exOrder.code + ' — qty(' + exOrder.qty + ') > remaining(' + exRemaining + ')'); continue; }
+    if(exOrder.qty > exRemaining){
+      console.log('[SKIP SELL] ' + exOrder.code + ' — qty(' + exOrder.qty + ') > remaining(' + exRemaining + ')');
+      exOrder._skipped = 'qty > remaining';
+      fs.writeFileSync(ordersFile, JSON.stringify(orders, null, 2));
+      continue;
+    }
     var entryNotional = exPos.entry * exOrder.qty;
     var pnl = exNotional - entryNotional - exCost;
     realizedPnl += pnl;
@@ -307,6 +328,8 @@ async function main(){
     fills.push(exFill);
     appendFill(exFill);
     applyFillToPositions(positions, exFill, exOrder);
+    exOrder._filled = date;
+    fs.writeFileSync(ordersFile, JSON.stringify(orders, null, 2));
     console.log('  SELL ' + exOrder.code + ' ' + exOrder.qty + '주 @' + exResult.price +
                 ' urgency=' + (exOrder.urgency||'now') + ' pnl=' + Math.round(pnl));
   }
@@ -315,23 +338,41 @@ async function main(){
   var entries = orders.entries || [];
   for(var bi = 0; bi < entries.length; bi++){
     var buyOrder  = entries[bi];
+    if(buyOrder._filled || buyOrder._skipped){ console.log('  [RESUME] BUY ' + buyOrder.code + ' 이미 처리됨 — 건너뜀'); continue; }
     var buyCandle = null;
     try{
       var buyRaw = await loadCandles(buyOrder.code, 5);
       var buyF   = asOfCandles(buyRaw, date);
       buyCandle  = buyF.length ? buyF[0] : null;
-    }catch(e){ console.warn('[SKIP BUY] ' + buyOrder.code + ' 봉 로드 실패: ' + e.message); continue; }
+    }catch(e){
+      console.warn('[SKIP BUY] ' + buyOrder.code + ' 봉 로드 실패: ' + e.message);
+      buyOrder._skipped = '봉 로드 실패: ' + e.message;
+      fs.writeFileSync(ordersFile, JSON.stringify(orders, null, 2));
+      continue;
+    }
     var buyResult = paperFillPrice(buyOrder, buyCandle);
-    if(buyResult.skip){ console.log('[SKIP BUY] ' + buyOrder.code + ' — ' + buyResult.reason); continue; }
+    if(buyResult.skip){
+      console.log('[SKIP BUY] ' + buyOrder.code + ' — ' + buyResult.reason);
+      buyOrder._skipped = buyResult.reason;
+      fs.writeFileSync(ordersFile, JSON.stringify(orders, null, 2));
+      continue;
+    }
     var buyNotional = buyResult.price * buyOrder.qty;
     var buyCost     = calcCost('BUY', buyNotional);
-    if(cash < buyNotional + buyCost){ console.log('[SKIP BUY] ' + buyOrder.code + ' — 현금 부족 (필요 ' + Math.round(buyNotional + buyCost) + ' > 보유 ' + Math.round(cash) + ')'); continue; }
+    if(cash < buyNotional + buyCost){
+      console.log('[SKIP BUY] ' + buyOrder.code + ' — 현금 부족 (필요 ' + Math.round(buyNotional + buyCost) + ' > 보유 ' + Math.round(cash) + ')');
+      buyOrder._skipped = '현금 부족';
+      fs.writeFileSync(ordersFile, JSON.stringify(orders, null, 2));
+      continue;
+    }
     cash -= (buyNotional + buyCost);
     var buyFill = { date: date, code: buyOrder.code, action: 'BUY', qty: buyOrder.qty,
                     price: buyResult.price, notional: buyNotional, cost: buyCost, requestId: buyOrder.requestId || '' };
     fills.push(buyFill);
     appendFill(buyFill);
     applyFillToPositions(positions, buyFill, buyOrder);
+    buyOrder._filled = date;
+    fs.writeFileSync(ordersFile, JSON.stringify(orders, null, 2));
     console.log('  BUY  ' + buyOrder.code + ' ' + buyOrder.qty + '주 @' + buyResult.price);
   }
 

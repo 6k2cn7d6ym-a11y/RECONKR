@@ -115,7 +115,7 @@ async function main(){
   setExitPersist(() => {});   // 봇은 여기서 저장하지 않음 — exitState 변이는 출력 JSON으로 전달
   for(const pos of openPos){
     let candles;
-    try{ candles = asOfCandles(await loadCandles(pos.code, 40), args.asof); }
+    try{ candles = asOfCandles(await loadCandles(pos.code, 40, {confirmedToday:true}), args.asof); }
     catch(e){ out.skipped.push({ code: pos.code, why: '일봉 로드 실패: ' + e.message }); continue; }
     if(!candles.length){ out.skipped.push({ code: pos.code, why: '일봉 없음' }); continue; }
     const close = parseFloat(candles[0].stck_clpr);
@@ -141,7 +141,7 @@ async function main(){
   for(const code of universe){
     if(heldCodes.has(code)) continue;
     let candles;
-    try{ candles = asOfCandles(await loadCandles(code, CFG.historyDays), args.asof); }
+    try{ candles = asOfCandles(await loadCandles(code, CFG.historyDays, {confirmedToday:true}), args.asof); }
     catch(e){ out.skipped.push({ code, why: '일봉 로드 실패: ' + e.message }); continue; }
     if(candles.length < 65){ out.skipped.push({ code, why: '일봉 부족 ' + candles.length }); continue; }
     if(candles[0].stck_bsop_date !== asOfYmd){ out.skipped.push({ code, why: '최신 봉 날짜 불일치 ' + candles[0].stck_bsop_date + ' ≠ ' + asOfYmd + ' (거래정지·데이터 지연 의심)' }); continue; }
