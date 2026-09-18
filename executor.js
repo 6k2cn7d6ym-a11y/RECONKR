@@ -59,6 +59,7 @@ var CFG = {
   fillsFile:       path.join(__dirname, 'fills.csv'),
   alertConfigFile: path.join(os.homedir(), '.config', 'minon', 'alert.json'),
   staleOrderDays:  3,   // 직전 영업일 근사 (금→월 주말 3일 커버, 그 이상 스킵)
+  checkpointFile:  path.join(__dirname, 'ops', 'checkpoint.json'),
 };
 
 // ── 유틸 ──────────────────────────────────────────────────
@@ -185,6 +186,13 @@ function appendFill(fill){
      round2(fill.notional), round2(fill.cost), fill.requestId || ''].join(',') + '\n');
 }
 
+// 체결 직후 crash-safe 체크포인트 — 재실행 시 cash/realizedPnl/positions 복원용
+function saveCheckpoint(date, cash, realizedPnl, positions){
+  writeJson(CFG.checkpointFile, {
+    date: date, cash: round2(cash), realizedPnl: round2(realizedPnl), positions: positions,
+  });
+}
+
 // ── 비용 ──────────────────────────────────────────────────
 function calcCost(action, notional){
   var c = CFG.costs;
@@ -267,17 +275,32 @@ async function main(){
     console.log('[SKIP] 이미 집행됨 (' + path.basename(ordersFile) + ' executedAt=' + orders._executedAt + ')'); return;
   }
 
-  // 4. 자본·현금 (ledger 최신, 초기 100만)
-  var ledger = readLatestLedger(1000000);
-  var equity = ledger.equity;
-  var cash   = ledger.cash;
+  // 4. 체크포인트 또는 ledger에서 자본·현금·포지션 복원
+  var ckptData = readJson(CFG.checkpointFile, null);
+  var equity, cash, positions, realizedPnl;
+  if(ckptData && ckptData.date === date){
+    console.log('[RESUME-CKPT] 체크포인트 복구 (date=' + ckptData.date +
+                ') — cash=' + ckptData.cash + ' realizedPnl=' + ckptData.realizedPnl);
+    cash        = ckptData.cash;
+    realizedPnl = ckptData.realizedPnl;
+    positions   = ckptData.positions;
+  } else {
+    if(ckptData && ckptData.date && ckptData.date !== date){
+      var staleMsg = '미처리 체크포인트 감지: ' + ckptData.date +
+                     ' (집행일 ' + date + ') — 전일 크래시 가능성. 수동 확인 필요';
+      console.warn('[WARN] ' + staleMsg);
+      sendAlert('warn', staleMsg);
+    }
+    var ledger = readLatestLedger(1000000);
+    cash        = ledger.cash;
+    realizedPnl = 0;
+    positions   = readJson(CFG.positionsFile, []);
+  }
 
-  // 5. positions
-  var positions = readJson(CFG.positionsFile, []);
-  var openPos   = positions.filter(function(p){ return p && (p.status === 'open' || p.status === 'partial'); });
+  // 5. positions 필터
+  var openPos = positions.filter(function(p){ return p && (p.status === 'open' || p.status === 'partial'); });
 
-  var fills       = [];
-  var realizedPnl = 0;
+  var fills = [];
 
   // 6. 매도 집행
   var exits = orders.exits || [];
@@ -330,6 +353,7 @@ async function main(){
     applyFillToPositions(positions, exFill, exOrder);
     exOrder._filled = date;
     fs.writeFileSync(ordersFile, JSON.stringify(orders, null, 2));
+    saveCheckpoint(date, cash, realizedPnl, positions);
     console.log('  SELL ' + exOrder.code + ' ' + exOrder.qty + '주 @' + exResult.price +
                 ' urgency=' + (exOrder.urgency||'now') + ' pnl=' + Math.round(pnl));
   }
@@ -373,6 +397,7 @@ async function main(){
     applyFillToPositions(positions, buyFill, buyOrder);
     buyOrder._filled = date;
     fs.writeFileSync(ordersFile, JSON.stringify(orders, null, 2));
+    saveCheckpoint(date, cash, realizedPnl, positions);
     console.log('  BUY  ' + buyOrder.code + ' ' + buyOrder.qty + '주 @' + buyResult.price);
   }
 
@@ -399,9 +424,10 @@ async function main(){
   appendLedger({ date: date, equity: equity, cash: cash,
                  holdValue: round2(holdValue), realizedPnl: round2(realizedPnl) });
 
-  // 11. executedAt 마킹 (멱등성)
+  // 11. executedAt 마킹 (멱등성) + 체크포인트 정리
   orders._executedAt = date;
   fs.writeFileSync(ordersFile, JSON.stringify(orders, null, 2));
+  if(fs.existsSync(CFG.checkpointFile)) fs.unlinkSync(CFG.checkpointFile);
 
   // 12. halt 재평가
   var hr = checkAndUpdateHalt(equity);
