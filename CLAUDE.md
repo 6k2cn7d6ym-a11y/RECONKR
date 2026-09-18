@@ -201,10 +201,17 @@ validateTVGate()             // 거래대금 게이트 정당성
 
 ## 8. 배포
 
-- `index.html` → **GitHub Pages**. 대표님이 직접 커밋/푸시. 빌드 없음. 반영까지 1~3분.
+- `index.html` → **GitHub Pages**. `main` 브랜치 push 즉시 반영. 빌드 없음. 반영까지 1~3분.
 - `worker.js` → **Cloudflare Worker** (`recon.miinonnnn.workers.dev`). `wrangler deploy` 또는 대시보드. 시크릿 등록됨(`ANTHROPIC_API_KEY`).
 - 배포 후 흰 화면 = 거의 항상 **PWA 캐시** 또는 GitHub Pages 반영 지연. Cmd+Shift+R 강제 새로고침 안내.
 - **워커 변경 없으면 "워커 변경 없음"이라고 명시**해서 불필요한 배포 막는다.
+
+### 브랜치 운영 규칙 (★ 2026-09-18 확립)
+
+- **push = 즉시 배포.** `main`에 push하는 순간 GitHub Pages가 반영된다.
+- **팀(Claude Code 세션) 작업은 `dev` 브랜치에서만.** `git push origin dev`. `main` 직접 push 금지 — GitHub 브랜치 보호로 차단(대표가 Settings에서 설정).
+- **`main` 머지는 대표 승인 후.** 대표가 GitHub에서 PR 머지 또는 직접 push.
+- **`archive/*` 브랜치는 읽기 전용 이력.** `archive/pre-260918` 등 과거 스냅샷. `main`·`dev`에서 직접 머지 금지. 참조만 가능.
 
 ---
 
