@@ -5,6 +5,7 @@ orders/
 ledger.csv
 fills.csv
 positions.json
+*.bak
 
 # 시크릿
 .env

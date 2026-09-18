@@ -214,6 +214,21 @@ validateTVGate()             // 거래대금 게이트 정당성
 - **`main` 머지는 대표 승인 후.** 대표가 GitHub에서 PR 머지 또는 직접 push.
 - **`archive/*` 브랜치는 읽기 전용 이력.** `archive/pre-260918` 등 과거 스냅샷. `main`·`dev`에서 직접 머지 금지. 참조만 가능.
 
+### 페이퍼 트레이딩 워크트리 (★ 2026-09-18 확립)
+
+- **런타임과 개발 트리 분리.** `git worktree add ../reconkr-paper main` — cron·pm2는 `../reconkr-paper`에서만 실행. 개발은 기존 폴더(dev 브랜치).
+- **`../reconkr-paper` 는 런타임 전용. 수정·실행 금지(cron 제외).** 10영업일 페이퍼 종료 후 `git worktree remove ../reconkr-paper`로 삭제.
+- **data/·positions/·ledger는 reconkr-paper 폴더 것이 정본.** 개발 폴더의 같은 파일과 혼동 금지.
+
+### 페이퍼 개시 체크리스트
+
+1. `git worktree add ../reconkr-paper main` 실행 확인
+2. `../reconkr-paper/positions.json` → 빈 배열 `[]`
+3. `../reconkr-paper/ops/status.json` → `{"status":"active","peakEquity":1000000}`
+4. `../reconkr-paper/ledger.csv` → 헤더만 (`일자,자본,현금,보유평가,실현손익`)
+5. pm2 cron 경로를 `../reconkr-paper`로 변경 확인
+6. 합성 테스트 잔재(positions.json에 closed 포지션 등) 없는지 확인
+
 ---
 
 ## 9. 현재 상태 (2026-09-17 기준)
