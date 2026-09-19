@@ -5,6 +5,7 @@ orders/
 ledger.csv
 fills.csv
 positions.json
+*.bak
 
 # 시크릿
 .env
@@ -17,6 +18,7 @@ node_modules/
 # 아카이브 (로컬 전용)
 archive/
 _inbox/
+_outbox/
 
 # Wrangler 로컬 캐시
 .wrangler/
@@ -28,3 +30,4 @@ sandbox/
 *.pages
 *.numbers
 *.key
+ops/

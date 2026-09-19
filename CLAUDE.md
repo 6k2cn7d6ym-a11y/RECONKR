@@ -38,6 +38,7 @@ ReconKR/
 ├── *.js / universe.json      ★ 루트 = 실행·캐시·정본 (cron·봇·백테스트 전부 여기서)
 │   ├── swingEval.js          백테스트·봇 공통 진입 평가 모듈
 │   ├── bot-live.js           라이브 봇 (신호 JSON 생성)
+│   ├── executor.js           paper 실행기 (orders/YYYYMMDD.json → 체결·ledger·halt · live stub)
 │   ├── backtest-swing-kr.js  로컬 백테스트 (Node 전용 · node backtest-swing-kr.js --universe universe.json)
 │   ├── portfolio-sim.js      포트폴리오 시뮬
 │   ├── momoEngine.js / swingEngine.js / coreEngine.js / exitEngine.js
@@ -213,6 +214,22 @@ validateTVGate()             // 거래대금 게이트 정당성
 - **`main` 머지는 대표 승인 후.** 대표가 GitHub에서 PR 머지 또는 직접 push.
 - **`archive/*` 브랜치는 읽기 전용 이력.** `archive/pre-260918` 등 과거 스냅샷. `main`·`dev`에서 직접 머지 금지. 참조만 가능.
 
+### 페이퍼 트레이딩 워크트리 (★ 2026-09-18 확립)
+
+- **런타임과 개발 트리 분리.** `git worktree add ../reconkr-paper main` — cron·pm2는 `../reconkr-paper`에서만 실행. 개발은 기존 폴더(dev 브랜치).
+- **`../reconkr-paper` 는 런타임 전용. 수정·실행 금지(cron 제외).** 10영업일 페이퍼 종료 후 `git worktree remove ../reconkr-paper`로 삭제.
+- **data/·positions/·ledger는 reconkr-paper 폴더 것이 정본.** 개발 폴더의 같은 파일과 혼동 금지.
+
+### 페이퍼 개시 체크리스트
+
+1. `git worktree add ../reconkr-paper main` 실행 확인
+2. `../reconkr-paper/positions.json` → 빈 배열 `[]`
+3. `../reconkr-paper/ops/status.json` → `{"status":"active","peakEquity":1000000}`
+4. `../reconkr-paper/ledger.csv` → 헤더만 (`일자,자본,현금,보유평가,실현손익`)
+5. pm2 cron 경로를 `../reconkr-paper`로 변경 확인
+6. 합성 테스트 잔재(positions.json에 closed 포지션 등) 없는지 확인
+7. 첫 영업일 15:40 bot-live 실행 후 signals 파일 대표께 첨부 — 첫날 신호로 파이프라인 정합 확인
+
 ---
 
 ## 9. 현재 상태 (2026-09-17 기준)
@@ -236,6 +253,7 @@ validateTVGate()             // 거래대금 게이트 정당성
 - **표시 버그 7건** — CORE 음수RR / T2<T1 / 장외ENTER / $표기 / MA200라벨 / NXT배지 / PRE오표시.
 - **엔진 모듈 분리** (루트 `*.js`) — momoEngine·swingEngine·coreEngine·exitEngine·indicatorEngine·engineUtil·kisData 파일로 추출, `engineTests.js` + `verifyEngines.node.js`로 회귀.
 - **백테스트 인프라** — 루트 `backtest-swing-kr.js` Node 실행 가능. `node backtest-swing-kr.js --universe universe.json`으로 219종목 또는 지정 종목 시뮬.
+- **executor.js (paper 모드)** — orders/YYYYMMDD.json 일별 집행, ledger/fills/positions 관리, halt(-10% drawdown) + 킬스위치(ops/killswitch), 텔레그램 alert. 343줄. 자연 halt 재현 검증 완료 (002070 20260731 시가 -50% · drawdown -16.19% · Worker POST HTTP 200).
 
 ### ⏳ 진행 중 / 부분
 

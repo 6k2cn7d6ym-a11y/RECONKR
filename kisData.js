@@ -74,21 +74,26 @@ async function fetchDailyCandlesLong(code, targetDays){
 }
 
 // 캐시 우선 로드 — 캐시가 오늘자면 재사용, 아니면 새로 받고 저장
-async function loadCandles(code, targetDays){
+// opts.confirmedToday=true: 오늘 15:35 이후 캐시만 사용 (부분봉 오염 방지)
+async function loadCandles(code, targetDays, opts){
+  opts = opts || {};
   fs.mkdirSync(CACHE_DIR, { recursive: true });
   const file = path.join(CACHE_DIR, code + '.json');
   const todayYmd = fmt(new Date());
   if(fs.existsSync(file)){
     try{
       const cached = JSON.parse(fs.readFileSync(file, 'utf-8'));
-      if(cached.fetchedYmd === todayYmd && (cached.candles || []).length >= Math.min(targetDays || 0, 200)){
-        return cached.candles;
-      }
+      const enoughCandles = (cached.candles || []).length >= Math.min(targetDays || 0, 200);
+      const freshToday    = cached.fetchedYmd === todayYmd;
+      const freshEnough   = !opts.confirmedToday || (cached.fetchedHm || '0000') >= '1535';
+      if(freshToday && freshEnough && enoughCandles) return cached.candles;
     }catch(e){ /* 캐시 손상 → 재수집 */ }
   }
   const candles = await fetchDailyCandlesLong(code, targetDays);
   if(candles.length){
-    fs.writeFileSync(file, JSON.stringify({ fetchedYmd: todayYmd, code, candles }));
+    const now = new Date();
+    const nowHm = ('0' + now.getHours()).slice(-2) + ('0' + now.getMinutes()).slice(-2);
+    fs.writeFileSync(file, JSON.stringify({ fetchedYmd: todayYmd, fetchedHm: nowHm, code, candles }));
   }
   await sleep(SLEEP_MS);
   return candles;
