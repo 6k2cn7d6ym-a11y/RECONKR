@@ -207,11 +207,13 @@ validateTVGate()             // 거래대금 게이트 정당성
 - 배포 후 흰 화면 = 거의 항상 **PWA 캐시** 또는 GitHub Pages 반영 지연. Cmd+Shift+R 강제 새로고침 안내.
 - **워커 변경 없으면 "워커 변경 없음"이라고 명시**해서 불필요한 배포 막는다.
 
-### 브랜치 운영 규칙 (★ 2026-09-18 확립)
+### 브랜치 운영 규칙 (★ 2026-09-20 갱신)
 
 - **push = 즉시 배포.** `main`에 push하는 순간 GitHub Pages가 반영된다.
-- **팀(Claude Code 세션) 작업은 `dev` 브랜치에서만.** `git push origin dev`. `main` 직접 push 금지 — GitHub 브랜치 보호로 차단(대표가 Settings에서 설정).
-- **`main` 머지는 대표 승인 후.** 대표가 GitHub에서 PR 머지 또는 직접 push.
+- **팀(Claude Code 세션) 작업은 `dev` 브랜치에서만.** `git push origin dev`.
+- **`main` 머지는 대표 채팅 "머지 승인" 이후에만.** PR 불요. 팀 자체 판단으로 main push 금지 — 위반 시 즉시 revert.
+- **머지 명령:** `git checkout main && git fetch origin && git merge --no-ff dev && git push origin main`
+- **force push 금지.** `.claude/settings.json` `disallowedTools`로 도구 레벨 차단 (`git push --force` / `git push -f` 호출 불가).
 - **`archive/*` 브랜치는 읽기 전용 이력.** `archive/pre-260918` 등 과거 스냅샷. `main`·`dev`에서 직접 머지 금지. 참조만 가능.
 
 ### 페이퍼 트레이딩 워크트리 (★ 2026-09-18 확립)
