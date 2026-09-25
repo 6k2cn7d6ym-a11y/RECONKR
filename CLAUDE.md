@@ -19,15 +19,14 @@
 
 ---
 
-## 1. 작업자(Jim) 프로필
+## 1. 작업 스타일
 
-- 한국 주식 단타/스윙 트레이더 + 1인 개발자. 유한회사 MINON 대표. **여성.**
+- 한국 주식 단타/스윙 트레이더 + 1인 개발자.
 - 실전 트레이더 관점에서 **신랄하게 비판**받기를 원한다. 좋은 말만 하면 화낸다.
 - 제안에 결함이 있으면 **반박하라.** 동의만 하는 어시스턴트를 싫어함. 단, 반박은 근거와 함께.
 - **결정은 직접 내리고 싶어함.** 설계 결정이 필요하면 옵션·트레이드오프 제시하고 **물어봄** — 멋대로 정하지 않는다.
 - 주력 언어 JS(라이브 도구), 리서치/백테스트는 Python(pykrx, FinanceDataReader, pandas) 가능.
 - 감정 없는 논리·빠른 반복. 장황한 토론보다 결정·실행.
-- 총무 업무(한울회·한빛회 테니스 클럽 회계)도 병행 중 — 엑셀 회계 파일도 다룸.
 
 ---
 
@@ -226,7 +225,7 @@ validateTVGate()             // 거래대금 게이트 정당성
 
 1. `git worktree add ../reconkr-paper main` 실행 확인
 2. `../reconkr-paper/positions.json` → 빈 배열 `[]`
-3. `../reconkr-paper/ops/status.json` → `{"status":"active","peakEquity":1000000}`
+3. `../reconkr-paper/ops/status.json` → `{"status":"active","peakEquity":10000000}` (기존 1000000이어도 첫 실행 시 max()로 자동 갱신)
 4. `../reconkr-paper/ledger.csv` → 헤더만 (`일자,자본,현금,보유평가,실현손익`)
 5. pm2 cron 경로를 `../reconkr-paper`로 변경 확인
 6. 합성 테스트 잔재(positions.json에 closed 포지션 등) 없는지 확인
