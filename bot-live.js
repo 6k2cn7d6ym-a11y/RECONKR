@@ -48,6 +48,7 @@ const CFG = {
   historyDays: 200,                    // MA120·RSI 워밍업 충분
   indexCode: '0001',
   size: { riskPctPerTrade: 1.5, maxPositionPct: 20, allowFractional: false, minShares: 1, currency: '₩' },
+  paperInitialEquity: 1000000,         // ledger 첫 행 전 초기 자본 (executor.js readLatestLedger(1000000)과 동일값)
   maxNewEntriesPerDay: 2,              // 100만원 실험: 하루 신규 진입 상한
   maxOpenPositions: 4,                 // 20% 캡 × 4 = 80% 이하
   t1SellPct: 100,                      // T1 도달 시 전량 익절 (백테스트 V1 T1-100 기준)
@@ -69,6 +70,17 @@ function parseArgs(argv){
   return o;
 }
 const readJson = (p, dflt) => { try { return JSON.parse(fs.readFileSync(p, 'utf-8')); } catch(e){ return dflt; } };
+// executor가 기록한 ledger.csv 마지막 행(일자,자본,현금,...)에서 계좌 복원. 헤더뿐이거나 없으면 null.
+function readLedgerAccount(){
+  try{
+    const lines = fs.readFileSync(path.join(__dirname, 'ledger.csv'), 'utf-8').trim().split('\n');
+    const last = lines[lines.length - 1];
+    if(!last || last.startsWith('일자')) return null;
+    const c = last.split(',');
+    const equity = parseFloat(c[1]), cash = parseFloat(c[2]);
+    return equity > 0 ? { equity: equity, cashAvailable: cash >= 0 ? cash : equity } : null;
+  }catch(e){ return null; }
+}
 function kstNow(){ return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' })); }
 const ymdOf = d => d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
 
@@ -92,7 +104,12 @@ async function main(){
   const universe = readJson(universeFile, null);
   if(!universe){ console.error(universeFile + ' 없음'); process.exit(1); }
   const positions = readJson(path.resolve(args.positionsFile), []);
-  const account = readJson(path.resolve(args.accountFile), null) || { equity: args.equity, cashAvailable: args.equity };
+  let src = 'account.json';
+  let account = readJson(path.resolve(args.accountFile), null);
+  if(!account && args.equity > 0){ account = { equity: args.equity, cashAvailable: args.equity }; src = '--equity'; }
+  if(!account){ account = readLedgerAccount(); src = 'ledger.csv'; }
+  if(!account){ account = { equity: CFG.paperInitialEquity, cashAvailable: CFG.paperInitialEquity }; src = 'paperInitialEquity'; }
+  console.log('[account] source=' + src + ' equity=' + account.equity + ' cash=' + account.cashAvailable);
   if(!(account.equity > 0)){ console.error('계좌 평가액 없음 — account.json 또는 --equity'); process.exit(1); }
   const openPos = positions.filter(p => p && (p.status === 'open' || p.status === 'partial'));
 
