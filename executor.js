@@ -291,7 +291,7 @@ async function main(){
       console.warn('[WARN] ' + staleMsg);
       sendAlert('warn', staleMsg);
     }
-    var ledger = readLatestLedger(1000000);
+    var ledger = readLatestLedger(10000000);
     cash        = ledger.cash;
     realizedPnl = 0;
     positions   = readJson(CFG.positionsFile, []);

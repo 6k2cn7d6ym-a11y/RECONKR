@@ -225,7 +225,7 @@ validateTVGate()             // 거래대금 게이트 정당성
 
 1. `git worktree add ../reconkr-paper main` 실행 확인
 2. `../reconkr-paper/positions.json` → 빈 배열 `[]`
-3. `../reconkr-paper/ops/status.json` → `{"status":"active","peakEquity":1000000}`
+3. `../reconkr-paper/ops/status.json` → `{"status":"active","peakEquity":10000000}` (기존 1000000이어도 첫 실행 시 max()로 자동 갱신)
 4. `../reconkr-paper/ledger.csv` → 헤더만 (`일자,자본,현금,보유평가,실현손익`)
 5. pm2 cron 경로를 `../reconkr-paper`로 변경 확인
 6. 합성 테스트 잔재(positions.json에 closed 포지션 등) 없는지 확인

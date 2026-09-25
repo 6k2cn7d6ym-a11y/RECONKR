@@ -48,8 +48,8 @@ const CFG = {
   historyDays: 200,                    // MA120·RSI 워밍업 충분
   indexCode: '0001',
   size: { riskPctPerTrade: 1.5, maxPositionPct: 20, allowFractional: false, minShares: 1, currency: '₩' },
-  paperInitialEquity: 1000000,         // ledger 첫 행 전 초기 자본 (executor.js readLatestLedger(1000000)과 동일값)
-  maxNewEntriesPerDay: 2,              // 100만원 실험: 하루 신규 진입 상한
+  paperInitialEquity: 10000000,        // ledger 첫 행 전 초기 자본 (executor.js readLatestLedger(10000000)과 동일값)
+  maxNewEntriesPerDay: 2,              // 하루 신규 진입 상한
   maxOpenPositions: 4,                 // 20% 캡 × 4 = 80% 이하
   t1SellPct: 100,                      // T1 도달 시 전량 익절 (백테스트 V1 T1-100 기준)
   gradeToType: { A: 'A', B: 'B' },     // swing_grade → sizeEngine typeRiskMult (A×1.0, B×0.6)
