@@ -80,6 +80,10 @@ function todayKst(){
   var d = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
   return d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
 }
+function kstHm(){
+  var d = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
+  return d.getHours() * 100 + d.getMinutes();
+}
 
 function asOfCandles(candles, date){
   if(!date) return candles;
@@ -259,6 +263,14 @@ async function main(){
 
   var date = args.date || todayKst();
   console.log('[executor] mode=' + args.mode + ' date=' + date);
+
+  // 조기 기동 가드 — pm2 cron_restart(09:05)가 간헐적으로 수 초 일찍 트리거되는 현상 대응.
+  // --date 미지정(=cron 자동 실행)인데 예정 시각(09:05) 전이면 아무 파일도 읽거나 쓰지 않고 종료.
+  // 어차피 pm2가 정시 SIGINT로 죽일 프로세스를, '아무 일도 하지 않은 빈 프로세스'로 만든다.
+  if(!args.date && kstHm() < 905){
+    console.log('[EARLY-EXIT] KST ' + kstHm() + ' < 0905 — cron 조기 기동 추정, 무작업 종료');
+    return;
+  }
 
   // 1. killswitch
   if(isKillswitchActive()) return;
