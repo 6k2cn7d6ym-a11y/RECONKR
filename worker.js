@@ -725,7 +725,7 @@ export default {
     if (!isAllowedProxyTarget(target)) {
       return new Response('허용되지 않은 URL', { status: 403 });
     }
-    if (target.includes('finance.yahoo.com/v10/')) return await fetchYahooV10(target);
+    if (isYahooV10Target(target)) return await fetchYahooV10(target);
     try {
       const res  = await fetch(target, { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', 'Accept-Language': 'en-US,en;q=0.9' } });
       const data = await res.text();
@@ -1396,6 +1396,14 @@ function isInvestChartTarget(target) {
   try { u = new URL(target); } catch (e) { return false; }
   if (u.protocol !== 'https:' || u.port || u.username || u.password) return false;
   return INVEST_CHART_HOSTS.includes(u.hostname.toLowerCase()) && u.pathname.startsWith('/v8/finance/chart/');
+}
+
+// v10 크럼 분기 — 원문 includes는 쿼리스트링 밀반입(?x=finance.yahoo.com/v10/)에 걸림. 파싱된 호스트·경로로 판정
+function isYahooV10Target(target) {
+  let u;
+  try { u = new URL(target); } catch (e) { return false; }
+  const h = u.hostname.toLowerCase();
+  return (h === 'finance.yahoo.com' || h.endsWith('.finance.yahoo.com')) && u.pathname.startsWith('/v10/');
 }
 
 // 루트 ?url= 프록시 허용 호스트 — 문자열 포함 검사 우회(https://evil.com/?yahoo.com) 차단
