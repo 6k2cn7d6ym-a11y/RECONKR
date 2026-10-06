@@ -1458,6 +1458,10 @@ function isSafeId(v){
   // onclick(id) — id는 Date.now() 기반 숫자(최대 16자리). 무인증 KV발 저널 데이터 방어.
   return /^\d{1,16}$/.test(String(v));
 }
+function isSafeRceptNo(v){
+  // DART 접수번호 — 14자리 숫자. href에 꽂히기 전 형식 검증(아테나 L5790 지적).
+  return /^\d{14}$/.test(String(v));
+}
 
 // ── parseTradeDate/tradeHoldDays: engineUtil.js 로 이전 (2026-07) ──
 async function fetchWithProxy(url){
@@ -3787,7 +3791,7 @@ function renderTrack(mode){
     var typeMark = (t.scoreType==='engine') ? '<span style="color:var(--t3);font-size:8px">E</span> ' : '';
     return '<div style="display:flex;align-items:center;gap:6px;padding:6px 14px;border-bottom:1px solid var(--b);font-size:11px">'+
       '<span style="font-family:var(--mono);min-width:14px;color:var(--t3)">'+icon+'</span>'+
-      '<span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+typeMark+t.name+stopMark+'</span>'+
+      '<span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+typeMark+escHtml(t.name)+stopMark+'</span>'+
       '<span style="font-family:var(--mono);font-size:10px;color:var(--t3);min-width:52px">'+(t.scanDate||'')+'</span>'+
       '<span style="font-family:var(--mono);min-width:26px;text-align:right;color:'+cfg.color+'">'+t.score+'</span>'+
       '<span style="font-family:var(--mono);min-width:44px;text-align:right">'+fmtPct(t.p1?t.p1.pct:null)+'</span>'+
@@ -5739,7 +5743,7 @@ async function fetchDartDisclosures(stockCode){
         type:     d.pblntf_ty,   // 'A' 정기, 'B' 주요사항, 'D' 외부감사 등
         corpName: d.corp_name,
         rcept_no: d.rcept_no,
-        url:      'https://dart.fss.or.kr/dsaf001/main.do?rcpNo='+d.rcept_no,
+        url:      isSafeRceptNo(d.rcept_no) ? 'https://dart.fss.or.kr/dsaf001/main.do?rcpNo='+d.rcept_no : '',
       };
     });
   }catch(e){
@@ -5799,12 +5803,15 @@ async function loadDartFeed(){
       var dt    = d.rcept_dt.replace(/(\d{4})(\d{2})(\d{2})/,'$2.$3');
       var isNeg = DART_NEGATIVE_KEYWORDS.some(function(k){ return d.report_nm.includes(k); });
       var color = isNeg ? 'var(--r)' : 'var(--t)';
+      var reportHtml = isSafeRceptNo(d.rcept_no) ?
+        '<a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo='+d.rcept_no+'" target="_blank" '
+          +'style="font-size:11px;color:'+color+';text-decoration:none;line-height:1.4;word-break:keep-all">'+escHtml(d.report_nm)+'</a>' :
+        '<span style="font-size:11px;color:'+color+';line-height:1.4;word-break:keep-all">'+escHtml(d.report_nm)+'</span>';
       html += '<div style="display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-bottom:1px solid var(--b)">'
         +'<span style="font-family:var(--mono);font-size:9px;color:var(--t3);flex-shrink:0;padding-top:2px">'+dt+'</span>'
         +'<div style="flex:1;min-width:0">'
-          +'<div style="font-family:var(--mono);font-size:9px;color:var(--t2);margin-bottom:2px">'+d.corp_name+'</div>'
-          +'<a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo='+d.rcept_no+'" target="_blank" '
-            +'style="font-size:11px;color:'+color+';text-decoration:none;line-height:1.4;word-break:keep-all">'+d.report_nm+'</a>'
+          +'<div style="font-family:var(--mono);font-size:9px;color:var(--t2);margin-bottom:2px">'+escHtml(d.corp_name)+'</div>'
+          +reportHtml
         +'</div>'
       +'</div>';
     });
@@ -8909,12 +8916,13 @@ function renderDartDisclosures(r){
         var icon   = isNeg ? '⚠' : isFact ? '✅' : '·';
         var iconColor = isNeg ? 'var(--r)' : isFact ? 'var(--g)' : 'var(--t3)';
         var dateFmt = (d.date||'').replace(/(\d{4})(\d{2})(\d{2})/,'$1-$2-$3');
+        var titleHtml = d.url ?
+          '<a href="'+d.url+'" target="_blank" rel="noopener" style="color:var(--t2);flex:1;text-decoration:none">'+escHtml(d.title)+'</a>' :
+          '<span style="color:var(--t2);flex:1">'+escHtml(d.title)+'</span>';
         return '<div style="display:flex;gap:6px;padding:3px 0;font-size:10px;line-height:1.4">'+
           '<span style="color:'+iconColor+';flex-shrink:0;width:10px">'+icon+'</span>'+
           '<span style="color:var(--t3);font-family:var(--mono);flex-shrink:0;width:72px">'+dateFmt+'</span>'+
-          '<a href="'+d.url+'" target="_blank" rel="noopener" style="color:var(--t2);flex:1;text-decoration:none">'+
-            d.title+
-          '</a>'+
+          titleHtml+
         '</div>';
       }).join('')+
       (r.dartDisclosures.length > 5 ?
@@ -9186,9 +9194,9 @@ function momoCardHTML(r){
 
   // 시그널/워닝/블로커 전체
   var allSigs=[];
-  (r.signals||[]).forEach(function(s){allSigs.push('<div class="sig-line"><span class="sig-icon" style="color:var(--g)">✓</span>'+s+'</div>');});
-  (r.warnings||[]).forEach(function(w){allSigs.push('<div class="sig-line"><span class="sig-icon" style="color:var(--a)">⚠</span>'+w+'</div>');});
-  if(ac!=='BLOCK')(r.blockers||[]).forEach(function(b){allSigs.push('<div class="sig-line"><span class="sig-icon" style="color:var(--r)">✗</span>'+b+'</div>');});
+  (r.signals||[]).forEach(function(s){allSigs.push('<div class="sig-line"><span class="sig-icon" style="color:var(--g)">✓</span>'+escHtml(s)+'</div>');});
+  (r.warnings||[]).forEach(function(w){allSigs.push('<div class="sig-line"><span class="sig-icon" style="color:var(--a)">⚠</span>'+escHtml(w)+'</div>');});
+  if(ac!=='BLOCK')(r.blockers||[]).forEach(function(b){allSigs.push('<div class="sig-line"><span class="sig-icon" style="color:var(--r)">✗</span>'+escHtml(b)+'</div>');});
   var sigsHtml=allSigs.length?'<div class="card-signals" style="margin-bottom:8px">'+allSigs.join('')+'</div>':'';
 
   // 돌파 체크리스트
@@ -9429,9 +9437,9 @@ function _cardSignalLines(r, opts){
   var maxWarn  = opts.maxWarn  || 2;
   var maxBlock = opts.maxBlock || 3;
   var lines=[];
-  (r.signals  ||[]).slice(0,maxSig)  .forEach(function(s){ lines.push('<div class="sig-line"><span class="sig-icon" style="color:var(--g)">✓</span>'+s+'</div>'); });
-  (r.warnings ||[]).slice(0,maxWarn) .forEach(function(w){ lines.push('<div class="sig-line"><span class="sig-icon" style="color:var(--a)">⚠</span>'+w+'</div>'); });
-  (r.blockers ||[]).slice(0,maxBlock).forEach(function(b){ lines.push('<div class="sig-line"><span class="sig-icon" style="color:var(--r)">✗</span>'+b+'</div>'); });
+  (r.signals  ||[]).slice(0,maxSig)  .forEach(function(s){ lines.push('<div class="sig-line"><span class="sig-icon" style="color:var(--g)">✓</span>'+escHtml(s)+'</div>'); });
+  (r.warnings ||[]).slice(0,maxWarn) .forEach(function(w){ lines.push('<div class="sig-line"><span class="sig-icon" style="color:var(--a)">⚠</span>'+escHtml(w)+'</div>'); });
+  (r.blockers ||[]).slice(0,maxBlock).forEach(function(b){ lines.push('<div class="sig-line"><span class="sig-icon" style="color:var(--r)">✗</span>'+escHtml(b)+'</div>'); });
   return lines.length ? '<div class="card-signals">'+lines.join('')+'</div>' : '';
 }
 
@@ -9841,7 +9849,7 @@ function coreCardHTML(r){
       sectorRsHtml =
         '<div style="margin:6px 0 6px;padding:8px 10px;background:var(--bg2);border:1px solid var(--b);border-radius:10px">'+
           '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">'+
-            '<span style="font-family:var(--mono);font-size:9px;color:var(--t2);letter-spacing:.08em">섹터 RS · '+r.sector_name+'</span>'+
+            '<span style="font-family:var(--mono);font-size:9px;color:var(--t2);letter-spacing:.08em">섹터 RS · '+escHtml(r.sector_name)+'</span>'+
             '<span style="font-family:var(--mono);font-size:11px;color:'+rsColor+'">'+(sRs>=0?'+':'')+sRs+'%p · '+rsLabel+'</span>'+
           '</div>'+
           '<div style="display:flex;gap:14px;font-family:var(--mono);font-size:9px;color:var(--t3)">'+
@@ -9857,7 +9865,7 @@ function coreCardHTML(r){
       sectorRsHtml =
         '<div style="margin:6px 0 6px;padding:6px 10px;background:var(--bg2);border:1px solid var(--b);border-radius:10px">'+
           '<div style="display:flex;justify-content:space-between;align-items:center">'+
-            '<span style="font-family:var(--mono);font-size:9px;color:var(--t2);letter-spacing:.08em">섹터 RS · '+r.sector_name+'</span>'+
+            '<span style="font-family:var(--mono);font-size:9px;color:var(--t2);letter-spacing:.08em">섹터 RS · '+escHtml(r.sector_name)+'</span>'+
             '<span style="font-family:var(--mono);font-size:9px;color:var(--t3)">'+msg+'</span>'+
           '</div>'+
         '</div>';
@@ -9910,7 +9918,7 @@ function coreCardHTML(r){
 
     // 시총 경고 (있을 때만)
     var capWarn = bk.market_cap_warning ?
-      '<div style="font-family:var(--mono);font-size:9px;color:var(--a);margin-top:4px">⚠ '+bk.market_cap_warning+'</div>' : '';
+      '<div style="font-family:var(--mono);font-size:9px;color:var(--a);margin-top:4px">⚠ '+escHtml(bk.market_cap_warning)+'</div>' : '';
 
     babylonHtml =
       '<div style="margin:6px 0 6px;padding:8px 10px;background:var(--bg2);border:1px solid '+bkClr+';border-radius:10px">'+
@@ -10096,13 +10104,13 @@ function _legacyCardHTML(r, mode){
         '<div class="lv lv-stop"><div class="lv-label">손절선</div><div class="lv-val">'+(r.stop?'₩'+Math.round(r.stop).toLocaleString():'--')+'</div></div>'+
         '<div class="lv lv-entry"><div class="lv-label">추가매수</div><div class="lv-val" style="color:var(--a)">'+(r.add_price?'₩'+Math.round(r.add_price).toLocaleString():'--')+'</div></div>'+
       '</div>'+
-      ((r.sell_signals && r.sell_signals.length)?'<div style="margin-bottom:4px">'+r.sell_signals.slice(0,2).map(function(s){return '<div class="sig-line"><span class="sig-icon" style="color:var(--r)">✗</span>'+s+'</div>';}).join('')+'</div>':'')+
-      ((r.hold_signals && r.hold_signals.length)?'<div style="margin-bottom:4px">'+r.hold_signals.slice(0,2).map(function(s){return '<div class="sig-line"><span class="sig-icon" style="color:var(--g)">✓</span>'+s+'</div>';}).join('')+'</div>':'')+
+      ((r.sell_signals && r.sell_signals.length)?'<div style="margin-bottom:4px">'+r.sell_signals.slice(0,2).map(function(s){return '<div class="sig-line"><span class="sig-icon" style="color:var(--r)">✗</span>'+escHtml(s)+'</div>';}).join('')+'</div>':'')+
+      ((r.hold_signals && r.hold_signals.length)?'<div style="margin-bottom:4px">'+r.hold_signals.slice(0,2).map(function(s){return '<div class="sig-line"><span class="sig-icon" style="color:var(--g)">✓</span>'+escHtml(s)+'</div>';}).join('')+'</div>':'')+
       ((r.add_price && r.add_reason)?'<div style="background:rgba(43,159,255,.08);border:1px solid rgba(43,159,255,.20);border-radius:8px;padding:8px 12px;font-size:11px;color:var(--bl);margin-bottom:6px">➕ '+escHtml(r.add_reason)+'</div>':'')+
       vwapHtml+
       (r.news?'<div class="news-line">'+escHtml(r.news)+'</div>':'')+
       '<div style="font-size:11px;color:var(--t2);margin-top:6px">'+escHtml(r.summary||'')+'</div>'+
-      ((r.risk_factors && r.risk_factors.length)?'<div style="margin-top:6px">'+r.risk_factors.slice(0,2).map(function(f){return '<div class="sig-line"><span class="sig-icon" style="color:var(--a)">⚠</span>'+f+'</div>';}).join('')+'</div>':'')+
+      ((r.risk_factors && r.risk_factors.length)?'<div style="margin-top:6px">'+r.risk_factors.slice(0,2).map(function(f){return '<div class="sig-line"><span class="sig-icon" style="color:var(--a)">⚠</span>'+escHtml(f)+'</div>';}).join('')+'</div>':'')+
       // onclick 내 ticker는 escHtml로 못 막음(& #39; 디코드 후 JS 실행) — isKrCode 통과시에만 버튼 렌더
       (isKrCode(r.ticker)?
         '<div style="margin-top:10px;display:flex;gap:6px">'+
@@ -10153,10 +10161,10 @@ function holdCardHTML(r, mode, trade){
   var _sigLimit  = (ac==='HOLD'||ac==='ADD') ? 3 : 5;
   var _warnLimit = (ac==='SELL_ALL'||ac==='STOP_LOSS') ? 6 : 3;
   var signals = (r.signals||[]).slice(0,_sigLimit).map(function(s){
-    return '<div style="display:flex;gap:6px;font-size:11px;color:var(--t);line-height:1.5"><span style="color:var(--g);flex-shrink:0">✓</span>'+s+'</div>';
+    return '<div style="display:flex;gap:6px;font-size:11px;color:var(--t);line-height:1.5"><span style="color:var(--g);flex-shrink:0">✓</span>'+escHtml(s)+'</div>';
   }).join('');
   var warnings = (r.warnings||[]).slice(0,_warnLimit).map(function(w){
-    return '<div style="display:flex;gap:6px;font-size:11px;color:var(--t);line-height:1.5"><span style="color:var(--a);flex-shrink:0">⚠</span>'+w+'</div>';
+    return '<div style="display:flex;gap:6px;font-size:11px;color:var(--t);line-height:1.5"><span style="color:var(--a);flex-shrink:0">⚠</span>'+escHtml(w)+'</div>';
   }).join('');
 
   // 모드 색상
@@ -10188,7 +10196,7 @@ function holdCardHTML(r, mode, trade){
         '</div>'+
         '<div style="font-size:10px;color:var(--t2);font-family:var(--mono);margin-top:2px">'+urgencyLabel+
           (r._holdEngineScore!=null?' · 엔진 '+r._holdEngineScore+'pt':'')+
-          (r.whale_label?' · '+r.whale_label:'')+'</div>'+
+          (r.whale_label?' · '+escHtml(r.whale_label):'')+'</div>'+
       '</div>'+
       '<div style="text-align:center;padding:8px 16px;border-radius:10px;border:1.5px solid '+acColor+';background:rgba(255,255,255,.04)">'+
         '<div style="font-family:var(--mono);font-size:13px;font-weight:700;color:'+acColor+'">'+acLabel+'</div>'+
@@ -10200,7 +10208,7 @@ function holdCardHTML(r, mode, trade){
       '<div style="margin-bottom:8px;padding:10px 12px;background:rgba(255,45,78,.10);border:1.5px solid rgba(255,45,78,.40);border-radius:10px">'+
         '<div style="font-family:var(--mono);font-size:9px;color:var(--r);letter-spacing:.1em;margin-bottom:5px">⚡ 엔진 BLOCK — 즉시 청산 권고</div>'+
         (r._holdEngineBlock||[]).map(function(b){
-          return '<div style="font-size:11px;color:var(--t);line-height:1.5;padding:2px 0"><span style="color:var(--r);margin-right:5px">✗</span>'+b+'</div>';
+          return '<div style="font-size:11px;color:var(--t);line-height:1.5;padding:2px 0"><span style="color:var(--r);margin-right:5px">✗</span>'+escHtml(b)+'</div>';
         }).join('')+
       '</div>':'')+
 
@@ -10269,7 +10277,7 @@ function holdCardHTML(r, mode, trade){
         html += '<div style="font-family:var(--mono);font-size:9px;color:var(--r);letter-spacing:.1em;margin-bottom:5px">⚡ 청산 신호 감지</div>';
         es.critical.forEach(function(s){
           html += '<div style="font-size:11px;color:var(--t);line-height:1.5;padding:2px 0">'+
-            '<span style="color:var(--r);margin-right:5px">✗</span>'+s+'</div>';
+            '<span style="color:var(--r);margin-right:5px">✗</span>'+escHtml(s)+'</div>';
         });
         html += '</div>';
       }
@@ -10279,7 +10287,7 @@ function holdCardHTML(r, mode, trade){
         html += '<div style="font-family:var(--mono);font-size:9px;color:var(--gold);letter-spacing:.1em;margin-bottom:4px">⚠ 청산 주의 신호</div>';
         es.warning.forEach(function(w){
           html += '<div style="font-size:11px;color:var(--t2);line-height:1.5;padding:2px 0">'+
-            '<span style="color:var(--gold);margin-right:5px">△</span>'+w+'</div>';
+            '<span style="color:var(--gold);margin-right:5px">△</span>'+escHtml(w)+'</div>';
         });
         html += '</div>';
       }
@@ -11004,10 +11012,10 @@ function renderJournal(mode){
           var phaseLabel={'PRE':'프리마켓','ORB':'ORB','EARLY':'골든윈도우','PRIME':'2차모멘텀','LATE':'페이드','CLOSED':'장마감'}[s.marketPhase]||s.marketPhase||'';
           var wickLabel={'strong':'위꼬리 강함','normal':'위꼬리 보통','weak':'⚠위꼬리','failed':'슈팅스타'}[s.breakout_wick_strength]||'';
           var sigHtml=(s.signals||[]).map(function(sg){
-            return '<div style="font-size:10px;color:var(--g);line-height:1.5">✓ '+sg+'</div>';
+            return '<div style="font-size:10px;color:var(--g);line-height:1.5">✓ '+escHtml(sg)+'</div>';
           }).join('');
           var warnHtml=(s.warnings||[]).map(function(w){
-            return '<div style="font-size:10px;color:var(--a);line-height:1.5">⚠ '+w+'</div>';
+            return '<div style="font-size:10px;color:var(--a);line-height:1.5">⚠ '+escHtml(w)+'</div>';
           }).join('');
           return '<div style="margin-top:6px;border:1px solid var(--b);border-radius:8px;overflow:hidden">'+
             '<div onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===\'none\'?\'block\':\'none\'" '+
@@ -11035,8 +11043,8 @@ function renderJournal(mode){
                   (s.rr?'<span style="color:var(--pu)">'+s.rr+'R</span>':'')+
                 '</div>':'')+
               sigHtml+warnHtml+
-              (s.summary?'<div style="font-size:10px;color:var(--t2);margin-top:4px;padding-top:4px;border-top:1px solid var(--b)">'+s.summary+'</div>':'')+
-              (s.news?'<div style="font-size:9px;color:var(--t3);margin-top:4px;line-height:1.4">'+s.news+'</div>':'')+
+              (s.summary?'<div style="font-size:10px;color:var(--t2);margin-top:4px;padding-top:4px;border-top:1px solid var(--b)">'+escHtml(s.summary)+'</div>':'')+
+              (s.news?'<div style="font-size:9px;color:var(--t3);margin-top:4px;line-height:1.4">'+escHtml(s.news)+'</div>':'')+
             '</div>'+
           '</div>';
         })(t.card_snapshot):'')+
