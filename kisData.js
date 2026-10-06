@@ -142,7 +142,8 @@ async function fetchIndexCandlesLong(indexCode, targetDays){
   return all;
 }
 
-async function loadIndexCandles(indexCode, targetDays){
+async function loadIndexCandles(indexCode, targetDays, opts){
+  opts = opts || {};
   fs.mkdirSync(CACHE_DIR_IDX, { recursive: true });
   const code = indexCode || '0001';
   const file = path.join(CACHE_DIR_IDX, code + '.json');
@@ -150,11 +151,18 @@ async function loadIndexCandles(indexCode, targetDays){
   if(fs.existsSync(file)){
     try{
       const cached = JSON.parse(fs.readFileSync(file, 'utf-8'));
-      if(cached.fetchedYmd === todayYmd && (cached.candles || []).length >= Math.min(targetDays || 0, 200)) return cached.candles;
+      const enoughCandles = (cached.candles || []).length >= Math.min(targetDays || 0, 200);
+      const freshToday    = cached.fetchedYmd === todayYmd;
+      const freshEnough   = !opts.confirmedToday || (cached.fetchedHm || '0000') >= '1535';
+      if(freshToday && freshEnough && enoughCandles) return cached.candles;
     }catch(e){}
   }
   const candles = await fetchIndexCandlesLong(code, targetDays);
-  if(candles.length) fs.writeFileSync(file, JSON.stringify({ fetchedYmd: todayYmd, code, candles }));
+  if(candles.length){
+    const now = new Date();
+    const nowHm = ('0' + now.getHours()).slice(-2) + ('0' + now.getMinutes()).slice(-2);
+    fs.writeFileSync(file, JSON.stringify({ fetchedYmd: todayYmd, fetchedHm: nowHm, code, candles }));
+  }
   await sleep(SLEEP_MS);
   return candles;
 }

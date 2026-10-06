@@ -116,10 +116,19 @@ async function main(){
   // 시장 컨텍스트
   let indexMap = null, asOfYmd = args.asof;
   try{
-    const ic = asOfCandles(await loadIndexCandles(CFG.indexCode, CFG.historyDays + 130), args.asof);
+    const ic = asOfCandles(await loadIndexCandles(CFG.indexCode, CFG.historyDays + 130, {confirmedToday: true}), args.asof);
     indexMap = buildIndexMap(ic);
     if(!asOfYmd && ic.length) asOfYmd = ic[0].stck_bsop_date;
   }catch(e){ console.warn('KOSPI 지수 로드 실패 → 중립 게이트:', e.message); }
+
+  // 휴장일 가드 — --asof 미지정(=cron 자동 실행)인데 지수 봉 기준일이 오늘(KST)이 아니면
+  // 휴장(또는 지수 로드 실패)으로 보고 signals·orders를 전혀 쓰지 않고 종료.
+  // 그대로 두면 asOfYmd가 '어제' 날짜로 잡혀, 이미 집행된 과거 signals/orders 파일을 같은 이름으로 덮어쓴다(10/5 사고 원인).
+  if(!args.asof && asOfYmd !== ymdOf(now)){
+    console.log('[HOLIDAY-SKIP] 지수 봉 기준일(' + (asOfYmd || 'none') + ') ≠ 오늘(' + ymdOf(now) + ') — 휴장 추정, signals/orders 미작성 종료');
+    return;
+  }
+
   const mkt = (indexMap && asOfYmd && indexMap[asOfYmd]) || null;
   const out = {
     asOf: asOfYmd, ranAt: new Date().toISOString(), regime: 'PRIME(확정봉)',
@@ -192,12 +201,28 @@ async function main(){
   }
 
   // ── 3. 출력 ──
+  const targetYmd = asOfYmd || ymdOf(now);
+  // 이미 집행된(= _executedAt 있거나 어느 주문이든 _filled 있는) orders 파일은 어떤 경우에도 재작성하지 않는다.
+  // 휴장 가드가 막지 못하는 다른 원인(시계 오차·재실행 등)에 대한 2차 방어선.
+  const existingOrdersFile = path.join(__dirname, 'orders', targetYmd + '.json');
+  if(fs.existsSync(existingOrdersFile)){
+    try{
+      const existing = JSON.parse(fs.readFileSync(existingOrdersFile, 'utf-8'));
+      const locked = !!existing._executedAt ||
+        (existing.entries || []).some(e => e._filled) ||
+        (existing.exits   || []).some(e => e._filled);
+      if(locked){
+        console.log('[LOCKED] ' + targetYmd + ' orders 파일이 이미 집행됨(_executedAt/_filled) — signals/orders 재작성 금지, 종료');
+        return;
+      }
+    }catch(e){ console.warn('[WARN] 기존 orders 파일 파싱 실패 — 안전하게 종료: ' + e.message); return; }
+  }
   fs.mkdirSync(path.join(__dirname, 'signals'), { recursive: true });
-  const sigFile = path.join(__dirname, 'signals', (asOfYmd || ymdOf(now)) + '.json');
+  const sigFile = path.join(__dirname, 'signals', targetYmd + '.json');
   fs.writeFileSync(sigFile, JSON.stringify(out, null, 2));
   if(args.emitOrders){
     fs.mkdirSync(path.join(__dirname, 'orders'), { recursive: true });
-    const ordFile = path.join(__dirname, 'orders', (asOfYmd || ymdOf(now)) + '.json');
+    const ordFile = existingOrdersFile;
     fs.writeFileSync(ordFile, JSON.stringify({ asOf: out.asOf, source: 'bot-live', entries: out.entries, exits: out.exits }, null, 2));
     console.log('→ 주문 제안 기록: ' + ordFile + ' (실행기가 requestId 부여 후 프록시 호출)');
   }
