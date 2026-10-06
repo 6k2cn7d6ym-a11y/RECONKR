@@ -36,6 +36,7 @@ var http  = require('http');
 var BCFG = require('./backtest-swing-kr.js').CFG;
 var kisData = require('./kisData.js');
 var loadCandles = kisData.loadCandles;
+var loadIndexCandles = kisData.loadIndexCandles;
 var u = require('./engineUtil.js');
 
 global.G = { marketPhase: 'PRIME', spyAboveMA200: null, spyIntraday: null, _isNxtHours: false };
@@ -50,6 +51,7 @@ global.parseTradeDate   = u.parseTradeDate;
 var CFG = {
   costs:           BCFG.costs,
   gapSkipPct:      BCFG.gapSkipPct,
+  indexCode:       '0001',
   haltDrawdownPct: 10,
   killswitchPath:  path.join(__dirname, 'ops', 'killswitch'),
   statusFile:      path.join(__dirname, 'ops', 'status.json'),
@@ -269,6 +271,22 @@ async function main(){
   // 어차피 pm2가 정시 SIGINT로 죽일 프로세스를, '아무 일도 하지 않은 빈 프로세스'로 만든다.
   if(!args.date && kstHm() < 905){
     console.log('[EARLY-EXIT] KST ' + kstHm() + ' < 0905 — cron 조기 기동 추정, 무작업 종료');
+    return;
+  }
+
+  // 0. 휴장일 가드 — 집행일(date)의 KOSPI 지수 봉이 없으면 휴장(또는 데이터 지연)으로 보고
+  //    orders·fills·positions·ledger·checkpoint 중 아무것도 건드리지 않고 종료한다.
+  //    `--date`로 특정 과거 영업일을 재현하는 경우도 그 날짜의 지수 봉이 있어야 통과한다(=실제 거래일만 허용).
+  try{
+    var idxCandles = await loadIndexCandles(CFG.indexCode, 30);
+    var hasDateCandle = idxCandles.some(function(c){ return c.stck_bsop_date === date; });
+    if(!hasDateCandle){
+      console.log('[HOLIDAY-SKIP] ' + date + ' 지수 봉 없음(최신 ' + (idxCandles[0] ? idxCandles[0].stck_bsop_date : 'none') + ') — 휴장 추정, 무작업 종료');
+      return;
+    }
+  }catch(e){
+    console.warn('[WARN] 지수 봉 로드 실패 — 휴장 판정 불가: ' + e.message);
+    sendAlert('warn', '휴장 판정 실패(지수 봉 로드 오류): ' + e.message);
     return;
   }
 
