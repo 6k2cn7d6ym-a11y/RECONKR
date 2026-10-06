@@ -9135,8 +9135,8 @@ function momoCardHTML(r){
         '<div class="as-label '+ea.css+'">'+ea.label+'</div>'+
         '<div class="as-reason">'+ea.reason+'</div>'+
         (ea.trigger?'<div class="as-trigger">'+ea.trigger+'</div>':'')+
-        (r.action_reason?'<div style="font-family:var(--mono);font-size:10px;color:var(--t2);margin-top:5px;padding:4px 8px;background:rgba(255,255,255,.04);border-radius:6px">📋 '+r.action_reason+'</div>':'')+ 
-        (r.entry_reason?'<div style="font-size:10px;color:var(--t3);margin-top:4px">Claude: '+r.entry_reason+'</div>':'')+
+        (r.action_reason?'<div style="font-family:var(--mono);font-size:10px;color:var(--t2);margin-top:5px;padding:4px 8px;background:rgba(255,255,255,.04);border-radius:6px">📋 '+escHtml(r.action_reason)+'</div>':'')+
+        (r.entry_reason?'<div style="font-size:10px;color:var(--t3);margin-top:4px">Claude: '+escHtml(r.entry_reason)+'</div>':'')+
       '</div>'+
     '</div>' : '';
 
@@ -9146,12 +9146,12 @@ function momoCardHTML(r){
       '<div class="as-icon">⏳</div>'+
       '<div class="as-body">'+
         '<div class="as-label wait">관망 — 아직 진입 시점 아님</div>'+
-        '<div class="as-reason">'+(r.action_reason || (r.warnings&&r.warnings[0]) || '점수 '+(r.score||0)+'pt — 트리거/조건 보완 대기')+'</div>'+
+        '<div class="as-reason">'+escHtml(r.action_reason || (r.warnings&&r.warnings[0]) || '점수 '+(r.score||0)+'pt — 트리거/조건 보완 대기')+'</div>'+
       '</div>'+
     '</div>' : '';
 
   // 뉴스
-  var newsHtml=r.news?'<div class="news-line">'+r.news+'</div>':'';
+  var newsHtml=r.news?'<div class="news-line">'+escHtml(r.news)+'</div>':'';
 
   // 데이터 신선도
   var freshnessHtml='';
@@ -9667,7 +9667,7 @@ function swingCardHTML(r){
           '<div class="as-label '+ea.css+'">'+ea.label+'</div>'+
           '<div class="as-reason">'+ea.reason+'</div>'+
           (ea.trigger?'<div class="as-trigger">'+ea.trigger+'</div>':'')+
-          (r.entry_reason?'<div style="font-size:10px;color:var(--t3);margin-top:4px">Claude: '+r.entry_reason+'</div>':'')+
+          (r.entry_reason?'<div style="font-size:10px;color:var(--t3);margin-top:4px">Claude: '+escHtml(r.entry_reason)+'</div>':'')+
         '</div>'+
       '</div>'
     : ac==='READY' ?
@@ -9690,7 +9690,7 @@ function swingCardHTML(r){
 
     vwapHtml+
     (tags?'<div class="card-tags">'+tags+'</div>':'')+
-    (r.news?'<div class="news-line">'+r.news+'</div>':'')+
+    (r.news?'<div class="news-line">'+escHtml(r.news)+'</div>':'')+
     layersHtml+
     levelsBlock+
     sellHtml+
@@ -10017,7 +10017,7 @@ function coreCardHTML(r){
     '</div>'+
 
     (tags?'<div class="card-tags">'+tags+'</div>':'')+
-    (r.news?'<div class="news-line">'+r.news+'</div>':'')+
+    (r.news?'<div class="news-line">'+escHtml(r.news)+'</div>':'')+
     coreScoreHtml+
     sectorRsHtml+
     babylonHtml+
@@ -10083,7 +10083,7 @@ function _legacyCardHTML(r, mode){
           '<div style="font-family:var(--mono);font-size:11px;color:var(--t2);margin-top:2px">점수 '+r.score+'</div>'+
         '</div>'+
       '</div>'+
-      '<div style="background:'+urgBg+';border:1px solid '+urgBorder+';border-radius:8px;padding:8px 12px;font-family:var(--mono);font-size:12px;color:'+urgColor+';margin-bottom:8px">'+urgIcon+' '+(r.action_reason||'')+'</div>'+
+      '<div style="background:'+urgBg+';border:1px solid '+urgBorder+';border-radius:8px;padding:8px 12px;font-family:var(--mono);font-size:12px;color:'+urgColor+';margin-bottom:8px">'+urgIcon+' '+escHtml(r.action_reason||'')+'</div>'+
       '<div class="levels" style="margin-bottom:8px">'+
         '<div class="lv lv-t1"><div class="lv-label">T1 익절</div><div class="lv-val">'+(r.t1?'₩'+Math.round(r.t1).toLocaleString():'--')+'</div></div>'+
         '<div class="lv lv-rr"><div class="lv-label">T2 익절</div><div class="lv-val" style="color:var(--bl)">'+(r.t2?'₩'+Math.round(r.t2).toLocaleString():'--')+'</div></div>'+
@@ -10092,10 +10092,10 @@ function _legacyCardHTML(r, mode){
       '</div>'+
       ((r.sell_signals && r.sell_signals.length)?'<div style="margin-bottom:4px">'+r.sell_signals.slice(0,2).map(function(s){return '<div class="sig-line"><span class="sig-icon" style="color:var(--r)">✗</span>'+s+'</div>';}).join('')+'</div>':'')+
       ((r.hold_signals && r.hold_signals.length)?'<div style="margin-bottom:4px">'+r.hold_signals.slice(0,2).map(function(s){return '<div class="sig-line"><span class="sig-icon" style="color:var(--g)">✓</span>'+s+'</div>';}).join('')+'</div>':'')+
-      ((r.add_price && r.add_reason)?'<div style="background:rgba(43,159,255,.08);border:1px solid rgba(43,159,255,.20);border-radius:8px;padding:8px 12px;font-size:11px;color:var(--bl);margin-bottom:6px">➕ '+r.add_reason+'</div>':'')+
+      ((r.add_price && r.add_reason)?'<div style="background:rgba(43,159,255,.08);border:1px solid rgba(43,159,255,.20);border-radius:8px;padding:8px 12px;font-size:11px;color:var(--bl);margin-bottom:6px">➕ '+escHtml(r.add_reason)+'</div>':'')+
       vwapHtml+
-      (r.news?'<div class="news-line">'+r.news+'</div>':'')+
-      '<div style="font-size:11px;color:var(--t2);margin-top:6px">'+(r.summary||'')+'</div>'+
+      (r.news?'<div class="news-line">'+escHtml(r.news)+'</div>':'')+
+      '<div style="font-size:11px;color:var(--t2);margin-top:6px">'+escHtml(r.summary||'')+'</div>'+
       ((r.risk_factors && r.risk_factors.length)?'<div style="margin-top:6px">'+r.risk_factors.slice(0,2).map(function(f){return '<div class="sig-line"><span class="sig-icon" style="color:var(--a)">⚠</span>'+f+'</div>';}).join('')+'</div>':'')+
       // onclick 내 ticker는 escHtml로 못 막음(& #39; 디코드 후 JS 실행) — isKrCode 통과시에만 버튼 렌더
       (isKrCode(r.ticker)?
@@ -10211,7 +10211,7 @@ function holdCardHTML(r, mode, trade){
       '</div>':'')+
     (r.reason||r.summary?
       '<div style="font-size:12px;color:var(--t);line-height:1.6;padding:10px 12px;background:var(--bg2);border-radius:10px;margin-bottom:10px;white-space:pre-line">'+
-        (r.reason||r.summary)+'</div>':'')+
+        escHtml(r.reason||r.summary)+'</div>':'')+
 
     // 가격 레벨
     '<div style="display:grid;grid-template-columns:repeat('+(mode==='swing'&&r.add_price?'4':'3')+',1fr);background:var(--bg2);border-radius:11px;overflow:hidden;margin-bottom:10px">'+
@@ -10316,10 +10316,10 @@ function holdCardHTML(r, mode, trade){
 
     // 요약 (reason과 다를 때만 표시)
     (r.summary&&r.summary!==(r.reason||'')?
-      '<div style="font-size:11px;color:var(--t2);margin-bottom:10px">'+r.summary+'</div>':'')+
+      '<div style="font-size:11px;color:var(--t2);margin-bottom:10px">'+escHtml(r.summary)+'</div>':'')+
     (r.ai_note?
       '<div style="font-size:10px;color:var(--t3);margin-bottom:10px;padding:7px 10px;background:rgba(255,255,255,.025);border:1px solid var(--b);border-radius:8px;line-height:1.5">'+
-        '<span style="font-family:var(--mono);font-size:8px;color:var(--t3);letter-spacing:.06em">CLAUDE 해설 (참고용 · 판정과 무관)</span><br>'+r.ai_note+'</div>':'')+
+        '<span style="font-family:var(--mono);font-size:8px;color:var(--t3);letter-spacing:.06em">CLAUDE 해설 (참고용 · 판정과 무관)</span><br>'+escHtml(r.ai_note)+'</div>':'')+
 
     // 버튼 — 보유탭과 동일하게 추가매수/분할매도/재분석 (2026-07: RECON과 동작 통일)
     '<div style="display:flex;gap:6px">'+
