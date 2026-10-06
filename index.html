@@ -7954,8 +7954,8 @@ async function resolveKoreanName(name, analyzeEl){
       var sym  = code+'.'+mkt;
       if(analyzeEl) analyzeEl.innerHTML =
         '<div class="analyzing-card"><div class="analyzing-spinner"></div>'+
-        '<div><div class="analyzing-ticker">'+sym+'</div>'+
-        '<div class="analyzing-text">'+(items[0][0]||name)+' 분석 시작...</div></div></div>';
+        '<div><div class="analyzing-ticker">'+escHtml(sym)+'</div>'+
+        '<div class="analyzing-text">'+escHtml(items[0][0]||name)+' 분석 시작...</div></div></div>';
       return sym;
     }
   }catch(e){}
@@ -7970,8 +7970,8 @@ async function resolveKoreanName(name, analyzeEl){
         var sym = sc + (cls === 'K' ? '.KQ' : '.KS');
         if(analyzeEl) analyzeEl.innerHTML =
           '<div class="analyzing-card"><div class="analyzing-spinner"></div>'+
-          '<div><div class="analyzing-ticker">'+sym+'</div>'+
-          '<div class="analyzing-text">'+(dartData.corp_name||name)+' 분석 시작...</div></div></div>';
+          '<div><div class="analyzing-ticker">'+escHtml(sym)+'</div>'+
+          '<div class="analyzing-text">'+escHtml(dartData.corp_name||name)+' 분석 시작...</div></div></div>';
         return sym;
       }
     }catch(e){}
@@ -7990,8 +7990,8 @@ async function resolveKoreanName(name, analyzeEl){
       var sym = quotes[0].symbol;
       if(analyzeEl) analyzeEl.innerHTML =
         '<div class="analyzing-card"><div class="analyzing-spinner"></div>'+
-        '<div><div class="analyzing-ticker">'+sym+'</div>'+
-        '<div class="analyzing-text">'+(quotes[0].longname||name)+' 분석 시작...</div></div></div>';
+        '<div><div class="analyzing-ticker">'+escHtml(sym)+'</div>'+
+        '<div class="analyzing-text">'+escHtml(quotes[0].longname||name)+' 분석 시작...</div></div></div>';
       return sym;
     }
   }catch(e){}
@@ -9340,9 +9340,11 @@ function momoCardHTML(r){
     // DART 공시 목록 (있을 때만)
     renderDartDisclosures(r)+
     // 진입 기록 버튼 (2026-07: 기록 = 자동 감시 등록 — 📌 보유 버튼 통합 제거)
-    '<div style="display:flex;gap:6px;margin-top:10px">'+
-      '<button class="mc-trade-btn" style="flex:1;margin-top:0" onclick="openTradeFromCard(\''+r.ticker+'\')">+ 거래 기록</button>'+
-    '</div>'+
+    // onclick 내 ticker는 escHtml로 못 막음(& #39; 디코드 후 JS 실행) — isKrCode 통과시에만 버튼 렌더
+    (isKrCode(r.ticker)?
+      '<div style="display:flex;gap:6px;margin-top:10px">'+
+        '<button class="mc-trade-btn" style="flex:1;margin-top:0" onclick="openTradeFromCard(\''+r.ticker+'\')">+ 거래 기록</button>'+
+      '</div>' : '')+
     _compatibilityFooter('momo', r._compatScores, r._marketPhase || G.marketPhase)+
   '</div>';
 }
@@ -9694,9 +9696,11 @@ function swingCardHTML(r){
     sellHtml+
     _cardSignalLines(r)+
     // 진입 기록 버튼 (2026-07: 기록 = 자동 감시 등록 — BLOCK 포함 항상 표시)
-    '<div style="display:flex;gap:6px;margin-top:10px">'+
-      '<button class="mc-trade-btn" style="flex:1;margin-top:0" onclick="openTradeFromCard(\''+r.ticker+'\')">+ 거래 기록</button>'+
-    '</div>'+
+    // onclick 내 ticker는 escHtml로 못 막음(& #39; 디코드 후 JS 실행) — isKrCode 통과시에만 버튼 렌더
+    (isKrCode(r.ticker)?
+      '<div style="display:flex;gap:6px;margin-top:10px">'+
+        '<button class="mc-trade-btn" style="flex:1;margin-top:0" onclick="openTradeFromCard(\''+r.ticker+'\')">+ 거래 기록</button>'+
+      '</div>' : '')+
     _compatibilityFooter('swing', r._compatScores, r._marketPhase || G.marketPhase)+
   '</div>';
 }
@@ -10021,9 +10025,11 @@ function coreCardHTML(r){
     levelsBlock+
     _cardSignalLines(r)+
     // 진입 기록 버튼 (2026-07: 기록 = 자동 감시 등록)
-    '<div style="display:flex;gap:6px;margin-top:10px">'+
-      '<button class="mc-trade-btn" style="flex:1;margin-top:0" onclick="openTradeFromCard(\''+r.ticker+'\')">+ 거래 기록</button>'+
-    '</div>'+
+    // onclick 내 ticker는 escHtml로 못 막음(& #39; 디코드 후 JS 실행) — isKrCode 통과시에만 버튼 렌더
+    (isKrCode(r.ticker)?
+      '<div style="display:flex;gap:6px;margin-top:10px">'+
+        '<button class="mc-trade-btn" style="flex:1;margin-top:0" onclick="openTradeFromCard(\''+r.ticker+'\')">+ 거래 기록</button>'+
+      '</div>' : '')+
     _compatibilityFooter('core', r._compatScores, r._marketPhase || G.marketPhase)+
   '</div>';
 }
@@ -10091,10 +10097,12 @@ function _legacyCardHTML(r, mode){
       (r.news?'<div class="news-line">'+r.news+'</div>':'')+
       '<div style="font-size:11px;color:var(--t2);margin-top:6px">'+(r.summary||'')+'</div>'+
       ((r.risk_factors && r.risk_factors.length)?'<div style="margin-top:6px">'+r.risk_factors.slice(0,2).map(function(f){return '<div class="sig-line"><span class="sig-icon" style="color:var(--a)">⚠</span>'+f+'</div>';}).join('')+'</div>':'')+
-      '<div style="margin-top:10px;display:flex;gap:6px">'+
-        '<button onclick="openTradeLog(\''+r.ticker+'\','+(r.price||0)+')" style="flex:2;background:rgba(0,240,122,.08);border:1px solid rgba(0,240,122,.20);border-radius:8px;padding:8px;font-family:var(--mono);font-size:11px;color:var(--g);cursor:pointer">✓ 매도 기록</button>'+
-        '<button onclick="rerunCard(\''+r.ticker+'\',\''+_m2+'\')" style="flex:1;background:none;border:1px solid var(--b);border-radius:8px;padding:8px;font-family:var(--mono);font-size:11px;color:var(--t2);cursor:pointer">↻ 재분석</button>'+
-      '</div>'+
+      // onclick 내 ticker는 escHtml로 못 막음(& #39; 디코드 후 JS 실행) — isKrCode 통과시에만 버튼 렌더
+      (isKrCode(r.ticker)?
+        '<div style="margin-top:10px;display:flex;gap:6px">'+
+          '<button onclick="openTradeLog(\''+r.ticker+'\','+(r.price||0)+')" style="flex:2;background:rgba(0,240,122,.08);border:1px solid rgba(0,240,122,.20);border-radius:8px;padding:8px;font-family:var(--mono);font-size:11px;color:var(--g);cursor:pointer">✓ 매도 기록</button>'+
+          '<button onclick="rerunCard(\''+r.ticker+'\',\''+_m2+'\')" style="flex:1;background:none;border:1px solid var(--b);border-radius:8px;padding:8px;font-family:var(--mono);font-size:11px;color:var(--t2);cursor:pointer">↻ 재분석</button>'+
+        '</div>' : '')+
     '</div>';
   }
 
@@ -10319,8 +10327,10 @@ function holdCardHTML(r, mode, trade){
         'style="flex:1;background:rgba(43,159,255,.1);border:1px solid rgba(43,159,255,.3);border-radius:8px;padding:9px;font-family:var(--mono);font-size:11px;color:var(--bl);cursor:pointer">+ 추가 매수</button>'+
       '<button onclick="openPartialSell('+trade.id+')" '+
         'style="flex:1;background:rgba(255,45,78,.1);border:1px solid rgba(255,45,78,.3);border-radius:8px;padding:9px;font-family:var(--mono);font-size:11px;color:var(--r);cursor:pointer">+ 분할 매도</button>'+
-      '<button onclick="rerunCard(\''+r.ticker+'\',\''+mode+'\')" '+
-        'style="flex:1;background:none;border:1px solid var(--b);border-radius:8px;padding:9px;font-family:var(--mono);font-size:11px;color:var(--t2);cursor:pointer">↻ 재분석</button>'+
+      // onclick 내 ticker는 escHtml로 못 막음(& #39; 디코드 후 JS 실행) — isKrCode 통과시에만 버튼 렌더
+      (isKrCode(r.ticker)?
+        '<button onclick="rerunCard(\''+r.ticker+'\',\''+mode+'\')" '+
+          'style="flex:1;background:none;border:1px solid var(--b);border-radius:8px;padding:9px;font-family:var(--mono);font-size:11px;color:var(--t2);cursor:pointer">↻ 재분석</button>' : '')+
     '</div>'+
   '</div>';
 }
