@@ -1449,7 +1449,8 @@ function escHtml(s){
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 function isKrCode(s){
-  return /^[0-9A-Z]{6}$/.test(s);
+  // 6자리 코드 단독, 또는 .KS/.KQ/.KN 접미사 포함(resolveKoreanName·DART fallback 반환형, L1446 등 참조)
+  return /^[0-9A-Z]{6}(\.(KS|KQ|KN))?$/.test(s);
 }
 
 // ── parseTradeDate/tradeHoldDays: engineUtil.js 로 이전 (2026-07) ──
