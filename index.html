@@ -722,6 +722,15 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
   <div class="sg-title">텔레그램 알림</div>
   <div class="sg-row" style="cursor:pointer" onclick="testTelegramKR()"><div><div class="sg-label">텔레그램 연결 테스트</div><div class="sg-sub">손절/T1/T2 감시 알림 채널</div></div><div style="font-family:var(--mono);font-size:11px;color:var(--bl)">테스트 →</div></div>
 
+  <div class="sg-title">접근 토큰</div>
+  <div class="sg-row" style="flex-direction:column;align-items:flex-start">
+    <div><div class="sg-label">대표 토큰</div><div class="sg-sub">설정 후 값은 다시 표시되지 않습니다</div></div>
+    <div class="ntfy-row">
+      <input class="ntfy-input" type="password" id="reconTokenInput" placeholder="토큰 입력" autocomplete="off" onchange="saveReconToken(this.value)">
+    </div>
+    <div style="font-family:var(--mono);font-size:11px;color:var(--t2);margin-top:6px" id="reconTokenStatus"></div>
+  </div>
+
   <div class="sg-title">KIS API (한국투자증권)</div>
   <div class="sg-row" style="flex-direction:column;align-items:flex-start">
     <div><div class="sg-label">App Key / Secret</div><div class="sg-sub">서버(Oracle VM)에서 안전하게 관리 — 앱 입력 불필요</div></div>
@@ -1053,7 +1062,7 @@ async function syncJournalWatch(mode){
   var positions = Object.values(byC);
   if(!positions.length) return;
   try{
-    await fetch(WORKER_URL + '/reconkr/positions', {
+    await workerFetch(WORKER_URL + '/reconkr/positions', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ mode:mode, positions:positions })
     });
@@ -1072,7 +1081,7 @@ function journalUnwatch(code, mode){
   if(stillLive) return;
   var now = Date.now();
   try{
-    fetch(WORKER_URL + '/reconkr/positions', {
+    workerFetch(WORKER_URL + '/reconkr/positions', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ mode:mode, positions:[{ code:code, deleted:true, deletedAt:now, updatedAt:now }] })
     });
@@ -1104,7 +1113,7 @@ async function pushJournal(mode){
   });
   if(!trades.length) return;
   try{
-    await fetch(WORKER_URL + '/reconkr/journal', {
+    await workerFetch(WORKER_URL + '/reconkr/journal', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ mode:mode, trades:trades })
     });
@@ -1114,7 +1123,7 @@ async function pushJournal(mode){
 async function pullJournal(mode){
   mode = mode || (typeof G!=='undefined' && G.currentMode) || 'momo';
   try{
-    var res = await fetch(WORKER_URL + '/reconkr/journal?mode=' + encodeURIComponent(mode));
+    var res = await workerFetch(WORKER_URL + '/reconkr/journal?mode=' + encodeURIComponent(mode));
     if(!res.ok) return false;
     var data = await res.json();
     var serverTrades = (data && data.trades) || [];
@@ -1145,7 +1154,7 @@ function mergeJournalLocal(serverList, mode){
 async function testTelegramKR(){
   showToast('텔레그램 전송 중...');
   try{
-    var resp = await fetch(WORKER_URL + '/reconkr/test-telegram');
+    var resp = await workerFetch(WORKER_URL + '/reconkr/test-telegram');
     var data = await resp.json();
     if(data.ok) showToast('✅ 텔레그램 전송 성공');
     else throw new Error('전송 실패');
@@ -1196,6 +1205,11 @@ var G_jFilters = { momo:'today', swing:'today', core:'today' };
 // 초기값 로드
 if(G.ntfy)  { document.getElementById('ntfyChInput').value = G.ntfy; }
 // DART 키는 서버 관리 (2026-07) — 입력칸 복원 불필요
+// 토큰은 입력칸에 복원하지 않음(화면에 재노출 금지) — 상태 텍스트만 갱신
+(function(){
+  var st = document.getElementById('reconTokenStatus');
+  if(st) st.textContent = localStorage.getItem('reconToken') ? '✓ 설정됨' : '미설정';
+})();
 
 // ═══════════════════════════════════════
 // 모드/탭 전환
@@ -1463,10 +1477,21 @@ function isSafeRceptNo(v){
   return /^\d{14}$/.test(String(v));
 }
 
+// ── 워커 호출 공통 래퍼: 토큰 있으면 X-Recon-Token 헤더 부착 ──
+function workerFetch(url, opts){
+  opts = opts || {};
+  var token = localStorage.getItem('reconToken');
+  if(token){
+    opts.headers = opts.headers || {};
+    opts.headers['X-Recon-Token'] = token;
+  }
+  return fetch(url, opts);
+}
+
 // ── parseTradeDate/tradeHoldDays: engineUtil.js 로 이전 (2026-07) ──
 async function fetchWithProxy(url){
   var bust = '&_t='+Date.now(); // 캐시 버스팅
-  var fetchP = fetch(WORKER_URL + '?url=' + encodeURIComponent(url) + bust, {cache:'no-store'})
+  var fetchP = workerFetch(WORKER_URL + '?url=' + encodeURIComponent(url) + bust, {cache:'no-store'})
     .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
     .then(function(t){ return JSON.parse(t); });
   var timeoutP = new Promise(function(_,reject){
@@ -1478,7 +1503,7 @@ async function fetchWithProxy(url){
 // ── 네이버/JSONP 응답도 처리하는 fetch ──
 async function fetchTextWithProxy(url){
   var bust = '&_t='+Date.now();
-  var fetchP = fetch(WORKER_URL + '?url=' + encodeURIComponent(url) + bust, {cache:'no-store'})
+  var fetchP = workerFetch(WORKER_URL + '?url=' + encodeURIComponent(url) + bust, {cache:'no-store'})
     .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); });
   var timeoutP = new Promise(function(_,reject){
     setTimeout(function(){ reject(new Error('timeout')); }, 8000);
@@ -3259,7 +3284,7 @@ async function trackSync(mode){
   if(!cfg) return false;
   var track = loadTrack(mode);
   try {
-    var resp = await fetch(WORKER_URL + '/reconkr/track', {
+    var resp = await workerFetch(WORKER_URL + '/reconkr/track', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode: mode, track: track })
@@ -3275,7 +3300,7 @@ async function trackSync(mode){
 async function trackPull(mode){
   if(!TRACK_CFG[mode]) return null;
   try {
-    var resp = await fetch(WORKER_URL + '/reconkr/track?mode=' + encodeURIComponent(mode));
+    var resp = await workerFetch(WORKER_URL + '/reconkr/track?mode=' + encodeURIComponent(mode));
     var data = await resp.json();
     if(!data.ok || !Array.isArray(data.track)) return null;
     return data.track;
@@ -8328,7 +8353,7 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
     //   워커 2026-06 리팩토링에서 AI 프록시가 /recon/claude + 모델 허용목록으로 변경됨.
     //   기존 /reconkr/ai + claude-sonnet-4-20250514 는 catch-all("RECON Worker OK")로 떨어져 JSON 파싱 오류.
     //   워커 ALLOWED_MODELS: claude-sonnet-4-6 / claude-sonnet-4-5 / claude-haiku-4-5 계열만 통과.
-    var res = await fetch(WORKER_URL + '/recon/claude', {
+    var res = await workerFetch(WORKER_URL + '/recon/claude', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
@@ -10824,6 +10849,12 @@ function playBeep(success){
 // 설정 + 유틸
 // ═══════════════════════════════════════
 function save(k,v){ localStorage.setItem(k,v); if(k==='ntfyCh') G.ntfy=v; }
+function saveReconToken(v){
+  v = (v||'').trim();
+  if(v) localStorage.setItem('reconToken', v); else localStorage.removeItem('reconToken');
+  var st = document.getElementById('reconTokenStatus');
+  if(st) st.textContent = v ? '✓ 설정됨' : '미설정';
+}
 
 function cycle(id,vals){
   var el=document.getElementById(id);
