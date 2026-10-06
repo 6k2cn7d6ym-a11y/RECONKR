@@ -30,12 +30,19 @@ export default {
         headers: {
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-          'Access-Control-Allow-Headers': '*',
+          'Access-Control-Allow-Headers': 'Content-Type, X-Recon-Token, *',
         }
       });
     }
 
     const url = new URL(request.url);
+
+    // ★ 2026-10 토큰 인증 — AUTH_MODE 'log'(기본: 통과+기록) / 'enforce'(401 거절)
+    const auth = authorizeRequest(request, url, env);
+    if (!auth.ok) {
+      console.log(JSON.stringify({ authFail: auth.reason, mode: authMode(env), path: url.pathname, method: request.method }));
+      if (authMode(env) === 'enforce') return jsonResp({ error: 'unauthorized' }, 401);
+    }
 
     if (url.pathname.startsWith('/sec/facts/')) {
       const ticker = url.pathname.slice('/sec/facts/'.length).toUpperCase().trim();
@@ -715,7 +722,7 @@ export default {
         headers: { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' },
       });
     }
-    if (!target.includes('yahoo.com') && !target.includes('finviz.com') && !target.includes('dataviz.cnn.io')) {
+    if (!isAllowedProxyTarget(target)) {
       return new Response('허용되지 않은 URL', { status: 403 });
     }
     if (target.includes('finance.yahoo.com/v10/')) return await fetchYahooV10(target);
@@ -1333,6 +1340,62 @@ async function sendTelegramDebug(text, env) {
   });
   const body = await res.json().catch(() => ({}));
   return { httpStatus: res.status, telegram: body };
+}
+
+// ════════════════════════════════════════
+// ★ 2026-10 토큰 인증
+//   헤더 X-Recon-Token. 토큰 3종(워커 시크릿):
+//     RECON_OWNER_TOKEN  — 대표 앱(RECON·ReconKR) 전 경로
+//     RECON_INVEST_TOKEN — 투자팀: 보유·저널·TRACK·US 시세 조회(GET)만
+//     RECON_BOT_TOKEN    — executor·watchdog: 텔레그램 발송만
+//   AUTH_MODE 미설정 = 'log' → 시크릿 등록 전 배포해도 기존 동작 그대로.
+// ════════════════════════════════════════
+function authMode(env) {
+  return env.AUTH_MODE === 'enforce' ? 'enforce' : 'log';
+}
+
+function safeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || !a || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+function tokenRole(token, env) {
+  if (!token) return null;
+  if (safeEqual(token, env.RECON_OWNER_TOKEN))  return 'owner';
+  if (safeEqual(token, env.RECON_INVEST_TOKEN)) return 'invest';
+  if (safeEqual(token, env.RECON_BOT_TOKEN))    return 'bot';
+  return null;
+}
+
+const INVEST_GET_PATHS = new Set([
+  '/recon/positions', '/reconkr/positions',
+  '/recon/journal',   '/reconkr/journal',
+  '/recon/track',     '/reconkr/track',
+  '/us-movers', '/us-movers-raw', '/us-premarket', '/us-quote', '/us-indicators', '/us-rankprobe',
+]);
+const BOT_POST_PATHS = new Set(['/recon/telegram']);
+
+function authorizeRequest(request, url, env) {
+  // 루트 헬스체크(?url= 없음)만 공개
+  if (url.pathname === '/' && !url.searchParams.get('url')) return { ok: true, role: 'public' };
+  const role = tokenRole(request.headers.get('X-Recon-Token'), env);
+  if (!role) return { ok: false, reason: request.headers.get('X-Recon-Token') ? 'bad-token' : 'no-token' };
+  if (role === 'owner') return { ok: true, role };
+  if (role === 'invest' && request.method === 'GET' && INVEST_GET_PATHS.has(url.pathname)) return { ok: true, role };
+  if (role === 'bot' && request.method === 'POST' && BOT_POST_PATHS.has(url.pathname)) return { ok: true, role };
+  return { ok: false, reason: 'forbidden-' + role };
+}
+
+// 루트 ?url= 프록시 허용 호스트 — 문자열 포함 검사 우회(https://evil.com/?yahoo.com) 차단
+const PROXY_HOST_SUFFIXES = ['yahoo.com', 'finviz.com', 'dataviz.cnn.io'];
+function isAllowedProxyTarget(target) {
+  let u;
+  try { u = new URL(target); } catch (e) { return false; }
+  if (u.protocol !== 'https:') return false;
+  const h = u.hostname.toLowerCase();
+  return PROXY_HOST_SUFFIXES.some(s => h === s || h.endsWith('.' + s));
 }
 
 function jsonResp(data, status = 200) {
