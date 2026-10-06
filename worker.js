@@ -1384,8 +1384,18 @@ function authorizeRequest(request, url, env) {
   if (!role) return { ok: false, reason: request.headers.get('X-Recon-Token') ? 'bad-token' : 'no-token' };
   if (role === 'owner') return { ok: true, role };
   if (role === 'invest' && request.method === 'GET' && INVEST_GET_PATHS.has(url.pathname)) return { ok: true, role };
+  if (role === 'invest' && request.method === 'GET' && url.pathname === '/' && isInvestChartTarget(url.searchParams.get('url'))) return { ok: true, role };
   if (role === 'bot' && request.method === 'POST' && BOT_POST_PATHS.has(url.pathname)) return { ok: true, role };
   return { ok: false, reason: 'forbidden-' + role };
+}
+
+// INVEST 루트 ?url= — 투자팀 미국 OHLCV 정본(Yahoo v8 chart)만. finviz·CNN·Yahoo 비차트는 OWNER 전용
+const INVEST_CHART_HOSTS = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com'];
+function isInvestChartTarget(target) {
+  let u;
+  try { u = new URL(target); } catch (e) { return false; }
+  if (u.protocol !== 'https:' || u.port || u.username || u.password) return false;
+  return INVEST_CHART_HOSTS.includes(u.hostname.toLowerCase()) && u.pathname.startsWith('/v8/finance/chart/');
 }
 
 // 루트 ?url= 프록시 허용 호스트 — 문자열 포함 검사 우회(https://evil.com/?yahoo.com) 차단
