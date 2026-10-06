@@ -1443,6 +1443,15 @@ var WORKER_URL = 'https://recon.miinonnnn.workers.dev';
 var DART_URL   = 'https://dart.minon.kr';
 var KIS_URL    = 'https://dart.minon.kr'; // KIS도 Oracle VM 경유 (Cloudflare IP 차단 대응) // Oracle DART 프록시
 
+// ── XSS 방어: HTML 이스케이프 + 종목코드 형식 검증 ──
+function escHtml(s){
+  if(s===null||s===undefined) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function isKrCode(s){
+  return /^[0-9A-Z]{6}$/.test(s);
+}
+
 // ── parseTradeDate/tradeHoldDays: engineUtil.js 로 이전 (2026-07) ──
 async function fetchWithProxy(url){
   var bust = '&_t='+Date.now(); // 캐시 버스팅
@@ -7895,6 +7904,15 @@ async function runModeScan(mode){
       }
     }
     for(var i=0;i<tickers.length;i++){
+      if(!isKrCode(tickers[i])){
+        if(analyzeEl) analyzeEl.innerHTML =
+          '<div class="analyzing-card"><div style="color:var(--r);font-size:12px;padding:8px">'+
+          '형식 오류 — 6자리 종목코드 또는 한글 종목명을 입력하세요'+
+          '</div></div>';
+        return;
+      }
+    }
+    for(var i=0;i<tickers.length;i++){
       await runSingleScan(mode, tickers[i], analyzeEl, resultEl);
     }
   }finally{
@@ -7906,7 +7924,7 @@ async function runModeScan(mode){
 async function resolveKoreanName(name, analyzeEl){
   if(analyzeEl) analyzeEl.innerHTML =
     '<div class="analyzing-card"><div class="analyzing-spinner"></div>'+
-    '<div><div class="analyzing-ticker">'+name+'</div>'+
+    '<div><div class="analyzing-ticker">'+escHtml(name)+'</div>'+
     '<div class="analyzing-text">종목 검색 중...</div></div></div>';
 
   // ── 1순위: 종목 마스터 검색 ──
@@ -7919,8 +7937,8 @@ async function resolveKoreanName(name, analyzeEl){
     var sym = matched[0].symbol;
     if(analyzeEl) analyzeEl.innerHTML =
       '<div class="analyzing-card"><div class="analyzing-spinner"></div>'+
-      '<div><div class="analyzing-ticker">'+sym+'</div>'+
-      '<div class="analyzing-text">'+matched[0].shortname+' 분석 시작...</div></div></div>';
+      '<div><div class="analyzing-ticker">'+escHtml(sym)+'</div>'+
+      '<div class="analyzing-text">'+escHtml(matched[0].shortname)+' 분석 시작...</div></div></div>';
     return sym;
   }
 
