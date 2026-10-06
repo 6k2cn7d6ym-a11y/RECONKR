@@ -135,6 +135,7 @@ function sendAlert(type, msg){
     method:   'POST',
     headers:  { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
   };
+  if(cfg.token) opts.headers['X-Recon-Token'] = cfg.token;
   var req = lib.request(opts, function(res){ res.resume(); });
   req.on('error', function(e){ console.warn('[ALERT] 전송 실패:', e.message); });
   req.write(body);
