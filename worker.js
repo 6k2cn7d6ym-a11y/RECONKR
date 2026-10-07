@@ -40,7 +40,10 @@ export default {
     // ★ 2026-10 토큰 인증 — AUTH_MODE 'log'(기본: 통과+기록) / 'enforce'(401 거절)
     const auth = authorizeRequest(request, url, env);
     if (!auth.ok) {
-      console.log(JSON.stringify({ authFail: auth.reason, mode: authMode(env), path: url.pathname, method: request.method }));
+      const logEntry = { authFail: auth.reason, mode: authMode(env), path: url.pathname, method: request.method };
+      const targetInfo = classifyProxyTarget(url.searchParams.get('url'));
+      if (targetInfo) { logEntry.targetHost = targetInfo.targetHost; logEntry.targetRoute = targetInfo.targetRoute; }
+      console.log(JSON.stringify(logEntry));
       if (authMode(env) === 'enforce') return jsonResp({ error: 'unauthorized' }, 401);
     }
 
@@ -1404,6 +1407,15 @@ function isYahooV10Target(target) {
   try { u = new URL(target); } catch (e) { return false; }
   const h = u.hostname.toLowerCase();
   return (h === 'finance.yahoo.com' || h.endsWith('.finance.yahoo.com')) && u.pathname.startsWith('/v10/');
+}
+
+// authFail 로그용 호스트 관측 — 원문 URL·쿼리·userinfo·fragment는 기록하지 않고 호스트명+경로분류만 남긴다
+function classifyProxyTarget(target) {
+  if (!target) return null;
+  let u;
+  try { u = new URL(target); } catch (e) { return { targetHost: null, targetRoute: 'invalid' }; }
+  const route = isInvestChartTarget(target) ? 'chart' : (isYahooV10Target(target) ? 'v10' : 'other');
+  return { targetHost: u.hostname.toLowerCase(), targetRoute: route };
 }
 
 // 루트 ?url= 프록시 허용 호스트 — 문자열 포함 검사 우회(https://evil.com/?yahoo.com) 차단
