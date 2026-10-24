@@ -10188,7 +10188,12 @@ function holdCardHTML(r, mode, trade){
   var signals = (r.signals||[]).slice(0,_sigLimit).map(function(s){
     return '<div style="display:flex;gap:6px;font-size:11px;color:var(--t);line-height:1.5"><span style="color:var(--g);flex-shrink:0">✓</span>'+escHtml(s)+'</div>';
   }).join('');
-  var warnings = (r.warnings||[]).slice(0,_warnLimit).map(function(w){
+  var _warnList = (r.warnings||[]).slice();
+  if(trade.exitState && trade.exitState.beMoved && trade.sells && trade.sells.length &&
+     !trade.sells.some(function(sv){return sv.price>=trade.entry;})){
+    _warnList.unshift('현재 매입가 기준 손실 분할매도 기록과 본전 이동 상태가 함께 있습니다 — 이동 근거 확인 필요');
+  }
+  var warnings = _warnList.slice(0,_warnLimit).map(function(w){
     return '<div style="display:flex;gap:6px;font-size:11px;color:var(--t);line-height:1.5"><span style="color:var(--a);flex-shrink:0">⚠</span>'+escHtml(w)+'</div>';
   }).join('');
 
@@ -10644,7 +10649,7 @@ function confirmPartialSell(tradeId){
     trade.status='partial';
     trade.pnl=parseFloat(trade.sells.reduce(function(s,sv){return s+sv.pnl;},0).toFixed(2));
     // ── 엔진 상태 동기화: 수동 분할매도 = T1 실행 취급 + 스탑 본전 이동 (2026-06) ──
-    if(trade.exitState){
+    if(trade.exitState && price >= trade.entry){
       trade.exitState.t1Done = true;
       if(trade.exitState.stop < trade.entry){ trade.exitState.stop = trade.entry; trade.exitState.beMoved = true; }
       trade.exitState.highWater = Math.max(trade.exitState.highWater||trade.entry, trade.exit||trade.entry);
@@ -11124,7 +11129,7 @@ function recalcTrade(trade){
     } else {
       trade.status='partial';
       trade.exit=null;
-      if(trade.exitState){
+      if(trade.exitState && trade.sells.some(function(sv){return sv.price>=trade.entry;})){
         trade.exitState.t1Done = true;
         if(trade.exitState.stop < trade.entry){ trade.exitState.stop = trade.entry; trade.exitState.beMoved = true; }
       }
