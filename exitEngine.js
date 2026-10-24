@@ -70,7 +70,7 @@ function initExitState(trade, mode){
     initialStop: stop,
     t1:          t1,
     t2:          t2,
-    t1Done:      trade.status === 'partial',  // 이미 분할매도 했으면 T1 완료 취급
+    t1Done:      trade.status === 'partial' && (!(trade.sells && trade.sells.length) || trade.sells.some(function(sv){ return sv.price >= entry; })),  // 분할매도: 매도 기록이 없으면 기존대로, 있으면 매입가 이상 매도가 하나라도 있을 때만 T1 완료
     beMoved:     false,
     highWater:   entry,
     setAt:       Date.now(),
