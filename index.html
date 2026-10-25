@@ -1166,39 +1166,16 @@ try{
   ['momo','swing','core'].forEach(function(m){ localStorage.removeItem('holdPositions_'+m); });
 }catch(e){}
 
-// ── 중복 열린 포지션 1회 병합 (2026-07: 같은 종목·모드 중복 → 가중평균 하나로) ──
-//   병합 로직 도입 전 생긴 중복 레코드 정리. 실행 후 저장.
+// 중복 열린 포지션: 자동 병합 중단(이중 합산 방지). 감지만 하고 데이터는 건드리지 않는다.
 try{
-  var _seen = {}, _merged = false;
-  var _kept = [];
+  var _dk = {}, _dn = 0;
   (G_journal||[]).forEach(function(t){
-    if(!t || !t.ticker){ _kept.push(t); return; }
-    if(t.deleted){ _kept.push(t); return; }  // tombstone은 병합 대상 아님, 그대로 보존(삭제 전파용)
-    var open = (t.status==='open'||t.status==='partial');
-    if(!open){ _kept.push(t); return; }
-    var key = t.ticker + '|' + (t.mode||'momo');
-    if(_seen[key]){
-      // 기존 포지션에 병합
-      var base = _seen[key];
-      if(!base.buys) base.buys = [{ date:base.date, price:base.entry, shares:base.shares, memo:'기존 진입' }];
-      if(t.buys && t.buys.length) base.buys = base.buys.concat(t.buys);
-      else base.buys.push({ date:t.date, price:t.entry, shares:t.shares, memo:'병합' });
-      var tv = base.buys.reduce(function(s,b){ return s + (b.price||0)*(b.shares||0); }, 0);
-      var ts = base.buys.reduce(function(s,b){ return s + (b.shares||0); }, 0);
-      if(ts>0){ base.entry = parseFloat((tv/ts).toFixed(2)); base.shares = ts; }
-      base.remaining = (base.remaining||0) + (t.remaining!==undefined?t.remaining:(t.shares||0));
-      base.updatedAt = Date.now();
-      _merged = true;
-    } else {
-      _seen[key] = t;
-      _kept.push(t);
-    }
+    if(!t || !t.ticker || t.deleted) return;
+    if(t.status!=='open' && t.status!=='partial') return;
+    var k = t.ticker + '|' + (t.mode||'momo');
+    if(_dk[k]) _dn++; else _dk[k] = 1;
   });
-  if(_merged){
-    G_journal = _kept;
-    saveJournal();
-    console.log('[journal] 중복 열린 포지션 병합 완료');
-  }
+  if(_dn) console.warn('[journal] 열린 포지션 중복 '+_dn+'건 (자동 병합 중단)');
 }catch(e){}
 var G_jFilters = { momo:'today', swing:'today', core:'today' };
 
@@ -8062,7 +8039,7 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
 
   if(_effectiveClosed){
     var _hasPosCheck = G_journal.find(function(t){
-      return t.ticker===ticker && (t.status==='open'||t.status==='partial') && (!t.mode||t.mode===mode);
+      return t.ticker===ticker && !t.deleted && (t.status==='open'||t.status==='partial') && (!t.mode||t.mode===mode);
     });
     if(!_hasPosCheck){
       if(mode === 'momo'){
@@ -8091,7 +8068,7 @@ async function runSingleScan(mode, ticker, analyzeEl, resultEl){
   // 보유 포지션은 모드 무관하게 감지 (SWING에서 기록 후 MOMO로 보든, 실제 포지션은 하나)
   // 단 '완료'(closed) 상태는 제외
   var openTrade = G_journal.find(function(t){
-    return t.ticker === ticker && (t.status === 'open' || t.status === 'partial');
+    return t.ticker === ticker && !t.deleted && (t.status === 'open' || t.status === 'partial');
   });
   // 기록된 모드와 현재 탭 모드가 다르면 사용자에게 안내만 (동작은 동일)
   var modeMismatch = openTrade && openTrade.mode && openTrade.mode !== mode;
