@@ -3,7 +3,8 @@
  * 앱의 fetchKisDailyChartLong 로직을 Node로 이식.
  *   - dart.minon.kr(Oracle VM) 경유 — 서버가 KIS 키/토큰 주입 (키 불필요)
  *   - 100일 윈도우 페이지네이션, stck_bsop_date 중복 제거, 최신 index 0
- *   - 로컬 파일 캐시: data/kr/{code}.json (같은 날 재실행 시 API 호출 0)
+ *   - 로컬 파일 캐시: data/kr-adj/{code}.json (수정주가) · data/kr-raw/ (원주가) — 같은 날 재실행 시 API 호출 0
+ *     data/kr = 2026-10-27 이전 원주가 캐시(보존, 코드에서 읽지 않음)
  * KIS 유량 제한 대응: 호출 간 기본 350ms 대기
  * ============================================================ */
 'use strict';
@@ -12,8 +13,8 @@ const fs = require('fs');
 const path = require('path');
 
 const KIS_URL = process.env.KIS_PROXY_URL || 'https://dart.minon.kr';
-const ADJ_PRC = process.env.KIS_ADJ_PRC || '1';        // '1' 수정주가(기본) / '0' 원주가(앱 비교용)
-const CACHE_DIR = path.join(__dirname, 'data', 'kr' + (ADJ_PRC === '1' ? '' : '-raw'));
+const ADJ_PRC = process.env.KIS_ADJ_PRC || '0';        // KIS FID_ORG_ADJ_PRC: '0' 수정주가(기본·앱과 동일) / '1' 원주가(권리 변동 대조용)
+const CACHE_DIR = path.join(__dirname, 'data', ADJ_PRC === '0' ? 'kr-adj' : 'kr-raw');
 const CACHE_DIR_IDX = path.join(__dirname, 'data', 'kr-index');
 const SLEEP_MS = 350;
 
@@ -51,7 +52,7 @@ async function fetchDailyCandlesLong(code, targetDays){
         FID_INPUT_DATE_1:        fmt(startDate),
         FID_INPUT_DATE_2:        fmt(endDate),
         FID_PERIOD_DIV_CODE:    'D',
-        FID_ORG_ADJ_PRC:        ADJ_PRC,   // ★ 2026-09: 기본 '1'(수정주가). 3년 백테스트에 액면분할·무상증자 왜곡 차단
+        FID_ORG_ADJ_PRC:        ADJ_PRC,   // ★ 2026-10-27: '0'=수정주가(기본), '1'=원주가. 3년 백테스트에 액면분할·무상증자 왜곡 차단
       });
     }catch(e){
       console.warn('[kisData]', code, 'page', page, '예외:', e.message);
@@ -169,5 +170,5 @@ async function loadIndexCandles(indexCode, targetDays, opts){
 
 module.exports = { fetchDailyCandlesLong, loadCandles, fetchIndexCandlesLong, loadIndexCandles, KIS_URL, ADJ_PRC };
 
-/* ★ 수정주가 (2026-09 변경): 기본 '1'(수정주가). 캐시는 data/kr/ (수정) · data/kr-raw/ (원주가) 분리.
- * 앱과 동일 조건(원주가) 비교가 필요하면 KIS_ADJ_PRC=0 으로 실행. */
+/* ★ 수정주가 (2026-10-27 정정): 기본 '0'(수정주가). 캐시는 data/kr-adj/ (수정) · data/kr-raw/ (원주가) 분리.
+ * 원주가가 필요하면(권리 변동 대조·과거 결과 재현) KIS_ADJ_PRC=1 로 실행. 앱 index.html도 '0'(수정주가). */
