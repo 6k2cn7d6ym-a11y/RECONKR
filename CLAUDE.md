@@ -42,7 +42,7 @@ ReconKR/
 │   ├── portfolio-sim.js      포트폴리오 시뮬
 │   ├── momoEngine.js / swingEngine.js / coreEngine.js / exitEngine.js
 │   ├── indicatorEngine.js / engineUtil.js / kisData.js / sizeEngine.js
-│   ├── engineTests.js / verifyEngines.node.js   회귀 테스트
+│   ├── engineTests.js                           회귀 테스트
 │   ├── universe.json         219종목 유니버스 정본
 │   └── data/                 KIS 캔들 캐시
 │
@@ -179,7 +179,7 @@ node --check /tmp/chk.js   # 반드시 통과
 grep -n "방금_추가한_고유문자열" index.html
 
 # 3. 로직 변경이면 격리 단위 테스트 (Node로 함수만 떼서 시나리오 검증)
-node verifyEngines.node.js
+node sandbox/dashboard-b/tests/engine-baseline.js <new.html> <old.html>   # HTML 변경 회귀 · 시장 상태 고정 신·구 비교 (로컬 전용 — sandbox/는 git 미추적이라 새 clone에는 없음)
 
 # 4. SWING 백테스트 (엔진 변경 시) — 루트에서 실행
 node backtest-swing-kr.js --universe universe.json
@@ -190,12 +190,14 @@ node backtest-swing-kr.js --universe universe.json
 **콘솔 회귀 테스트:**
 
 ```javascript
-runAllEngineTests()          // SWING 18 + CORE 13 + TimeAwareness 7
+runAllEngineTests()          // SWING 6 + CORE 13 + TimeAwareness 7 = 26
 runSwingEdgeTests() / runCoreEdgeTests() / runTimeAwarenessTests()
 showPerformanceStats()       // TRACK 대시보드
 compareSwingThresholds()     // 50/60/70/80 임계값 A/B
 validateTVGate()             // 거래대금 게이트 정당성
 ```
+
+`runAllEngineTests()`의 시험은 26건이다. 통과 건수는 시장 시간대에 따라 달라지며 기준선은 PRIME 26/26 · CLOSED 25/26이다. `engine-baseline.js`는 시장 상태를 고정해 신·구 `index.html`을 항목별로 비교하는 HTML 변경 회귀 도구이고, 기존 실패를 포함한 비교이므로 전체 시험 통과를 뜻하지 않는다. 신·구 모두 같은 현재 엔진 모듈(루트 `*.js`)을 읽으므로 엔진 코드 변경은 이 비교로 잡히지 않는다. CLOSED 기대 실패 1건(`완벽한 ENTER A 조건 (장중)` — 장중 조건 필요 시험).
 
 ---
 
@@ -252,7 +254,7 @@ validateTVGate()             // 거래대금 게이트 정당성
 - **★ 거래 일지 멀티디바이스 동기화 (2026-07-08)** — `pushJournal`/`pullJournal` + Worker `/reconkr/journal`. id별 머지 + tombstone.
 - **★ 보유 포지션 머지 모델 강화 (2026-07-08)** — `/reconkr/positions` 덮어쓰기 → 머지. 유령 감시 강제 제거(`clear:true`) 지원.
 - **표시 버그 7건** — CORE 음수RR / T2<T1 / 장외ENTER / $표기 / MA200라벨 / NXT배지 / PRE오표시.
-- **엔진 모듈 분리** (루트 `*.js`) — momoEngine·swingEngine·coreEngine·exitEngine·indicatorEngine·engineUtil·kisData 파일로 추출, `engineTests.js` + `verifyEngines.node.js`로 회귀.
+- **엔진 모듈 분리** (루트 `*.js`) — momoEngine·swingEngine·coreEngine·exitEngine·indicatorEngine·engineUtil·kisData 파일로 추출, `engineTests.js`로 회귀.
 - **백테스트 인프라** — 루트 `backtest-swing-kr.js` Node 실행 가능. `node backtest-swing-kr.js --universe universe.json`으로 219종목 또는 지정 종목 시뮬.
 - **executor.js (paper 모드)** — orders/YYYYMMDD.json 일별 집행, ledger/fills/positions 관리, halt(-10% drawdown) + 킬스위치(ops/killswitch), 텔레그램 alert. 343줄. 자연 halt 재현 검증 완료 (002070 20260731 시가 -50% · drawdown -16.19% · Worker POST HTTP 200).
 

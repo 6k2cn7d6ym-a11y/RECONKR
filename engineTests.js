@@ -40,7 +40,7 @@ function runSwingEdgeTests(){
     {
       name: 'TOXIC 키워드 즉시 BLOCK',
       ydata: { price: 10000, trading_value_m: 100, newsText: '관리종목 지정' },
-      swingData: { ma5:10500, ma20:10300, ma60:9800, ma60_slope:1, ma20_gap_pct:0 },
+      swingData: { ma5:10500, ma20:10300, ma60:9800, ma60_slope:1, ma20_gap_pct:0, rs20:null, rsi14:null, pullback_depth_pct:null },
       expect: { action: 'BLOCK', includes: 'TOXIC' }
     },
     {
@@ -52,7 +52,7 @@ function runSwingEdgeTests(){
     {
       name: '빈 swingData',
       ydata: { price: 10000 },
-      swingData: {},
+      swingData: { ma60_slope:null, ma20_gap_pct:null, rs20:null, rsi14:null, pullback_depth_pct:null },
       expect: { decisionPathMin: 3 }  // 게이트 몇 개 통과 로그 필수
     },
   ];
