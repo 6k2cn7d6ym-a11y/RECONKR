@@ -439,6 +439,35 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
 .dp-pill-ACCUMULATING{background:rgba(90,122,149,.10);border:1px solid var(--b);color:var(--t2)}
 .dp-pill-DISTRIBUTING{background:rgba(255,45,78,.10);border:1px solid rgba(255,45,78,.30);color:var(--r)}
 .dp-pill-TOXIC{background:rgba(255,45,78,.15);border:1px solid rgba(255,45,78,.40);color:var(--r)}
+.dsh-wrap{padding:12px;max-width:1000px;margin:0 auto;color:#dfe5ee;font-size:14px;line-height:1.45}
+.dsh-top{display:flex;justify-content:space-between;align-items:baseline;margin:2px 2px 8px}
+.dsh-top b{font-size:15px}.dsh-top span{font-size:12px;color:#8b97a9}
+.dsh-sec{margin:18px 0 8px;font-size:13px;font-weight:700;color:#c7d1df;display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:2px 8px;word-break:keep-all}
+.dsh-sec small{font-weight:400;color:#8b97a9;font-size:11px}
+.dsh-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr));gap:10px}
+.dsh-card{background:#171c26;border:1px solid #2c3647;border-radius:10px;padding:12px;min-width:0;overflow-wrap:anywhere}
+.dsh-card.dsh-rec{background:#1f1b2e;border-color:#3b3361}
+.dsh-hd{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.dsh-nm{font-size:16px;font-weight:700;min-width:0;flex:1 1 auto}
+.dsh-cd{font-size:11px;color:#8b97a9;font-weight:400;margin-left:4px}
+.dsh-badges{display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;min-width:0;max-width:60%}
+.dsh-badge{display:inline-block;font-size:11px;padding:1px 7px;border-radius:10px;background:#2c3647;color:#c7d1df}
+.dsh-badge.dsh-momo{background:#5a4510;color:#f2d98a}.dsh-badge.dsh-swing{background:#17484a;color:#8fdcd9}.dsh-badge.dsh-core{background:#3f2d63;color:#cdb6ff}
+.dsh-badge.dsh-none{background:#222a38;color:#8b97a9;border:1px dashed #4a5568}
+.dsh-badge.dsh-err{background:#c92a2a;color:#fff;font-weight:700}
+.dsh-badge.dsh-wd{background:#4a4f5c;color:#fff;font-weight:700}
+.dsh-badge.dsh-held{background:#1d3a5c;color:#9cc8ff}
+.dsh-vals{display:flex;flex-wrap:wrap;gap:2px 12px;font-size:12px;color:#a9b8cf;margin-top:6px}
+.dsh-vals b{font-weight:600}
+.dsh-vals .dsh-s{color:#ff9a9a}.dsh-vals .dsh-t{color:#8fbbe8}
+.dsh-bad{color:#ffb4b4;border-bottom:1px dotted #e5484d}
+.dsh-lntx{font-size:12px;color:#c7d1df;margin:8px 0 2px}
+.dsh-errln{font-size:12px;color:#ffb4b4;background:#3a1a22;border-radius:6px;padding:4px 8px;margin-top:6px}
+.dsh-why{font-size:12px;color:#a9b8cf;margin-top:8px}
+.dsh-tm{font-size:12px;color:#8b97a9;margin-top:6px}
+.dsh-empty{background:#171c26;border:1px dashed #3a4558;border-radius:10px;padding:14px;color:#8b97a9;font-size:13px}
+.dsh-band{border-radius:8px;padding:9px 12px;margin:0 0 10px;font-size:13px}.dsh-band small{display:block;font-size:11px;opacity:.9;margin-top:2px}
+.dsh-band.dsh-ok{background:#14301f;border:1px solid #2c6b44}.dsh-band.dsh-warn{background:#3a2f12;border:1px solid #8a6d1f;color:#f2d98a}.dsh-band.dsh-err{background:#c92a2a;color:#fff}.dsh-band.dsh-none{background:#222a38;border:1px dashed #4a5568;color:#c7d1df}
 </style>
 </head>
 <body>
@@ -910,6 +939,10 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
 
 <!-- 보유 종목 패널 제거 (2026-07: 저널 통합 — 진입 기록 = 자동 감시) -->
 
+<div class="scroll" id="page-momo-dash" style="display:none"></div>
+<div class="scroll" id="page-swing-dash" style="display:none"></div>
+<div class="scroll" id="page-core-dash" style="display:none"></div>
+
 <!-- ─── 하단 탭 ─── -->
 <div class="bottom-tabs" id="bottomTabs">
   <button class="btab" id="btabSearch" onclick="switchSubTab('search')">
@@ -923,6 +956,10 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
   <button class="btab" id="btabJournal" onclick="switchSubTab('journal')">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
     일지
+  </button>
+  <button class="btab" id="btabDash" onclick="switchSubTab('dash')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+    대시보드
   </button>
   <button class="btab" id="btabSettings" onclick="switchSubTab('settings')">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -938,6 +975,7 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
 <script src="coreEngine.js"></script>
 <script src="exitEngine.js"></script>
 <script src="engineTests.js"></script>
+<script src="feedRules.js"></script>
 <script>
 // ═══════════════════════════════════════
 // localStorage 네임스페이스 격리 (2026-06)
@@ -1192,7 +1230,7 @@ if(G.ntfy)  { document.getElementById('ntfyChInput').value = G.ntfy; }
 // 모드/탭 전환
 // ═══════════════════════════════════════
 var ALL_MODES = ['recon','momo','swing','core'];
-var ALL_SUBS  = ['search','history','journal','settings'];
+var ALL_SUBS  = ['search','history','journal','dash','settings'];
 
 function switchMode(mode){
   if(mode !== 'recon' && G.currentMode === mode){
@@ -1333,7 +1371,7 @@ function switchSubTab(sub){
   if(target) target.style.display = '';
 
   document.querySelectorAll('.btab').forEach(function(b){ b.classList.remove('on'); });
-  var map = { search:'btabSearch', history:'btabHistory', journal:'btabJournal', settings:'btabSettings' };
+  var map = { search:'btabSearch', history:'btabHistory', journal:'btabJournal', dash:'btabDash', settings:'btabSettings' };
   var btn = document.getElementById(map[sub]);
   if(btn) btn.classList.add('on');
 
@@ -1342,6 +1380,7 @@ function switchSubTab(sub){
   if(sub === 'history') renderHistory(G.currentMode);
   if(sub === 'journal') renderJournal(G.currentMode);
   if(sub === 'search')  renderOpenPositions(G.currentMode);
+  if(typeof dshSync === 'function') dshSync(sub === 'dash');
 }
 
 function updateKeyStatus(){
@@ -15520,6 +15559,257 @@ document.addEventListener('visibilitychange', function(){
 
 
 
+</script>
+<script>
+// ── 대시보드 탭 (2026-10 신규): Worker /reconkr/dash 의 업로드 자료를 읽어 그린다. 이 블록은 전역을 dshSync 하나만 노출한다 ──
+(function(){
+var DSH_POLL_MS = 60000, DSH_STALE_MS = 30 * 60 * 1000;
+var dshOpen = false, dshTimer = null, dshSeq = 0, dshBoxId = null, dshLastOk = 0, dshLastData = null, dshTokSig = null;
+
+var MODE = {
+  momo: {label: '단타'},
+  swing: {label: '스윙'},
+  core: {label: '중기'}
+};
+function esc(s){ return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+function comma(n){
+  var s = String(Math.round(Math.abs(n))), o = '', i;
+  for (i = 0; i < s.length; i++) { if (i > 0 && (s.length - i) % 3 === 0) o += ','; o += s.charAt(i); }
+  return (n < 0 ? '-' : '') + o;
+}
+function won(n){ return '₩' + comma(n); }
+var FR = FeedRules;
+var has = FR.has, validPx = FR.validPx, pxState = FR.pxState, rawTxt = FR.rawTxt, isRecObj = FR.isRecObj, BASE_KIND = FR.BASE_KIND, ISO_RE = FR.ISO_RE, isoM = FR.isoM, isKind = FR.isKind, baseInfo = FR.baseInfo;
+function badCell(v){ return '<span class="dsh-bad">오류 ' + esc(rawTxt(v)) + '</span>'; }
+function cellOf(j, r, k){ var s = j.px[k]; return s === 'absent' ? '<span class="dsh-bad">칸 없음</span>' : (s === 'none' ? '미제시' : (s === 'ok' ? won(r[k]) : badCell(r[k]))); }
+var strNE = FR.strNE, isoOk = FR.isoOk, got = FR.got, SPEC_FIELDS = FR.SPEC_FIELDS;
+/* 규격 판정은 feedRules.js 단일 코드 — 현재가(cur)는 투자팀 필드가 아니라 앱이 공급하는 값이라 여기서 붙인다 */
+function judgeRec(r){ var j = FR.judgeRec(r); j.quoteOk = isRecObj(r) && validPx(r.cur); return j; }
+function recName(r, j){ return !isRecObj(r) ? '(항목 오류)' : (j.nameOk ? r.name : '종목명 오류 ' + rawTxt(r.name)); }
+function liveNum(v){ return typeof v === 'number' && isFinite(v) ? won(v) : '<span class="dsh-bad">' + esc(rawTxt(v)) + '</span>'; }
+function liveCsvNum(s){ var n = Number(s); return s !== null && s !== '' && isFinite(n) ? won(n) : '<span class="dsh-bad">' + esc(rawTxt(s)) + '</span>'; }
+function liveHM(iso){
+  var t = typeof iso === 'string' ? Date.parse(iso) : NaN, d;
+  if (isNaN(t)) return '';
+  d = new Date(t + 9 * 3600 * 1000);
+  return ('0' + d.getUTCHours()).slice(-2) + ':' + ('0' + d.getUTCMinutes()).slice(-2);
+}
+var ENTRY_LABEL = {pending: '진입 판단 전', met: '진입 조건 충족', not_met: '진입 조건 미충족'};
+function liveBand(feed){
+  var st = feed.status, n = feed.counts || {rec: 0, error: 0, withdrawn: 0}, last = feed.lastAvailableDate, errs = Array.isArray(feed.errs) ? feed.errs : [], tx = '', cl = 'warn', lastTx;
+  lastTx = last ? '마지막으로 있던 파일 날짜 ' + esc(last) + ' (참고 · 오늘 추천 아님)' : '이전에 받은 파일도 없음';
+  if (st === 'none') { cl = 'none'; tx = '<b>오늘(' + esc(feed.date) + ') 투자팀 추천 파일 없음</b><small>' + lastTx + ' · 어제 파일로 대신 보여 주지 않습니다</small>'; }
+  else if (st === 'broken') { cl = 'err'; tx = '<b>갱신 실패 — 오늘(' + esc(feed.date) + ') 파일을 읽을 수 없음</b><small>' + esc(errs.join(' / ')) + ' · ' + lastTx + ' · 이전 자료로 대신 보여 주지 않습니다</small>'; }
+  else if (st === 'error') { cl = 'err'; tx = '<b>규격 오류 — 파일 구조가 맞지 않아 추천을 표시하지 않음</b><small>자료 날짜 ' + esc(feed.date) + ' · ' + esc(errs.join(' / ')) + '</small>'; }
+  else if (st === 'partial') { cl = 'warn'; tx = '<b>일부 오류 ' + esc(n.error) + '건</b><small>자료 날짜 ' + esc(feed.date) + ' · 오류 건은 해당 추천에만 표시하고 나머지는 그대로 보여 줍니다 · 발행 ' + esc(liveHM(feed.issuedAt)) + '</small>'; }
+  else if (st === 'ok') { cl = 'ok'; tx = '<b>정상 ' + esc(n.rec) + '건</b><small>자료 날짜 ' + esc(feed.date) + ' · 발행 ' + esc(liveHM(feed.issuedAt)) + '</small>'; }
+  else { cl = 'err'; tx = '<b>피드 상태 불명</b><small>' + esc(rawTxt(st)) + '</small>'; }
+  return '<div class="dsh-band dsh-' + cl + '">' + tx + '</div>';
+}
+function liveRecCard(it){
+  var r = it.rec, j = judgeRec(r), bad = !isRecObj(r), errs = j.errs.slice(), wd = j.state === 'withdrawn', bi = j.bi, nm, badges, ie = Array.isArray(it.errs) ? it.errs : [], q;
+  for (q = 0; q < ie.length; q++) { if (errs.indexOf(ie[q]) < 0) errs.push(ie[q]); }
+  if (it.state === 'error' && !errs.length) errs.push('피드 판정: 규격 오류');
+  if (bad) r = {};
+  nm = recName(bad ? null : r, j);
+  badges = '<span class="dsh-badge' + (j.modeOk ? ' dsh-' + esc(r.mode) : '') + '">' + esc(j.modeOk ? MODE[r.mode].label : '성격 불명') + '</span>' +
+    (!j.horizonOk ? '<span class="dsh-badge dsh-err">기간 오류 ' + esc(rawTxt(r.horizon)) + '</span>' : (r.horizon ? '<span class="dsh-badge">투자팀 제시 기간 ' + esc(r.horizon) + '</span>' : '<span class="dsh-badge dsh-none">기간 미제시</span>')) +
+    (ENTRY_LABEL.hasOwnProperty(r.entryStatus) ? '<span class="dsh-badge">' + esc(ENTRY_LABEL[r.entryStatus]) + '</span>' : '') +
+    (it.revs && it.revs.length > 1 ? '<span class="dsh-badge">판 ' + esc(it.rev) + ' (수정 ' + esc(it.revs.length - 1) + '회)</span>' : '') +
+    (wd ? '<span class="dsh-badge dsh-wd">철회</span>' : '') + (errs.length ? '<span class="dsh-badge dsh-err">규격 오류</span>' : '');
+  return '<div class="dsh-card dsh-rec"><div class="dsh-hd"><div class="dsh-nm">' + esc(nm) + '<span class="dsh-cd">' + esc(bad ? '' : (j.codeOk ? r.code : '코드 오류 ' + rawTxt(r.code))) + '</span></div><div class="dsh-badges">' + badges + '</div></div>' +
+    '<div class="dsh-vals"><span class="dsh-s">손절 <b>' + cellOf(j, r, 'stop') + '</b></span><span>기준(' + esc(bi.tag) + ') <b>' + (j.px.base === 'ok' ? won(r.base) : badCell(r.base)) + '</b></span><span class="dsh-t">목표1 <b>' + cellOf(j, r, 't1') + '</b></span><span class="dsh-t">목표2 <b>' + cellOf(j, r, 't2') + '</b></span></div>' +
+    '<div class="dsh-tm">기준가: ' + esc(bi.txt) + ' · 현재가는 앱 시세 조회 후 표시(피드에는 없음)</div>' +
+    (errs.length ? '<div class="dsh-errln">규격 오류 · ' + esc(errs.join(' / ')) + '</div>' : '') +
+    '<div class="dsh-why">근거 · ' + esc(bad ? '' : (j.whyOk ? r.why : '근거 오류 ' + rawTxt(r.why))) + '</div>' +
+    (typeof r.risk === 'string' && r.risk ? '<div class="dsh-why">위험 · ' + esc(r.risk) + '</div>' : '') +
+    (typeof r.revNote === 'string' && r.revNote ? '<div class="dsh-why">수정 사유 · ' + esc(r.revNote) + '</div>' : '') + '</div>';
+}
+function liveFeedHTML(feed){
+  var recs = Array.isArray(feed.recs) ? feed.recs : [], live = [], wdl = [], i, h = '', it;
+  if (feed.status === 'none' || feed.status === 'broken' || feed.status === 'error') recs = [];
+  for (i = 0; i < recs.length; i++) { it = recs[i]; (it && it.state === 'withdrawn' ? wdl : live).push(it); }
+  live.sort(function(a, b){ return (a.state === 'error' ? 1 : 0) - (b.state === 'error' ? 1 : 0); });
+  h += '<div class="dsh-sec">오늘의 추천 ' + live.length + '종목<small>투자팀 피드 · 건별로 규격 검사</small></div>';
+  h += liveBand(feed);
+  if (live.length) { h += '<div class="dsh-grid">'; for (i = 0; i < live.length; i++) h += liveRecCard(live[i]); h += '</div>'; }
+  else if (feed.status === 'ok' || feed.status === 'partial') h += '<div class="dsh-empty">표시할 추천이 없습니다.</div>';
+  h += '<div class="dsh-sec">철회 ' + wdl.length + '건<small>철회 판 · 추천 목록과 따로 표시</small></div>';
+  if (wdl.length) { h += '<div class="dsh-grid">'; for (i = 0; i < wdl.length; i++) h += liveRecCard(wdl[i]); h += '</div>'; }
+  else h += '<div class="dsh-empty">철회된 추천이 없습니다.</div>';
+  return h;
+}
+function orderState(e, o){
+  var f = e._filled, sk = e._skipped, ex = o && o.executedAt;
+  if (f && !sk) return '<span class="dsh-badge">모의 체결 ' + esc(typeof f === 'string' ? f : rawTxt(f)) + '</span>';
+  if (sk && !f) return '<span class="dsh-badge dsh-err">건너뜀 · ' + esc(typeof sk === 'string' ? sk : rawTxt(sk)) + '</span>';
+  if (ex || f || sk) return '<span class="dsh-badge dsh-none">집행됨 · 결과 불명</span>';
+  return '<span class="dsh-badge dsh-none">다음 시가 집행 예정</span>';
+}
+function acctTxt(v){ return typeof v === 'string' ? v : rawTxt(v); }
+function acctWarn(a){ return (typeof a.pageError === 'string' ? ' · pageError ' + (a.pageError === '' ? '(내용 없음)' : esc(a.pageError)) : '') + (typeof a.schemaWarn === 'string' ? ' · schemaWarn ' + (a.schemaWarn === '' ? '(내용 없음)' : esc(a.schemaWarn)) : ''); }
+function acctHm(v){ var m = typeof v === 'string' ? /T(\d{2}:\d{2})/.exec(v) : null; return m ? m[1] : acctTxt(v); }
+function liveAccountHTML(a){
+  var h = '<div class="dsh-sec">실제 계좌<small>증권앱 기준 수동 입력 · 모의 장부와 별개</small></div>', st, hs, i, x, nm, qOk, aOk, b, ok, sum = 0, nv = 0, nx = 0, calc, ref, warned;
+  if (!isRecObj(a)) return h + '<div class="dsh-empty">계좌 자료 없음 — data.js가 구버전입니다. node build-data.js 를 다시 실행하세요.</div>';
+  st = a.status;
+  if (st === 'missing') return h + '<div class="dsh-empty">계좌 미입력 — 대표님 회신 대기</div>';
+  if (st === 'broken' || st === 'error') return h + '<div class="dsh-errln">계좌 파일 오류(' + esc(acctTxt(st)) + ') · ' + esc(acctTxt(a.reason)) + ' · 값을 표시하지 않습니다</div>';
+  if (st === 'future-query') return h + '<div class="dsh-errln">조회 시각 이상 — 미래 시각, 값을 표시하지 않습니다</div>';
+  if (st === 'fetch-failed') return h + '<div class="dsh-errln">계좌 조회 실패 · 값을 표시하지 않습니다' + acctWarn(a) + '</div>';
+  if (st !== 'ok' && st !== 'unconfirmed' && st !== 'reference' && st !== 'incomplete') return h + '<div class="dsh-errln">계좌 상태 불명 · ' + esc(acctTxt(st)) + '</div>';
+  if (!Array.isArray(a.holdings)) return h + '<div class="dsh-errln">계좌 보유 목록을 읽지 못함 · 값을 표시하지 않습니다</div>';
+  hs = a.holdings; ref = st === 'reference'; warned = a.warned === true || a.truncated === true;
+  calc = st === 'ok' && !warned;
+  b = '<span class="dsh-badge dsh-held">출처 ' + esc(acctTxt(a.source)) + '</span>';
+  if (ref) b += '<span class="dsh-badge">보유 조회 ' + esc(acctHm(a.queriedAt)) + ' (참고)</span>';
+  else b += '<span class="dsh-badge">기준 ' + esc(acctTxt(a.queriedAt)) + '</span>';
+  if (st === 'incomplete' || (st === 'ok' && warned)) b += '<span class="dsh-badge dsh-err">불완전 조회 · 참고 표시</span>';
+  else if (st === 'ok') b += '<span class="dsh-badge">확정 ' + esc(acctTxt(a.confirmedBy)) + ' · ' + esc(acctTxt(a.confirmedAt)) + '</span>';
+  else if (st === 'unconfirmed') b += '<span class="dsh-badge dsh-err">미확정 (참고용) · 입력값 대조 필요</span>';
+  if (ref && a.confirmMarkIgnored === true) b += '<span class="dsh-badge dsh-err">확정 표식 무시됨 — 출처가 증권앱 대조가 아님</span>';
+  if (a.closingIgnored === true) b += '<span class="dsh-badge dsh-none">종료 선언 미적용 — 대시보드 미지원</span>';
+  if (a.truncated === true) b += '<span class="dsh-badge dsh-err">목록 잘림(일부만 조회됨) · 일부 종목 누락 가능</span>';
+  h += '<div class="dsh-card"><div class="dsh-hd"><div class="dsh-nm">증권 계좌</div><div class="dsh-badges">' + b + '</div></div>';
+  if (warned) h += '<div class="dsh-errln">증권사 조회 불완전' + acctWarn(a) + ' · 참고 표시 · 계산 제외</div>';
+  h += '<div class="dsh-lntx">보유 ' + esc(hs.length) + '건</div>';
+  for (i = 0; i < hs.length; i++) {
+    x = isRecObj(hs[i]) ? hs[i] : {};
+    nm = typeof x.name === 'string' && x.name !== '' ? x.name : '(이름 없음)';
+    qOk = typeof x.qty === 'number' && isFinite(x.qty) && x.qty > 0; aOk = typeof x.avgPrice === 'number' && isFinite(x.avgPrice) && x.avgPrice > 0;
+    ok = qOk && aOk && !Array.isArray(x.invalid) && typeof x.code === 'string' && /^\d{6}$/.test(x.code);
+    if (ok) { sum += Math.round(x.qty * x.avgPrice); nv++; } else nx++;
+    h += '<div class="dsh-vals"><span><b>' + esc(nm) + '</b> ' + (typeof x.code === 'string' && /^\d{6}$/.test(x.code) ? esc(x.code) : '<span class="dsh-bad">코드 미확인</span>') + '</span><span>수량 <b>' + (qOk ? esc(comma(x.qty)) + '주' : '<span class="dsh-bad">수량 미확인</span>') + '</b></span><span>평단 <b>' +
+      (aOk ? won(x.avgPrice) : '<span class="dsh-bad">단가 미확인</span>') + '</b></span><span>매입금액 <b>' + (qOk && aOk ? won(Math.round(x.qty * x.avgPrice)) : '-') + '</b></span></div>';
+  }
+  if (!calc) h += '<div class="dsh-lntx">참고 — 합계 미산출</div>';
+  else h += '<div class="dsh-lntx">매입금액 합계 <b>' + (nv > 0 ? won(sum) : '-') + '</b>' + (nx > 0 ? ' · ' + esc(nx) + '종목 제외 — 합계 불완전' : '') + '</div>';
+  return h + '</div>';
+}
+function livePaperHTML(p){
+  var h = '', rows, last, ops, peak, eq, i, ent, pos, items, o = p.orders || {};
+  h += '<div class="dsh-sec">모의 장부<small>봇의 가상 체결 · 실제 계좌·거래일지와 다른 장부 · 폴더 ' + esc(p.dir) + '</small></div>';
+  h += '<div class="dsh-card"><div class="dsh-hd"><div class="dsh-nm">페이퍼 계좌</div><div class="dsh-badges"><span class="dsh-badge dsh-wd">모의 장부</span></div></div>';
+  rows = p.ledger && p.ledger.status === 'ok' ? p.ledger.rows : null;
+  if (!rows) h += '<div class="dsh-errln">장부(ledger.csv)를 읽지 못함 · ' + esc(p.ledger ? p.ledger.status + ' ' + (p.ledger.err || '') : '') + '</div>';
+  else if (!rows.length) h += '<div class="dsh-lntx">장부 기록 없음 — 첫 실행 전입니다 (헤더만 있음)</div>';
+  else {
+    last = rows[rows.length - 1];
+    h += '<div class="dsh-vals"><span>일자 <b>' + esc(last['일자']) + '</b></span><span>자본 <b>' + liveCsvNum(last['자본']) + '</b></span><span>현금 <b>' + liveCsvNum(last['현금']) + '</b></span><span>보유평가 <b>' + liveCsvNum(last['보유평가']) + '</b></span><span>실현손익 <b>' + liveCsvNum(last['실현손익']) + '</b></span></div>';
+  }
+  ops = p.ops && p.ops.status === 'ok' && isRecObj(p.ops.value) ? p.ops.value : null;
+  peak = ops ? ops.peakEquity : null;
+  eq = rows && rows.length ? Number(rows[rows.length - 1]['자본']) : NaN;
+  h += '<div class="dsh-vals"><span>상태 <b>' + (ops ? esc(ops.status) : '읽지 못함') + '</b></span><span>최고 자본 <b>' + (validPx(peak) ? won(peak) : '-') + '</b></span><span>낙폭 <b>' +
+    (validPx(peak) && isFinite(eq) ? esc(((eq / peak - 1) * 100).toFixed(2)) + '%' : '기록 없음') + '</b></span></div>';
+  if (p.ops && p.ops.killswitch) h += '<div class="dsh-errln">킬스위치 켜짐 — 실행기가 주문을 건너뜁니다</div>';
+  pos = p.positions || {}; items = Array.isArray(pos.items) ? pos.items : null;
+  var held = [], closedN = 0, it2, qn, st2;
+  if (items) for (i = 0; i < items.length; i++) {
+    it2 = items[i]; st2 = isRecObj(it2) ? it2.status : undefined;
+    if (st2 === 'closed') { closedN++; continue; }
+    if (st2 === 'open' || st2 === 'partial') held.push(it2); else held.push({code: isRecObj(it2) ? it2.code : null, _unknown: isRecObj(it2) ? rawTxt(st2) : rawTxt(it2)});
+  }
+  h += '<div class="dsh-lntx">보유 ' + (items ? esc(held.length) + '건' : '읽지 못함') + (items && closedN ? ' · 종료 ' + esc(closedN) + '건' : '') + '</div>';
+  for (i = 0; i < held.length; i++) {
+    it2 = held[i];
+    if (it2._unknown !== undefined) { h += '<div class="dsh-errln">' + esc(it2.code || '') + ' 상태 불명 · ' + esc(it2._unknown) + '</div>'; continue; }
+    qn = it2.remaining !== undefined && it2.remaining !== null ? it2.remaining : it2.shares;
+    h += '<div class="dsh-why">' + esc(it2.code || '') + ' ' + (validPx(qn) || qn === 0 ? esc(qn) + '주' : '수량 불명') + (it2.status === 'partial' ? ' · 일부 청산' : '') + '</div>';
+  }
+  h += '</div>';
+  ent = Array.isArray(o.entries) ? o.entries : null;
+  h += '<div class="dsh-sec">모의 주문 ' + (ent ? esc(ent.length) : '-') + '건<small>' + (o.file ? esc(o.file) + ' · 기준일 ' + esc(o.asOf) : '주문 파일 없음') + ' · 실주문 아님</small></div>';
+  if (ent && ent.length) {
+    h += '<div class="dsh-grid">';
+    for (i = 0; i < ent.length; i++) {
+      var e = isRecObj(ent[i]) ? ent[i] : {}, pl = isRecObj(e.plan) ? e.plan : {};
+      h += '<div class="dsh-card"><div class="dsh-hd"><div class="dsh-nm">' + esc(e.code === undefined ? '-' : e.code) + '<span class="dsh-cd">' + esc(e.action === undefined ? '' : e.action) + '</span></div><div class="dsh-badges"><span class="dsh-badge">' + esc(e.validFor === 'next_open' ? '다음 시가' : (e.validFor === undefined ? '-' : e.validFor)) + '</span><span class="dsh-badge dsh-wd">모의</span>' + orderState(e, o) + '</div></div>' +
+        '<div class="dsh-vals"><span>주문가 <b>' + liveNum(e.price) + '</b></span><span>수량 <b>' + esc(e.qty === undefined ? '-' : e.qty) + '주</b></span><span class="dsh-s">손절 <b>' + liveNum(pl.stop) + '</b></span><span class="dsh-t">목표1 <b>' + liveNum(pl.t1) + '</b></span><span class="dsh-t">목표2 <b>' + liveNum(pl.t2) + '</b></span></div></div>';
+    }
+    h += '</div>';
+  } else h += '<div class="dsh-empty">' + (ent ? '오늘 주문이 없습니다.' : '주문 파일을 읽지 못했습니다.') + '</div>';
+  return h;
+}
+
+function dshHM(ms){ return liveHM(new Date(ms).toISOString()); }
+function dshBand(cl, title, sub){ return '<div class="dsh-band dsh-' + cl + '"><b>' + esc(title) + '</b>' + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</div>'; }
+function dshPut(html){ var b = dshBoxId ? document.getElementById(dshBoxId) : null; if (b) b.innerHTML = '<div class="dsh-wrap">' + html + '</div>'; }
+function dshBody(D, banner){
+  var h = banner, gen, stale, od;
+  if (!isRecObj(D) || !isRecObj(D.feed) || !isRecObj(D.paper)) return h + dshBand('err', '자료 형식 오류', '서버 자료를 읽을 수 없어 표시하지 않습니다');
+  gen = typeof D.generatedAt === 'string' ? Date.parse(D.generatedAt) : NaN;
+  stale = isNaN(gen) || Date.now() - gen > DSH_STALE_MS;
+  if (stale) h += dshBand('warn', '오래된 자료', isNaN(gen) ? '생성 시각을 확인할 수 없음' : '자료 생성 후 ' + Math.floor((Date.now() - gen) / 60000) + '분 경과 · PC 업로드가 멈췄을 수 있습니다');
+  h += '<div class="dsh-top"><b>' + esc(D.today) + '</b><span>자료 생성 ' + esc(liveHM(D.generatedAt)) + '</span></div>';
+  h += liveFeedHTML(D.feed);
+  h += liveAccountHTML(D.account);
+  h += livePaperHTML(D.paper);
+  od = D.paper.orders && D.paper.orders.asOf;
+  if (od && String(od).replace(/-/g, '') !== String(D.today).replace(/-/g, '')) h = h.replace('실주문 아님</small>', '오늘 주문 아님 · 가장 최근 파일</small>');
+  return h;
+}
+function dshNeedToken(){ dshPut(dshBand('warn', '토큰 설정 필요', '설정 탭에서 토큰(owner)을 입력하세요 · 토큰이 없거나 권한이 달라 서버가 거절했습니다')); }
+function dshFail(){
+  var b = dshBand('err', '조회 실패', '마지막 성공 ' + (dshLastOk ? dshHM(dshLastOk) : '없음') + ' · ' + (dshLastData ? '아래는 마지막으로 받은 자료입니다' : '표시할 자료가 없습니다'));
+  if (!dshLastData) { dshPut(b); return; }
+  try { dshPut(dshBody(dshLastData, b)); } catch (e) { dshPut(b); }
+}
+function dshClear(){ dshLastData = null; dshLastOk = 0; dshSeq++; }
+function dshSigOf(tok){ var h = 5381, i; for (i = 0; i < tok.length; i++) h = ((h * 33) ^ tok.charCodeAt(i)) >>> 0; return tok.length + ':' + h; }
+function dshSigNow(){ var t = localStorage.getItem('reconToken'); return t ? dshSigOf(String(t)) : ''; }
+function dshLoad(){
+  var seq, tok, sig, chg, reqSig;
+  if (!dshOpen) return;
+  if (document.hidden || G.activeSubTab !== 'dash' || dshBoxId !== 'page-' + G.currentMode + '-dash') return;
+  tok = localStorage.getItem('reconToken');
+  sig = tok ? dshSigOf(String(tok)) : '';
+  chg = dshTokSig !== null && sig !== dshTokSig;
+  if (!tok || chg) dshClear();
+  dshTokSig = sig;
+  if (!tok) { dshNeedToken(); return; }
+  if (chg) dshPut(dshBand('none', '인증 확인 중', '토큰이 바뀌어 다시 조회합니다'));
+  seq = ++dshSeq; reqSig = sig;
+  workerFetch(WORKER_URL + '/reconkr/dash', {cache: 'no-store'}).then(function(res){
+    return res.text().then(function(t){ return {status: res.status, text: t}; });
+  }).then(function(r){
+    var j = null;
+    if (seq !== dshSeq || !dshOpen) return;
+    if (dshSigNow() !== reqSig) { dshPut(dshBand('none', '인증 확인 중', '토큰이 바뀌어 다시 조회합니다')); dshLoad(); return; }
+    if (r.status === 401) { dshClear(); dshNeedToken(); return; }
+    try { j = JSON.parse(r.text); } catch (e) { j = null; }
+    if (r.status !== 200 || !j || j.ok !== true) { dshFail(); return; }
+    if (j.data === null || j.data === undefined) { dshPut(dshBand('none', '아직 업로드 없음', 'PC에서 대시보드 자료를 올리면 여기에 표시됩니다')); return; }
+    dshLastOk = Date.now(); dshLastData = j.data;
+    try { dshPut(dshBody(j.data, '')); } catch (e2) { dshPut(dshBand('err', '화면 표시 오류', '자료 구조가 예상과 다릅니다')); }
+  }).catch(function(){
+    if (seq !== dshSeq || !dshOpen) return;
+    if (dshSigNow() !== reqSig) { dshPut(dshBand('none', '인증 확인 중', '토큰이 바뀌어 다시 조회합니다')); dshLoad(); return; }
+    dshFail();
+  });
+}
+function dshTick(){
+  var id;
+  if (!dshOpen) return;
+  if (G.activeSubTab !== 'dash') { window.dshSync(false); return; }
+  id = 'page-' + G.currentMode + '-dash';
+  if (id !== dshBoxId) { dshBoxId = id; dshPut(dshBand('none', '불러오는 중', '')); dshLoad(); return; }
+  if (document.hidden) return;
+  dshLoad();
+}
+window.dshSync = function(on){
+  if (dshTimer) { clearInterval(dshTimer); dshTimer = null; }
+  if (!on) { dshOpen = false; dshSeq++; dshBoxId = null; return; }
+  dshOpen = true; dshBoxId = 'page-' + G.currentMode + '-dash';
+  dshPut(dshBand('none', '불러오는 중', ''));
+  dshTimer = setInterval(dshTick, DSH_POLL_MS);
+  dshLoad();
+};
+if (!window.dshVisBound) {
+  window.dshVisBound = true;
+  document.addEventListener('visibilitychange', function(){ if (dshOpen && !document.hidden) dshTick(); });
+}
+})();
 </script>
 </body>
 </html>
