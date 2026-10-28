@@ -439,7 +439,9 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
 .dp-pill-ACCUMULATING{background:rgba(90,122,149,.10);border:1px solid var(--b);color:var(--t2)}
 .dp-pill-DISTRIBUTING{background:rgba(255,45,78,.10);border:1px solid rgba(255,45,78,.30);color:var(--r)}
 .dp-pill-TOXIC{background:rgba(255,45,78,.15);border:1px solid rgba(255,45,78,.40);color:var(--r)}
-.dsh-wrap{padding:12px;max-width:1000px;margin:0 auto;color:#dfe5ee;font-size:14px;line-height:1.45}
+.dsh-wrap{padding:12px;max-width:1000px;margin:0 auto;color:#dfe5ee;font-size:14px;line-height:1.45;font-family:'Apple SD Gothic Neo','Noto Sans KR',sans-serif;font-variant-numeric:tabular-nums}
+.dsh-badge.dsh-vsell{background:#c92a2a;color:#fff;font-weight:700}.dsh-badge.dsh-vhalf{background:#8a6d1f;color:#fff;font-weight:700}.dsh-badge.dsh-vhold{background:#14301f;color:#9ee6b5;border:1px solid #2c6b44}
+.dsh-det{margin-top:8px;font-size:12px;color:#8b97a9}.dsh-det summary{cursor:pointer}
 .dsh-top{display:flex;justify-content:space-between;align-items:baseline;margin:2px 2px 8px}
 .dsh-top b{font-size:15px}.dsh-top span{font-size:12px;color:#8b97a9}
 .dsh-sec{margin:18px 0 8px;font-size:13px;font-weight:700;color:#c7d1df;display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:2px 8px;word-break:keep-all}
@@ -593,6 +595,12 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
         <div id="marketRegimeEl" style="font-family:var(--mono);font-size:11px;color:var(--t2);line-height:1.5">분석 중...</div>
       </div>
     </div>
+  </div>
+
+  <!-- 보유종목 대응 · 투자팀 추천 · 모의 장부 (대시보드) -->
+  <div class="mkt-section">
+    <div class="mkt-label">내 보유종목 · 대시보드</div>
+    <div id="dshMain"></div>
   </div>
 
   <!-- KIS 업종 동향 -->
@@ -939,9 +947,6 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
 
 <!-- 보유 종목 패널 제거 (2026-07: 저널 통합 — 진입 기록 = 자동 감시) -->
 
-<div class="scroll" id="page-momo-dash" style="display:none"></div>
-<div class="scroll" id="page-swing-dash" style="display:none"></div>
-<div class="scroll" id="page-core-dash" style="display:none"></div>
 
 <!-- ─── 하단 탭 ─── -->
 <div class="bottom-tabs" id="bottomTabs">
@@ -956,10 +961,6 @@ html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--sans
   <button class="btab" id="btabJournal" onclick="switchSubTab('journal')">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
     일지
-  </button>
-  <button class="btab" id="btabDash" onclick="switchSubTab('dash')">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
-    대시보드
   </button>
   <button class="btab" id="btabSettings" onclick="switchSubTab('settings')">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -1230,7 +1231,7 @@ if(G.ntfy)  { document.getElementById('ntfyChInput').value = G.ntfy; }
 // 모드/탭 전환
 // ═══════════════════════════════════════
 var ALL_MODES = ['recon','momo','swing','core'];
-var ALL_SUBS  = ['search','history','journal','dash','settings'];
+var ALL_SUBS  = ['search','history','journal','settings'];
 
 function switchMode(mode){
   if(mode !== 'recon' && G.currentMode === mode){
@@ -1274,6 +1275,8 @@ function switchMode(mode){
     G.currentMode = mode;
     switchSubTab('search');
   }
+
+  if(typeof dshSync === 'function') dshSync(G.currentMode === 'recon');
 
   // SWING/CORE 키 상태 표시
   updateKeyStatus();
@@ -1371,7 +1374,7 @@ function switchSubTab(sub){
   if(target) target.style.display = '';
 
   document.querySelectorAll('.btab').forEach(function(b){ b.classList.remove('on'); });
-  var map = { search:'btabSearch', history:'btabHistory', journal:'btabJournal', dash:'btabDash', settings:'btabSettings' };
+  var map = { search:'btabSearch', history:'btabHistory', journal:'btabJournal', settings:'btabSettings' };
   var btn = document.getElementById(map[sub]);
   if(btn) btn.classList.add('on');
 
@@ -1380,7 +1383,6 @@ function switchSubTab(sub){
   if(sub === 'history') renderHistory(G.currentMode);
   if(sub === 'journal') renderJournal(G.currentMode);
   if(sub === 'search')  renderOpenPositions(G.currentMode);
-  if(typeof dshSync === 'function') dshSync(sub === 'dash');
 }
 
 function updateKeyStatus(){
@@ -15564,7 +15566,10 @@ document.addEventListener('visibilitychange', function(){
 // ── 대시보드 탭 (2026-10 신규): Worker /reconkr/dash 의 업로드 자료를 읽어 그린다. 이 블록은 전역을 dshSync 하나만 노출한다 ──
 (function(){
 var DSH_POLL_MS = 60000, DSH_STALE_MS = 30 * 60 * 1000;
-var dshOpen = false, dshTimer = null, dshSeq = 0, dshBoxId = null, dshLastOk = 0, dshLastData = null, dshTokSig = null;
+// kisAuthHeaders·kisGet 각 8초 기한 합보다 길게: 정상 경로는 자르지 않고 끝나지 않는 요청만 끊는다
+var DSH_PX_TIMEOUT_MS = 20000;
+var DSH_PX_STALE_MS = 3 * 60 * 1000, DSH_BOX = 'dshMain';
+var dshOpen = false, dshTimer = null, dshSeq = 0, dshBoxId = null, dshLastOk = 0, dshLastData = null, dshTokSig = null, dshPx = {}, dshPxBusy = false, dshInflight = {}, dshReqSeq = 0, dshReqNo = {}, dshFresh = {}, dshNm = {}, dshNmBusy = false;
 
 var MODE = {
   momo: {label: '단타'},
@@ -15649,9 +15654,56 @@ function orderState(e, o){
 function acctTxt(v){ return typeof v === 'string' ? v : rawTxt(v); }
 function acctWarn(a){ return (typeof a.pageError === 'string' ? ' · pageError ' + (a.pageError === '' ? '(내용 없음)' : esc(a.pageError)) : '') + (typeof a.schemaWarn === 'string' ? ' · schemaWarn ' + (a.schemaWarn === '' ? '(내용 없음)' : esc(a.schemaWarn)) : ''); }
 function acctHm(v){ var m = typeof v === 'string' ? /T(\d{2}:\d{2})/.exec(v) : null; return m ? m[1] : acctTxt(v); }
-function liveAccountHTML(a){
-  var h = '<div class="dsh-sec">실제 계좌<small>증권앱 기준 수동 입력 · 모의 장부와 별개</small></div>', st, hs, i, x, nm, qOk, aOk, b, ok, sum = 0, nv = 0, nx = 0, calc, ref, warned;
-  if (!isRecObj(a)) return h + '<div class="dsh-empty">계좌 자료 없음 — data.js가 구버전입니다. node build-data.js 를 다시 실행하세요.</div>';
+function dshHasKey(o, k){ return o !== null && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k); }
+function dshIsObj(o){ return o !== null && typeof o === 'object' && !Array.isArray(o); }
+function dshPlanNum(v){ return v === null || (typeof v === 'number' && isFinite(v) && v > 0 && Math.floor(v) === v); }
+function dshHoldJudge(price, plan){
+  var keys = ['stop', 't1', 't2'], i, s, a, b;
+  if (!(typeof price === 'number' && isFinite(price) && price > 0)) return {act: 'STALE', label: '갱신 필요', why: '현재가를 받지 못했거나 오래됨'};
+  if (!dshIsObj(plan)) return {act: 'WAIT', label: '판단 대기 — 투자팀 미제시', why: ''};
+  for (i = 0; i < keys.length; i++) if (!dshHasKey(plan, keys[i]) || !dshPlanNum(plan[keys[i]])) return {act: 'ERR', label: '규격 오류 — ' + keys[i] + ' 칸 없음 또는 형식 오류', why: ''};
+  if (!dshHasKey(plan, 't1Done') || typeof plan.t1Done !== 'boolean') return {act: 'ERR', label: '규격 오류 — t1Done 칸 없음 또는 형식 오류', why: ''};
+  s = plan.stop; a = plan.t1; b = plan.t2;
+  if (s === null && a === null && b === null) return {act: 'WAIT', label: '판단 대기 — 투자팀 미제시', why: ''};
+  if ((s !== null && a !== null && s >= a) || (a !== null && b !== null && a >= b) || (s !== null && b !== null && s >= b)) return {act: 'ERR', label: '규격 오류 — 선 순서(손절<목표1<목표2) 위반', why: ''};
+  if (s !== null && price <= s) return {act: 'SELL_ALL', label: '손절선 이탈 — 매도', why: '현재가 ' + won(price) + ' ≤ 손절 ' + won(s)};
+  if (b !== null && price >= b) return {act: 'SELL_ALL', label: '목표2 도달 — 잔량 익절', why: '현재가 ' + won(price) + ' ≥ 목표2 ' + won(b)};
+  if (a !== null && price >= a && !plan.t1Done) return {act: 'SELL_HALF', label: '목표1 도달 — 절반 익절', why: '현재가 ' + won(price) + ' ≥ 목표1 ' + won(a)};
+  if (s === null) return {act: 'LIMITED', label: '손절 기준 미제시 — 판단 제한', why: '손절선이 없어 홀딩 여부를 판단할 수 없음 (현재가 ' + won(price) + ')'};
+  return {act: 'HOLD', label: plan.t1Done ? '홀딩(목표1 실행됨)' : '홀딩', why: '손절·목표 어느 선도 닿지 않음 (현재가 ' + won(price) + ')'};
+}
+function dshCalOk(iso){
+  var t;
+  if (!(typeof iso === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(iso))) return NaN;
+  t = Date.parse(iso + 'T00:00:00Z');
+  return !isNaN(t) && new Date(t).toISOString().slice(0, 10) === iso ? t : NaN;
+}
+function dshDays(fromIso, toIso){
+  var f = dshCalOk(fromIso), t = dshCalOk(toIso);
+  return isNaN(f) || isNaN(t) ? null : Math.round((t - f) / 86400000);
+}
+function dshPlanBad(pl, today){
+  if (dshHasKey(pl, 'planErr')) return typeof pl.planErr === 'string' && pl.planErr !== '' ? pl.planErr : 'planErr 칸 형식 오류';
+  return FeedRules.checkHoldItem(pl, today);
+}
+function dshPlanMap(hp){
+  var m = {dup: {}, map: {}, ok: false, n: 0}, i, it, c;
+  if (!dshIsObj(hp) || hp.status !== 'ok' || !Array.isArray(hp.items)) return m;
+  m.ok = true;
+  for (i = 0; i < hp.items.length; i++) {
+    it = hp.items[i]; c = dshIsObj(it) && typeof it.code === 'string' && /^\d{6}$/.test(it.code) ? it.code : null;
+    if (c === null) continue;
+    if (dshHasKey(m.map, c)) m.dup[c] = true; else { m.map[c] = it; m.n++; }
+  }
+  return m;
+}
+function dshPxOf(code){
+  var p = dshHasKey(dshPx, code) ? dshPx[code] : null;
+  return dshIsObj(p) && typeof p.price === 'number' && Date.now() - p.ts <= DSH_PX_STALE_MS ? p : null;
+}
+function liveHoldHTML(a, hp, today){
+  var h = '<div class="dsh-sec">내 보유종목 대응<small>손절·목표는 투자팀 계획 · 매도/홀딩 판정은 앱이 현재가와 비교</small></div>', st, hs, i, x, nm, code, pm, pl, px, price, j, c, cls, pnl, age, ad, b = '', warned, used = {}, extra = 0, k, avgOk, qOk, pe;
+  if (!dshIsObj(a)) return h + '<div class="dsh-empty">계좌 자료 없음 — data.js가 구버전입니다. node build-data.js 를 다시 실행하세요.</div>';
   st = a.status;
   if (st === 'missing') return h + '<div class="dsh-empty">계좌 미입력 — 대표님 회신 대기</div>';
   if (st === 'broken' || st === 'error') return h + '<div class="dsh-errln">계좌 파일 오류(' + esc(acctTxt(st)) + ') · ' + esc(acctTxt(a.reason)) + ' · 값을 표시하지 않습니다</div>';
@@ -15659,31 +15711,47 @@ function liveAccountHTML(a){
   if (st === 'fetch-failed') return h + '<div class="dsh-errln">계좌 조회 실패 · 값을 표시하지 않습니다' + acctWarn(a) + '</div>';
   if (st !== 'ok' && st !== 'unconfirmed' && st !== 'reference' && st !== 'incomplete') return h + '<div class="dsh-errln">계좌 상태 불명 · ' + esc(acctTxt(st)) + '</div>';
   if (!Array.isArray(a.holdings)) return h + '<div class="dsh-errln">계좌 보유 목록을 읽지 못함 · 값을 표시하지 않습니다</div>';
-  hs = a.holdings; ref = st === 'reference'; warned = a.warned === true || a.truncated === true;
-  calc = st === 'ok' && !warned;
+  hs = a.holdings; warned = a.warned === true || a.truncated === true;
+  pm = dshPlanMap(hp);
   b = '<span class="dsh-badge dsh-held">출처 ' + esc(acctTxt(a.source)) + '</span>';
-  if (ref) b += '<span class="dsh-badge">보유 조회 ' + esc(acctHm(a.queriedAt)) + ' (참고)</span>';
-  else b += '<span class="dsh-badge">기준 ' + esc(acctTxt(a.queriedAt)) + '</span>';
-  if (st === 'incomplete' || (st === 'ok' && warned)) b += '<span class="dsh-badge dsh-err">불완전 조회 · 참고 표시</span>';
-  else if (st === 'ok') b += '<span class="dsh-badge">확정 ' + esc(acctTxt(a.confirmedBy)) + ' · ' + esc(acctTxt(a.confirmedAt)) + '</span>';
+  b += st === 'reference' ? '<span class="dsh-badge">보유 조회 ' + esc(acctHm(a.queriedAt)) + ' (참고)</span>' : '<span class="dsh-badge">기준 ' + esc(acctTxt(a.queriedAt)) + '</span>';
+  if (st === 'incomplete' || warned) b += '<span class="dsh-badge dsh-err">불완전 조회 · 참고 표시</span>';
   else if (st === 'unconfirmed') b += '<span class="dsh-badge dsh-err">미확정 (참고용) · 입력값 대조 필요</span>';
-  if (ref && a.confirmMarkIgnored === true) b += '<span class="dsh-badge dsh-err">확정 표식 무시됨 — 출처가 증권앱 대조가 아님</span>';
-  if (a.closingIgnored === true) b += '<span class="dsh-badge dsh-none">종료 선언 미적용 — 대시보드 미지원</span>';
-  if (a.truncated === true) b += '<span class="dsh-badge dsh-err">목록 잘림(일부만 조회됨) · 일부 종목 누락 가능</span>';
-  h += '<div class="dsh-card"><div class="dsh-hd"><div class="dsh-nm">증권 계좌</div><div class="dsh-badges">' + b + '</div></div>';
-  if (warned) h += '<div class="dsh-errln">증권사 조회 불완전' + acctWarn(a) + ' · 참고 표시 · 계산 제외</div>';
-  h += '<div class="dsh-lntx">보유 ' + esc(hs.length) + '건</div>';
+  if (a.truncated === true) b += '<span class="dsh-badge dsh-err">목록 잘림 · 일부 종목 누락 가능</span>';
+  h += '<div class="dsh-card"><div class="dsh-hd"><div class="dsh-nm">보유 ' + esc(hs.length) + '종목</div><div class="dsh-badges">' + b + '</div></div>';
+  if (warned) h += '<div class="dsh-errln">증권사 조회 불완전' + acctWarn(a) + ' · 참고 표시</div>';
+  if (!pm.ok) h += '<div class="dsh-errln">보유 계획 ' + (dshIsObj(hp) ? (hp.status === 'none' ? '파일 없음 — 투자팀 미제시' : '읽지 못함(' + esc(acctTxt(hp.status)) + ') ' + esc(acctTxt(hp.err)) ) : '자료 없음 — build-data 구버전') + ' · 판정하지 않습니다</div>';
   for (i = 0; i < hs.length; i++) {
-    x = isRecObj(hs[i]) ? hs[i] : {};
-    nm = typeof x.name === 'string' && x.name !== '' ? x.name : '(이름 없음)';
-    qOk = typeof x.qty === 'number' && isFinite(x.qty) && x.qty > 0; aOk = typeof x.avgPrice === 'number' && isFinite(x.avgPrice) && x.avgPrice > 0;
-    ok = qOk && aOk && !Array.isArray(x.invalid) && typeof x.code === 'string' && /^\d{6}$/.test(x.code);
-    if (ok) { sum += Math.round(x.qty * x.avgPrice); nv++; } else nx++;
-    h += '<div class="dsh-vals"><span><b>' + esc(nm) + '</b> ' + (typeof x.code === 'string' && /^\d{6}$/.test(x.code) ? esc(x.code) : '<span class="dsh-bad">코드 미확인</span>') + '</span><span>수량 <b>' + (qOk ? esc(comma(x.qty)) + '주' : '<span class="dsh-bad">수량 미확인</span>') + '</b></span><span>평단 <b>' +
-      (aOk ? won(x.avgPrice) : '<span class="dsh-bad">단가 미확인</span>') + '</b></span><span>매입금액 <b>' + (qOk && aOk ? won(Math.round(x.qty * x.avgPrice)) : '-') + '</b></span></div>';
+    x = dshIsObj(hs[i]) ? hs[i] : {};
+    code = typeof x.code === 'string' && /^\d{6}$/.test(x.code) ? x.code : null;
+    pl = code !== null && pm.ok && dshHasKey(pm.map, code) ? pm.map[code] : null;
+    if (code !== null && pl !== null) used[code] = true;
+    px = code !== null ? dshPxOf(code) : null; price = px ? px.price : null;
+    j = code !== null && pm.ok && dshHasKey(pm.dup, code) ? {act: 'ERR', label: '규격 오류 — 같은 코드 계획이 2건 이상', why: ''} : dshHoldJudge(price, code === null ? null : pl);
+    pe = dshIsObj(pl) ? dshPlanBad(pl, today) : null;
+    if (pe !== null && j.act !== 'ERR') j = {act: 'ERR', label: '계획 오류 — ' + pe, why: ''};
+    if (code === null) j = {act: 'ERR', label: '코드 미확인 — 판정 불가', why: ''};
+    nm = typeof x.name === 'string' && x.name !== '' ? x.name : (dshIsObj(pl) && typeof pl.name === 'string' && pl.name !== '' ? pl.name : (px && typeof px.name === 'string' && px.name !== '' && px.name !== code ? px.name : '이름 미확인'));
+    cls = j.act === 'SELL_ALL' ? 'dsh-vsell' : (j.act === 'SELL_HALF' ? 'dsh-vhalf' : (j.act === 'HOLD' ? 'dsh-vhold' : (j.act === 'ERR' ? 'dsh-err' : 'dsh-none')));
+    avgOk = typeof x.avgPrice === 'number' && isFinite(x.avgPrice) && x.avgPrice > 0; qOk = typeof x.qty === 'number' && isFinite(x.qty) && x.qty > 0;
+    pnl = price !== null && avgOk ? (price / x.avgPrice - 1) * 100 : null;
+    h += '<div class="dsh-card" style="margin-top:10px"><div class="dsh-hd"><div class="dsh-nm">' + esc(nm) + '<span class="dsh-cd">' + (code !== null ? esc(code) : '<span class="dsh-bad">코드 미확인</span>') + '</span></div><div class="dsh-badges">' +
+      (dshIsObj(pl) && dshHasKey(MODE, pl.mode) ? '<span class="dsh-badge dsh-' + esc(pl.mode) + '">' + esc(MODE[pl.mode].label) + '</span>' : '') + '<span class="dsh-badge ' + cls + '">' + esc(j.label) + '</span></div></div>';
+    if (j.why) h += '<div class="dsh-why">사유 · ' + esc(j.why) + '</div>';
+    c = dshIsObj(pl) ? pl : {};
+    h += '<div class="dsh-vals"><span class="dsh-s">손절 <b>' + (dshIsObj(pl) && typeof c.stop === 'number' ? won(c.stop) : '미제시') + '</b></span><span class="dsh-t">목표1 <b>' + (typeof c.t1 === 'number' ? won(c.t1) : '미제시') + '</b></span><span class="dsh-t">목표2 <b>' + (typeof c.t2 === 'number' ? won(c.t2) : '미제시') + '</b></span></div>';
+    h += '<div class="dsh-vals"><span>현재가 <b>' + (price !== null ? won(price) : '갱신 필요') + '</b></span><span>평단 대비 <b>' + (pnl !== null ? esc((pnl > 0 ? '+' : '') + pnl.toFixed(2)) + '%' : '-') + '</b></span><span>시세 ' + (px ? esc(dshHM(px.ts)) : '없음') + '</span></div>';
+    if (dshIsObj(pl)) {
+      ad = dshDays(typeof c.asOf === 'string' ? c.asOf : null, typeof today === 'string' ? today : null);
+      age = ad === null || ad < 0 ? '<span class="dsh-bad">계획 기준일 오류 ' + esc(rawTxt(c.asOf)) + '</span>' : '계획 기준일 ' + esc(c.asOf) + (ad > 3 ? ' · <span class="dsh-bad">계획 ' + esc(ad) + '일 전 — 투자팀 갱신 필요</span>' : '');
+      h += '<div class="dsh-tm">' + age + '</div>';
+      if (typeof c.issue === 'string' && c.issue !== '') h += '<div class="dsh-why">참고(투자팀 의견 · 앱 판정 아님) · 이슈 ' + esc(c.issue) + '</div>';
+      if (typeof c.addBuy === 'string' && c.addBuy !== '') h += '<div class="dsh-why">참고(투자팀 의견 · 앱 판정 아님) · 추가매수 ' + esc(c.addBuy) + '</div>';
+    }
+    h += '<div class="dsh-tm">구조·트레일링·시간 손절은 미평가</div>';
+    h += '<details class="dsh-det"><summary>보유 상세</summary>평단 ' + (avgOk ? won(x.avgPrice) : '<span class="dsh-bad">단가 미확인</span>') + ' · 수량 ' + (qOk ? esc(comma(x.qty)) + '주' : '<span class="dsh-bad">수량 미확인</span>') + ' · 매입금액 ' + (qOk && avgOk ? won(Math.round(x.qty * x.avgPrice)) : '-') + '</details></div>';
   }
-  if (!calc) h += '<div class="dsh-lntx">참고 — 합계 미산출</div>';
-  else h += '<div class="dsh-lntx">매입금액 합계 <b>' + (nv > 0 ? won(sum) : '-') + '</b>' + (nx > 0 ? ' · ' + esc(nx) + '종목 제외 — 합계 불완전' : '') + '</div>';
+  if (pm.ok) { for (k in pm.map) if (dshHasKey(pm.map, k) && !used[k]) extra++; if (extra > 0) h += '<div class="dsh-lntx">계획만 있음 ' + esc(extra) + '건 (계좌에 없는 종목)</div>'; }
   return h + '</div>';
 }
 function livePaperHTML(p){
@@ -15724,7 +15792,8 @@ function livePaperHTML(p){
     h += '<div class="dsh-grid">';
     for (i = 0; i < ent.length; i++) {
       var e = isRecObj(ent[i]) ? ent[i] : {}, pl = isRecObj(e.plan) ? e.plan : {};
-      h += '<div class="dsh-card"><div class="dsh-hd"><div class="dsh-nm">' + esc(e.code === undefined ? '-' : e.code) + '<span class="dsh-cd">' + esc(e.action === undefined ? '' : e.action) + '</span></div><div class="dsh-badges"><span class="dsh-badge">' + esc(e.validFor === 'next_open' ? '다음 시가' : (e.validFor === undefined ? '-' : e.validFor)) + '</span><span class="dsh-badge dsh-wd">모의</span>' + orderState(e, o) + '</div></div>' +
+      var onm = dshIsObj(e.nameFill) && typeof e.nameFill.name === 'string' && e.nameFill.name !== '' ? e.nameFill.name : (typeof e.name === 'string' && e.name !== '' ? e.name : dshNameOf(e.code)), ocd = e.code === undefined ? '-' : e.code;
+      h += '<div class="dsh-card"><div class="dsh-hd"><div class="dsh-nm">' + esc(onm !== '' ? onm : ocd) + '<span class="dsh-cd">' + (onm !== '' ? esc(ocd) : '이름 미확인') + ' · ' + esc(e.action === undefined ? '' : e.action) + '</span></div><div class="dsh-badges"><span class="dsh-badge">' + esc(e.validFor === 'next_open' ? '다음 시가' : (e.validFor === undefined ? '-' : e.validFor)) + '</span><span class="dsh-badge dsh-wd">모의</span>' + orderState(e, o) + '</div></div>' +
         '<div class="dsh-vals"><span>주문가 <b>' + liveNum(e.price) + '</b></span><span>수량 <b>' + esc(e.qty === undefined ? '-' : e.qty) + '주</b></span><span class="dsh-s">손절 <b>' + liveNum(pl.stop) + '</b></span><span class="dsh-t">목표1 <b>' + liveNum(pl.t1) + '</b></span><span class="dsh-t">목표2 <b>' + liveNum(pl.t2) + '</b></span></div></div>';
     }
     h += '</div>';
@@ -15734,6 +15803,7 @@ function livePaperHTML(p){
 
 function dshHM(ms){ return liveHM(new Date(ms).toISOString()); }
 function dshBand(cl, title, sub){ return '<div class="dsh-band dsh-' + cl + '"><b>' + esc(title) + '</b>' + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</div>'; }
+function dshActive(){ return dshOpen && !document.hidden && G.currentMode === 'recon'; }
 function dshPut(html){ var b = dshBoxId ? document.getElementById(dshBoxId) : null; if (b) b.innerHTML = '<div class="dsh-wrap">' + html + '</div>'; }
 function dshBody(D, banner){
   var h = banner, gen, stale, od;
@@ -15742,8 +15812,8 @@ function dshBody(D, banner){
   stale = isNaN(gen) || Date.now() - gen > DSH_STALE_MS;
   if (stale) h += dshBand('warn', '오래된 자료', isNaN(gen) ? '생성 시각을 확인할 수 없음' : '자료 생성 후 ' + Math.floor((Date.now() - gen) / 60000) + '분 경과 · PC 업로드가 멈췄을 수 있습니다');
   h += '<div class="dsh-top"><b>' + esc(D.today) + '</b><span>자료 생성 ' + esc(liveHM(D.generatedAt)) + '</span></div>';
+  h += liveHoldHTML(D.account, D.holdPlan, D.today);
   h += liveFeedHTML(D.feed);
-  h += liveAccountHTML(D.account);
   h += livePaperHTML(D.paper);
   od = D.paper.orders && D.paper.orders.asOf;
   if (od && String(od).replace(/-/g, '') !== String(D.today).replace(/-/g, '')) h = h.replace('실주문 아님</small>', '오늘 주문 아님 · 가장 최근 파일</small>');
@@ -15758,10 +15828,81 @@ function dshFail(){
 function dshClear(){ dshLastData = null; dshLastOk = 0; dshSeq++; }
 function dshSigOf(tok){ var h = 5381, i; for (i = 0; i < tok.length; i++) h = ((h * 33) ^ tok.charCodeAt(i)) >>> 0; return tok.length + ':' + h; }
 function dshSigNow(){ var t = localStorage.getItem('reconToken'); return t ? dshSigOf(String(t)) : ''; }
+function dshFetchPx(cd){
+  var id, t0, tm, p, done = false;
+  if (dshHasKey(dshInflight, cd)) return dshInflight[cd];
+  id = ++dshReqSeq; t0 = Date.now(); dshReqNo[cd] = id;
+  p = new Promise(function(res, rej){
+    function fin(ok){
+      if (done) return;
+      done = true; clearTimeout(tm);
+      if (dshReqNo[cd] === id) { delete dshReqNo[cd]; delete dshInflight[cd]; }
+      if (ok) res(); else rej();
+    }
+    tm = setTimeout(function(){ fin(false); }, DSH_PX_TIMEOUT_MS);
+    fetchKisPrice(cd).then(function(r){
+      if (!done && dshReqNo[cd] === id && dshIsObj(r)) {
+        if (typeof r.price === 'number' && isFinite(r.price) && r.price > 0) { dshPx[cd] = {price: r.price, name: typeof r.name === 'string' ? r.name : '', ts: t0}; dshFresh[cd] = dshSeq; }
+        if (typeof r.name === 'string' && r.name !== '' && r.name !== cd) dshNm[cd] = r.name;
+      }
+      fin(true);
+    }, function(){ fin(false); });
+  });
+  dshInflight[cd] = p;
+  return p;
+}
+function dshRefreshPx(D, seq){
+  var codes = [], hs = dshIsObj(D) && dshIsObj(D.account) && Array.isArray(D.account.holdings) ? D.account.holdings : [], i, seen = {}, c, k = 0;
+  if (typeof fetchKisPrice !== 'function' || dshPxBusy) return;
+  for (i = 0; i < hs.length; i++) { c = dshIsObj(hs[i]) && typeof hs[i].code === 'string' && /^\d{6}$/.test(hs[i].code) ? hs[i].code : null; if (c !== null && !seen[c]) { seen[c] = true; codes.push(c); } }
+  if (!codes.length) return;
+  dshPxBusy = true;
+  (function next(){
+    var cd;
+    if (seq !== dshSeq || !dshActive() || k >= codes.length) {
+      dshPxBusy = false;
+      if (seq === dshSeq && dshActive() && dshLastData === D) { try { dshPut(dshBody(D, '')); } catch (e3) {} }
+      return;
+    }
+    cd = codes[k++];
+    if (dshFresh[cd] === seq) { next(); return; }
+    dshFetchPx(cd).then(next, next);
+  })();
+}
+function dshNameOf(code){
+  var v;
+  if (typeof code !== 'string') return '';
+  v = dshHasKey(dshNm, code) && typeof dshNm[code] === 'string' ? dshNm[code] : '';
+  if (v === '' && dshHasKey(dshPx, code) && dshIsObj(dshPx[code]) && typeof dshPx[code].name === 'string' && dshPx[code].name !== code) v = dshPx[code].name;
+  return v;
+}
+function dshFillNames(D, seq){
+  var ent = dshIsObj(D) && dshIsObj(D.paper) && dshIsObj(D.paper.orders) && Array.isArray(D.paper.orders.entries) ? D.paper.orders.entries : [], codes = [], i, e, c;
+  if (typeof fetchKisPrice !== 'function' || dshNmBusy) return;
+  for (i = 0; i < ent.length; i++) {
+    e = ent[i]; c = dshIsObj(e) && typeof e.code === 'string' && /^\d{6}$/.test(e.code) ? e.code : null;
+    if (c === null || dshHasKey(dshNm, c) || codes.indexOf(c) >= 0) continue;
+    if ((dshIsObj(e.nameFill) && typeof e.nameFill.name === 'string' && e.nameFill.name !== '') || (typeof e.name === 'string' && e.name !== '')) continue;
+    if (dshNameOf(c) !== '') continue;
+    codes.push(c);
+  }
+  if (!codes.length) return;
+  dshNmBusy = true;
+  (function next(){
+    var cd;
+    if (seq !== dshSeq || !dshActive() || !codes.length) {
+      dshNmBusy = false;
+      if (seq === dshSeq && dshActive() && dshLastData === D) { try { dshPut(dshBody(D, '')); } catch (e3) {} }
+      return;
+    }
+    cd = codes.shift(); dshNm[cd] = '';
+    dshFetchPx(cd).then(next, next);
+  })();
+}
 function dshLoad(){
   var seq, tok, sig, chg, reqSig;
   if (!dshOpen) return;
-  if (document.hidden || G.activeSubTab !== 'dash' || dshBoxId !== 'page-' + G.currentMode + '-dash') return;
+  if (!dshActive()) return;
   tok = localStorage.getItem('reconToken');
   sig = tok ? dshSigOf(String(tok)) : '';
   chg = dshTokSig !== null && sig !== dshTokSig;
@@ -15781,7 +15922,9 @@ function dshLoad(){
     if (r.status !== 200 || !j || j.ok !== true) { dshFail(); return; }
     if (j.data === null || j.data === undefined) { dshPut(dshBand('none', '아직 업로드 없음', 'PC에서 대시보드 자료를 올리면 여기에 표시됩니다')); return; }
     dshLastOk = Date.now(); dshLastData = j.data;
-    try { dshPut(dshBody(j.data, '')); } catch (e2) { dshPut(dshBand('err', '화면 표시 오류', '자료 구조가 예상과 다릅니다')); }
+    try { dshPut(dshBody(j.data, '')); } catch (e2) { dshPut(dshBand('err', '화면 표시 오류', '자료 구조가 예상과 다릅니다')); return; }
+    dshRefreshPx(j.data, seq);
+    dshFillNames(j.data, seq);
   }).catch(function(){
     if (seq !== dshSeq || !dshOpen) return;
     if (dshSigNow() !== reqSig) { dshPut(dshBand('none', '인증 확인 중', '토큰이 바뀌어 다시 조회합니다')); dshLoad(); return; }
@@ -15789,22 +15932,20 @@ function dshLoad(){
   });
 }
 function dshTick(){
-  var id;
   if (!dshOpen) return;
-  if (G.activeSubTab !== 'dash') { window.dshSync(false); return; }
-  id = 'page-' + G.currentMode + '-dash';
-  if (id !== dshBoxId) { dshBoxId = id; dshPut(dshBand('none', '불러오는 중', '')); dshLoad(); return; }
+  if (G.currentMode !== 'recon') { window.dshSync(false); return; }
   if (document.hidden) return;
   dshLoad();
 }
 window.dshSync = function(on){
   if (dshTimer) { clearInterval(dshTimer); dshTimer = null; }
-  if (!on) { dshOpen = false; dshSeq++; dshBoxId = null; return; }
-  dshOpen = true; dshBoxId = 'page-' + G.currentMode + '-dash';
+  if (!on || G.currentMode !== 'recon') { dshOpen = false; dshSeq++; dshBoxId = null; return; }
+  dshOpen = true; dshBoxId = DSH_BOX;
   dshPut(dshBand('none', '불러오는 중', ''));
   dshTimer = setInterval(dshTick, DSH_POLL_MS);
   dshLoad();
 };
+if (G.currentMode === 'recon') window.dshSync(true);
 if (!window.dshVisBound) {
   window.dshVisBound = true;
   document.addEventListener('visibilitychange', function(){ if (dshOpen && !document.hidden) dshTick(); });

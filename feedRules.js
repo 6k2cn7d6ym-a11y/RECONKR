@@ -167,7 +167,32 @@
       counts: {rec: items.length, error: nErr, withdrawn: nWd}};
   }
 
+  /* 보유 계획(§9) 한 항목 검사 — 앱과 빌더가 같은 함수를 쓴다. todayKst = 'YYYY-MM-DD'(호출하는 쪽이 넘기는 KST 오늘). 위반 사유 문자열, 정상이면 null */
+  function checkHoldItem(it, todayKst){
+    var own = function(o, k){ return Object.prototype.hasOwnProperty.call(o, k); }, keys = ['code', 'name', 'mode', 'stop', 't1', 't2', 't1Done', 'issue', 'addBuy', 'asOf'], i, v, ln = [], d, td;
+    var cal = function(iso){ var t; if (!(typeof iso === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(iso))) return NaN; t = Date.parse(iso + 'T00:00:00Z'); return !isNaN(t) && new Date(t).toISOString().slice(0, 10) === iso ? t : NaN; };
+    if (it === null || typeof it !== 'object' || Array.isArray(it)) return '항목이 객체가 아님';
+    if (own(it, 'planErr')) return 'planErr 칸은 빌더 전용 — 투자팀 작성 금지';
+    for (i = 0; i < keys.length; i++) if (!own(it, keys[i])) return keys[i] + ' 칸 없음';
+    if (!(typeof it.code === 'string' && /^\d{6}$/.test(it.code))) return 'code가 6자리 숫자 문자열이 아님';
+    if (!(it.name === null || typeof it.name === 'string')) return 'name이 문자열 또는 null이 아님';
+    if (!(it.mode === null || it.mode === 'momo' || it.mode === 'swing' || it.mode === 'core')) return 'mode가 momo/swing/core/null이 아님';
+    for (i = 1; i < 4; i++) { v = it[keys[i + 2]]; if (!(v === null || validPx(v))) return keys[i + 2] + '가 0보다 큰 정수 또는 null이 아님'; }
+    if (typeof it.t1Done !== 'boolean') return 't1Done이 불리언이 아님';
+    if (!(it.issue === null || typeof it.issue === 'string')) return 'issue가 문자열 또는 null이 아님';
+    if (!(it.addBuy === null || typeof it.addBuy === 'string')) return 'addBuy가 문자열 또는 null이 아님';
+    ['stop', 't1', 't2'].forEach(function(k){ if (it[k] !== null) ln.push(it[k]); });
+    for (i = 1; i < ln.length; i++) if (ln[i - 1] >= ln[i]) return '선 순서(손절<목표1<목표2) 위반';
+    if (!(typeof it.asOf === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(it.asOf))) return 'asOf가 YYYY-MM-DD가 아님';
+    d = cal(it.asOf);
+    if (isNaN(d)) return 'asOf ' + it.asOf + '가 달력에 없는 날짜';
+    td = cal(todayKst);
+    if (isNaN(td)) return '오늘(KST) 날짜 인자가 올바르지 않음';
+    if (d > td) return 'asOf ' + it.asOf + '가 오늘(KST ' + todayKst + ')보다 미래';
+    return null;
+  }
+
   return {MODE_KEYS: MODE_KEYS, BASE_KIND: BASE_KIND, ISO_RE: ISO_RE, SPEC_FIELDS: SPEC_FIELDS, has: has, validPx: validPx, pxState: pxState, rawTxt: rawTxt,
     isRecObj: isRecObj, isoM: isoM, isKind: isKind, baseInfo: baseInfo, strNE: strNE, isoOk: isoOk, got: got,
-    judgeRec: judgeRec, pickLatest: pickLatest, judgeFeed: judgeFeed};
+    judgeRec: judgeRec, pickLatest: pickLatest, judgeFeed: judgeFeed, checkHoldItem: checkHoldItem};
 });
