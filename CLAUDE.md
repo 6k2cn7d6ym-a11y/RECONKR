@@ -211,7 +211,7 @@ validateTVGate()             // 거래대금 게이트 정당성
 ### 브랜치 운영 규칙 (★ 2026-09-20 갱신)
 
 - **push = 즉시 배포.** `main`에 push하는 순간 GitHub Pages가 반영된다.
-- **팀(Claude Code 세션) 작업은 `dev` 브랜치에서만.** `git push origin dev`.
+- **팀(Claude Code 세션) 작업은 로컬 `dev` 브랜치에서만. `dev`는 push 금지(로컬 보관용).**
 - **`main` 머지는 대표 채팅 "머지 승인" 이후에만.** PR 불요. 팀 자체 판단으로 main push 금지 — 위반 시 즉시 revert.
 - **머지 명령:** `git checkout main && git fetch origin && git merge --no-ff dev && git push origin main`
 - **force push 금지.** `.claude/settings.json` `disallowedTools`로 도구 레벨 차단 (`git push --force` / `git push -f` 호출 불가).
