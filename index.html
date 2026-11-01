@@ -15758,7 +15758,7 @@ function liveHoldHTML(a, hp, today){
   hs = a.holdings; warned = a.warned === true || a.truncated === true;
   pm = dshPlanMap(hp);
   b = '<span class="dsh-badge dsh-held">출처 ' + esc(acctTxt(a.source)) + '</span>';
-  b += st === 'reference' ? '<span class="dsh-badge">보유 조회 ' + esc(acctHm(a.queriedAt)) + ' (참고)</span>' : (a.auto === true ? '<span class="dsh-badge dsh-held">자동 조회 확정 ' + esc(acctHm(a.queriedAt)) + '</span>' : '<span class="dsh-badge">기준 ' + esc(acctTxt(a.queriedAt)) + '</span>');
+  b += st === 'reference' ? '<span class="dsh-badge">보유 조회 ' + esc(acctHm(a.queriedAt)) + ' (참고)</span>' : (a.auto === true ? '<span class="dsh-badge dsh-held">자동 조회 확정 ' + esc(acctHm(a.queriedAt)) + '</span>' + (a.sync && typeof a.sync.lastSuccessAt === 'string' && /T\d{2}:\d{2}/.test(a.sync.lastSuccessAt) ? '<span class="dsh-badge">최종 확인 ' + esc(acctHm(a.sync.lastSuccessAt)) + '</span>' : '') : '<span class="dsh-badge">기준 ' + esc(acctTxt(a.queriedAt)) + '</span>');
   if (dshIsObj(a.sync) && typeof a.sync.warn === 'string' && a.sync.warn !== '') b += '<span class="dsh-badge dsh-err">' + esc(a.sync.warn) + '</span>';
   if (st === 'incomplete' || warned) b += '<span class="dsh-badge dsh-err">불완전 조회 · 참고 표시</span>';
   else if (st === 'unconfirmed') b += '<span class="dsh-badge dsh-err">미확정 (참고용) · 입력값 대조 필요</span>';
