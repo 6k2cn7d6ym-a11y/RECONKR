@@ -15568,7 +15568,7 @@ document.addEventListener('visibilitychange', function(){
 var DSH_POLL_MS = 60000, DSH_STALE_MS = 30 * 60 * 1000;
 // kisAuthHeaders·kisGet 각 8초 기한 합보다 길게: 정상 경로는 자르지 않고 끝나지 않는 요청만 끊는다
 var DSH_PX_TIMEOUT_MS = 20000;
-var DSH_PX_STALE_MS = 3 * 60 * 1000, DSH_BOX = 'dshMain';
+var DSH_PX_STALE_MS = 3 * 60 * 1000, DSH_BOX = 'dshMain', DSH_REC_DAYS = 10;
 var dshOpen = false, dshTimer = null, dshSeq = 0, dshBoxId = null, dshLastOk = 0, dshLastData = null, dshTokSig = null, dshPx = {}, dshPxBusy = false, dshInflight = {}, dshReqSeq = 0, dshReqNo = {}, dshFresh = {}, dshNm = {}, dshNmBusy = false;
 
 var MODE = {
@@ -15611,6 +15611,37 @@ function liveBand(feed){
   else { cl = 'err'; tx = '<b>피드 상태 불명</b><small>' + esc(rawTxt(st)) + '</small>'; }
   return '<div class="dsh-band dsh-' + cl + '">' + tx + '</div>';
 }
+function dshRecLevel(label, key, r, price, cls){
+  var v = r[key], pct, st;
+  if (!validPx(v)) return '<span class="' + cls + '">' + label + ' <b>미제시</b></span>';
+  pct = (v / price - 1) * 100;
+  if (key === 'stop') st = price <= v ? '이탈' : '미이탈';
+  else st = price >= v ? '도달' : '미도달';
+  return '<span class="' + cls + '">' + label + ' <b>' + (pct > 0 ? '+' : '') + pct.toFixed(2) + '% · ' + st + '</b></span>';
+}
+function dshRecPxHTML(r, j, wd){
+  var px, price;
+  if (!isRecObj(r) || !j.codeOk || wd) return '';
+  px = dshPxOf(r.code); price = px ? px.price : null;
+  if (price === null) return '<div class="dsh-vals"><span>현재가 <b>시세 확인 중 또는 갱신 필요</b></span></div>';
+  if (!j.calcOk) return '<div class="dsh-vals"><span>현재가 <b>' + won(price) + '</b></span><span>시세 ' + esc(dshHM(px.ts)) + '</span><span class="dsh-bad">규격 오류로 손절·목표 거리는 계산하지 않음</span></div>';
+  return '<div class="dsh-vals"><span>현재가 <b>' + won(price) + '</b></span><span>기준 대비 <b>' + ((price / r.base - 1) * 100 > 0 ? '+' : '') + ((price / r.base - 1) * 100).toFixed(2) + '%</b></span><span>시세 ' + esc(dshHM(px.ts)) + '</span></div>' +
+    '<div class="dsh-vals">' + dshRecLevel('손절', 'stop', r, price, 'dsh-s') + dshRecLevel('목표1', 't1', r, price, 'dsh-t') + dshRecLevel('목표2', 't2', r, price, 'dsh-t') + '</div>';
+}
+function dshRecCodes(D){
+  var f = dshIsObj(D) && dshIsObj(D.feed) ? D.feed : null, recs = f && Array.isArray(f.recs) ? f.recs : [], out = [], i, it, r, c, t;
+  if (!f || f.status === 'none' || f.status === 'broken' || f.status === 'error') return out;
+  for (i = 0; i < recs.length; i++) {
+    it = recs[i]; r = dshIsObj(it) && dshIsObj(it.rec) ? it.rec : null;
+    if (r === null || it.state === 'withdrawn' || r.withdrawn === true) continue;
+    c = typeof r.code === 'string' && /^\d{6}$/.test(r.code) ? r.code : null;
+    if (c === null) continue;
+    t = typeof r.issuedAt === 'string' ? Date.parse(r.issuedAt) : NaN;
+    if (isNaN(t) || Date.now() - t > DSH_REC_DAYS * 86400000) continue;
+    out.push(c);
+  }
+  return out;
+}
 function liveRecCard(it){
   var r = it.rec, j = judgeRec(r), bad = !isRecObj(r), errs = j.errs.slice(), wd = j.state === 'withdrawn', bi = j.bi, nm, badges, ie = Array.isArray(it.errs) ? it.errs : [], q;
   for (q = 0; q < ie.length; q++) { if (errs.indexOf(ie[q]) < 0) errs.push(ie[q]); }
@@ -15624,6 +15655,7 @@ function liveRecCard(it){
     (wd ? '<span class="dsh-badge dsh-wd">철회</span>' : '') + (errs.length ? '<span class="dsh-badge dsh-err">규격 오류</span>' : '');
   return '<div class="dsh-card dsh-rec"><div class="dsh-hd"><div class="dsh-nm">' + esc(nm) + '<span class="dsh-cd">' + esc(bad ? '' : (j.codeOk ? r.code : '코드 오류 ' + rawTxt(r.code))) + '</span></div><div class="dsh-badges">' + badges + '</div></div>' +
     '<div class="dsh-vals"><span class="dsh-s">손절 <b>' + cellOf(j, r, 'stop') + '</b></span><span>기준(' + esc(bi.tag) + ') <b>' + (j.px.base === 'ok' ? won(r.base) : badCell(r.base)) + '</b></span><span class="dsh-t">목표1 <b>' + cellOf(j, r, 't1') + '</b></span><span class="dsh-t">목표2 <b>' + cellOf(j, r, 't2') + '</b></span></div>' +
+    dshRecPxHTML(bad ? null : r, j, wd) +
     '<div class="dsh-tm">기준가: ' + esc(bi.txt) + ' · 현재가는 앱 시세 조회 후 표시(피드에는 없음)</div>' +
     (errs.length ? '<div class="dsh-errln">규격 오류 · ' + esc(errs.join(' / ')) + '</div>' : '') +
     '<div class="dsh-why">근거 · ' + esc(bad ? '' : (j.whyOk ? r.why : '근거 오류 ' + rawTxt(r.why))) + '</div>' +
@@ -15852,13 +15884,17 @@ function dshFetchPx(cd){
   return p;
 }
 function dshRefreshPx(D, seq){
-  var codes = [], hs = dshIsObj(D) && dshIsObj(D.account) && Array.isArray(D.account.holdings) ? D.account.holdings : [], i, seen = {}, c, k = 0;
+  var codes = [], hs = dshIsObj(D) && dshIsObj(D.account) && Array.isArray(D.account.holdings) ? D.account.holdings : [], i, seen = {}, c, k = 0, hn = 0;
   if (typeof fetchKisPrice !== 'function' || dshPxBusy) return;
   for (i = 0; i < hs.length; i++) { c = dshIsObj(hs[i]) && typeof hs[i].code === 'string' && /^\d{6}$/.test(hs[i].code) ? hs[i].code : null; if (c !== null && !seen[c]) { seen[c] = true; codes.push(c); } }
+  hn = codes.length;
+  hs = dshRecCodes(D);
+  for (i = 0; i < hs.length; i++) { if (!seen[hs[i]]) { seen[hs[i]] = true; codes.push(hs[i]); } }
   if (!codes.length) return;
   dshPxBusy = true;
   (function next(){
     var cd;
+    if (k === hn && hn > 0 && k < codes.length && seq === dshSeq && dshActive() && dshLastData === D) { try { dshPut(dshBody(D, '')); } catch (e4) {} }
     if (seq !== dshSeq || !dshActive() || k >= codes.length) {
       dshPxBusy = false;
       if (seq === dshSeq && dshActive() && dshLastData === D) { try { dshPut(dshBody(D, '')); } catch (e3) {} }
