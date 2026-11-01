@@ -174,7 +174,7 @@
     if (it === null || typeof it !== 'object' || Array.isArray(it)) return '항목이 객체가 아님';
     if (own(it, 'planErr')) return 'planErr 칸은 빌더 전용 — 투자팀 작성 금지';
     for (i = 0; i < keys.length; i++) if (!own(it, keys[i])) return keys[i] + ' 칸 없음';
-    if (!(typeof it.code === 'string' && /^\d{6}$/.test(it.code))) return 'code가 6자리 숫자 문자열이 아님';
+    if (!(typeof it.code === 'string' && /^[0-9A-Z]{6}$/.test(it.code))) return 'code가 6자리 숫자·대문자 영문 문자열이 아님';
     if (!(it.name === null || typeof it.name === 'string')) return 'name이 문자열 또는 null이 아님';
     if (!(it.mode === null || it.mode === 'momo' || it.mode === 'swing' || it.mode === 'core')) return 'mode가 momo/swing/core/null이 아님';
     for (i = 1; i < 4; i++) { v = it[keys[i + 2]]; if (!(v === null || validPx(v))) return keys[i + 2] + '가 0보다 큰 정수 또는 null이 아님'; }

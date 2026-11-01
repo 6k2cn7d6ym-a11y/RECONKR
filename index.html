@@ -15686,6 +15686,18 @@ function orderState(e, o){
 function acctTxt(v){ return typeof v === 'string' ? v : rawTxt(v); }
 function acctWarn(a){ return (typeof a.pageError === 'string' ? ' · pageError ' + (a.pageError === '' ? '(내용 없음)' : esc(a.pageError)) : '') + (typeof a.schemaWarn === 'string' ? ' · schemaWarn ' + (a.schemaWarn === '' ? '(내용 없음)' : esc(a.schemaWarn)) : ''); }
 function acctHm(v){ var m = typeof v === 'string' ? /T(\d{2}:\d{2})/.exec(v) : null; return m ? m[1] : acctTxt(v); }
+function acctMdHm(v){ var m = typeof v === 'string' ? /(\d{2}-\d{2})T(\d{2}:\d{2})/.exec(v) : null; return m ? m[1] + ' ' + m[2] : acctTxt(v); }
+var ACCT_FAIL_TXT = {net: '네트워크', auth: '인증', upstream: '서버 응답 오류', parse: '응답 형식', incomplete: '불완전 응답', invalid_row: '종목 행 오류', protect: '보호 규칙으로 교체 중단', changed: '조회 중 파일 변경 감지', unstable: '급변 후 재조회 불일치', empty_pending: '빈 결과 재확인 대기'};
+function acctSyncHTML(sy){
+  var n, cls;
+  if (sy === null || sy === undefined) return '';
+  if (!dshIsObj(sy)) return '<div class="dsh-errln">자동 조회 상태를 읽지 못함</div>';
+  if (sy.broken === true) return '<div class="dsh-errln">자동 조회 상태 파일을 읽지 못함 · 마지막 정상 값 표시</div>';
+  if (sy.lastResult !== 'fail') return '';
+  n = typeof sy.failCount === 'number' ? sy.failCount : 0;
+  return '<div class="dsh-errln">' + (n >= 3 ? '<b>' : '') + '자동 조회 실패(' + esc(typeof sy.failClass === 'string' ? (dshHasKey(ACCT_FAIL_TXT, sy.failClass) ? ACCT_FAIL_TXT[sy.failClass] : sy.failClass) : '분류 없음') + ')' + (n >= 2 ? ' · 연속 ' + esc(n) + '회' : '') + (n >= 3 ? '</b>' : '') +
+    ' · 마지막 정상 값 표시 · 최종 성공 ' + (typeof sy.lastSuccessAt === 'string' ? esc(acctMdHm(sy.lastSuccessAt)) : '기록 없음') + '</div>';
+}
 function dshHasKey(o, k){ return o !== null && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k); }
 function dshIsObj(o){ return o !== null && typeof o === 'object' && !Array.isArray(o); }
 function dshPlanNum(v){ return v === null || (typeof v === 'number' && isFinite(v) && v > 0 && Math.floor(v) === v); }
@@ -15723,7 +15735,7 @@ function dshPlanMap(hp){
   if (!dshIsObj(hp) || hp.status !== 'ok' || !Array.isArray(hp.items)) return m;
   m.ok = true;
   for (i = 0; i < hp.items.length; i++) {
-    it = hp.items[i]; c = dshIsObj(it) && typeof it.code === 'string' && /^\d{6}$/.test(it.code) ? it.code : null;
+    it = hp.items[i]; c = dshIsObj(it) && typeof it.code === 'string' && /^[0-9A-Z]{6}$/.test(it.code) ? it.code : null;
     if (c === null) continue;
     if (dshHasKey(m.map, c)) m.dup[c] = true; else { m.map[c] = it; m.n++; }
   }
@@ -15737,7 +15749,7 @@ function liveHoldHTML(a, hp, today){
   var h = '<div class="dsh-sec">내 보유종목 대응<small>손절·목표는 투자팀 계획 · 매도/홀딩 판정은 앱이 현재가와 비교</small></div>', st, hs, i, x, nm, code, pm, pl, px, price, j, c, cls, pnl, age, ad, b = '', warned, used = {}, extra = 0, k, avgOk, qOk, pe;
   if (!dshIsObj(a)) return h + '<div class="dsh-empty">계좌 자료 없음 — data.js가 구버전입니다. node build-data.js 를 다시 실행하세요.</div>';
   st = a.status;
-  if (st === 'missing') return h + '<div class="dsh-empty">계좌 미입력 — 대표님 회신 대기</div>';
+  if (st === 'missing') return h + '<div class="dsh-empty">계좌 미입력 — 대표님 회신 대기</div>' + acctSyncHTML(a.sync);
   if (st === 'broken' || st === 'error') return h + '<div class="dsh-errln">계좌 파일 오류(' + esc(acctTxt(st)) + ') · ' + esc(acctTxt(a.reason)) + ' · 값을 표시하지 않습니다</div>';
   if (st === 'future-query') return h + '<div class="dsh-errln">조회 시각 이상 — 미래 시각, 값을 표시하지 않습니다</div>';
   if (st === 'fetch-failed') return h + '<div class="dsh-errln">계좌 조회 실패 · 값을 표시하지 않습니다' + acctWarn(a) + '</div>';
@@ -15746,16 +15758,18 @@ function liveHoldHTML(a, hp, today){
   hs = a.holdings; warned = a.warned === true || a.truncated === true;
   pm = dshPlanMap(hp);
   b = '<span class="dsh-badge dsh-held">출처 ' + esc(acctTxt(a.source)) + '</span>';
-  b += st === 'reference' ? '<span class="dsh-badge">보유 조회 ' + esc(acctHm(a.queriedAt)) + ' (참고)</span>' : '<span class="dsh-badge">기준 ' + esc(acctTxt(a.queriedAt)) + '</span>';
+  b += st === 'reference' ? '<span class="dsh-badge">보유 조회 ' + esc(acctHm(a.queriedAt)) + ' (참고)</span>' : (a.auto === true ? '<span class="dsh-badge dsh-held">자동 조회 확정 ' + esc(acctHm(a.queriedAt)) + '</span>' : '<span class="dsh-badge">기준 ' + esc(acctTxt(a.queriedAt)) + '</span>');
+  if (dshIsObj(a.sync) && typeof a.sync.warn === 'string' && a.sync.warn !== '') b += '<span class="dsh-badge dsh-err">' + esc(a.sync.warn) + '</span>';
   if (st === 'incomplete' || warned) b += '<span class="dsh-badge dsh-err">불완전 조회 · 참고 표시</span>';
   else if (st === 'unconfirmed') b += '<span class="dsh-badge dsh-err">미확정 (참고용) · 입력값 대조 필요</span>';
   if (a.truncated === true) b += '<span class="dsh-badge dsh-err">목록 잘림 · 일부 종목 누락 가능</span>';
   h += '<div class="dsh-card"><div class="dsh-hd"><div class="dsh-nm">보유 ' + esc(hs.length) + '종목</div><div class="dsh-badges">' + b + '</div></div>';
+  h += acctSyncHTML(a.sync);
   if (warned) h += '<div class="dsh-errln">증권사 조회 불완전' + acctWarn(a) + ' · 참고 표시</div>';
   if (!pm.ok) h += '<div class="dsh-errln">보유 계획 ' + (dshIsObj(hp) ? (hp.status === 'none' ? '파일 없음 — 투자팀 미제시' : '읽지 못함(' + esc(acctTxt(hp.status)) + ') ' + esc(acctTxt(hp.err)) ) : '자료 없음 — build-data 구버전') + ' · 판정하지 않습니다</div>';
   for (i = 0; i < hs.length; i++) {
     x = dshIsObj(hs[i]) ? hs[i] : {};
-    code = typeof x.code === 'string' && /^\d{6}$/.test(x.code) ? x.code : null;
+    code = typeof x.code === 'string' && /^[0-9A-Z]{6}$/.test(x.code) ? x.code : null;
     pl = code !== null && pm.ok && dshHasKey(pm.map, code) ? pm.map[code] : null;
     if (code !== null && pl !== null) used[code] = true;
     px = code !== null ? dshPxOf(code) : null; price = px ? px.price : null;
@@ -15886,7 +15900,7 @@ function dshFetchPx(cd){
 function dshRefreshPx(D, seq){
   var codes = [], hs = dshIsObj(D) && dshIsObj(D.account) && Array.isArray(D.account.holdings) ? D.account.holdings : [], i, seen = {}, c, k = 0, hn = 0;
   if (typeof fetchKisPrice !== 'function' || dshPxBusy) return;
-  for (i = 0; i < hs.length; i++) { c = dshIsObj(hs[i]) && typeof hs[i].code === 'string' && /^\d{6}$/.test(hs[i].code) ? hs[i].code : null; if (c !== null && !seen[c]) { seen[c] = true; codes.push(c); } }
+  for (i = 0; i < hs.length; i++) { c = dshIsObj(hs[i]) && typeof hs[i].code === 'string' && /^[0-9A-Z]{6}$/.test(hs[i].code) ? hs[i].code : null; if (c !== null && !seen[c]) { seen[c] = true; codes.push(c); } }
   hn = codes.length;
   hs = dshRecCodes(D);
   for (i = 0; i < hs.length; i++) { if (!seen[hs[i]]) { seen[hs[i]] = true; codes.push(hs[i]); } }
@@ -15916,7 +15930,7 @@ function dshFillNames(D, seq){
   var ent = dshIsObj(D) && dshIsObj(D.paper) && dshIsObj(D.paper.orders) && Array.isArray(D.paper.orders.entries) ? D.paper.orders.entries : [], codes = [], i, e, c;
   if (typeof fetchKisPrice !== 'function' || dshNmBusy) return;
   for (i = 0; i < ent.length; i++) {
-    e = ent[i]; c = dshIsObj(e) && typeof e.code === 'string' && /^\d{6}$/.test(e.code) ? e.code : null;
+    e = ent[i]; c = dshIsObj(e) && typeof e.code === 'string' && /^[0-9A-Z]{6}$/.test(e.code) ? e.code : null;
     if (c === null || dshHasKey(dshNm, c) || codes.indexOf(c) >= 0) continue;
     if ((dshIsObj(e.nameFill) && typeof e.nameFill.name === 'string' && e.nameFill.name !== '') || (typeof e.name === 'string' && e.name !== '')) continue;
     if (dshNameOf(c) !== '') continue;
