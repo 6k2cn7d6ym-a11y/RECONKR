@@ -16008,11 +16008,21 @@ function dshLoad(){
   });
 }
 function dshRefresh(){
-  var b;
+  var b, rfSeq;
   if (!dshOpen || !dshActive() || dshBusy()) return;
   dshNmTry = {};
   b = document.getElementById('dshRf'); if (b) { b.disabled = true; b.textContent = '갱신 중…'; }
   dshLoad();
+  rfSeq = dshLoadSeq;
+  if (rfSeq === 0) return;
+  setTimeout(function(){
+    var b2;
+    if (dshLoadSeq !== rfSeq) return;
+    dshLoadSeq = 0; dshSeq++;
+    if (!dshOpen || !dshActive()) return;
+    if (dshLastData) { try { dshPut(dshBody(dshLastData, '')); return; } catch (e6) {} }
+    b2 = document.getElementById('dshRf'); if (b2) { b2.disabled = false; b2.textContent = '새로고침'; }
+  }, DSH_LOAD_GUARD_MS);
 }
 function dshTick(){
   if (!dshOpen) return;
