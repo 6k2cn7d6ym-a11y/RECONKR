@@ -15973,7 +15973,7 @@ function dshFillNames(D, seq){
   })();
 }
 function dshLoad(){
-  var seq, tok, sig, chg, reqSig;
+  var seq, tok, sig, chg, reqSig, gt;
   if (!dshOpen) return;
   if (!dshActive()) return;
   tok = localStorage.getItem('reconToken');
@@ -15984,10 +15984,19 @@ function dshLoad(){
   if (!tok) { dshNeedToken(); return; }
   if (chg) dshPut(dshBand('none', '인증 확인 중', '토큰이 바뀌어 다시 조회합니다'));
   seq = ++dshSeq; reqSig = sig; dshLoadSeq = seq; dshLoadAt = Date.now();
+  gt = setTimeout(function(){
+    var b2;
+    if (dshLoadSeq !== seq) return;
+    dshLoadSeq = 0; dshSeq++;
+    if (!dshOpen || !dshActive()) return;
+    if (dshLastData) { try { dshPut(dshBody(dshLastData, '')); return; } catch (e6) {} }
+    b2 = document.getElementById('dshRf'); if (b2) { b2.disabled = false; b2.textContent = '새로고침'; }
+  }, DSH_LOAD_GUARD_MS);
   workerFetch(WORKER_URL + '/reconkr/dash', {cache: 'no-store'}).then(function(res){
     return res.text().then(function(t){ return {status: res.status, text: t}; });
   }).then(function(r){
     var j = null;
+    clearTimeout(gt);
     if (dshLoadSeq === seq) dshLoadSeq = 0;
     if (seq !== dshSeq || !dshOpen) return;
     if (dshSigNow() !== reqSig) { dshPut(dshBand('none', '인증 확인 중', '토큰이 바뀌어 다시 조회합니다')); dshLoad(); return; }
@@ -16001,6 +16010,7 @@ function dshLoad(){
     dshFillNames(j.data, seq);
     if (dshBusy()) { try { dshPut(dshBody(j.data, '')); } catch (e5) {} }
   }).catch(function(){
+    clearTimeout(gt);
     if (dshLoadSeq === seq) dshLoadSeq = 0;
     if (seq !== dshSeq || !dshOpen) return;
     if (dshSigNow() !== reqSig) { dshPut(dshBand('none', '인증 확인 중', '토큰이 바뀌어 다시 조회합니다')); dshLoad(); return; }
@@ -16008,21 +16018,11 @@ function dshLoad(){
   });
 }
 function dshRefresh(){
-  var b, rfSeq;
+  var b;
   if (!dshOpen || !dshActive() || dshBusy()) return;
   dshNmTry = {};
   b = document.getElementById('dshRf'); if (b) { b.disabled = true; b.textContent = '갱신 중…'; }
   dshLoad();
-  rfSeq = dshLoadSeq;
-  if (rfSeq === 0) return;
-  setTimeout(function(){
-    var b2;
-    if (dshLoadSeq !== rfSeq) return;
-    dshLoadSeq = 0; dshSeq++;
-    if (!dshOpen || !dshActive()) return;
-    if (dshLastData) { try { dshPut(dshBody(dshLastData, '')); return; } catch (e6) {} }
-    b2 = document.getElementById('dshRf'); if (b2) { b2.disabled = false; b2.textContent = '새로고침'; }
-  }, DSH_LOAD_GUARD_MS);
 }
 function dshTick(){
   if (!dshOpen) return;
