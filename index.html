@@ -15710,8 +15710,8 @@ function acctSyncHTML(sy){
 function dshHasKey(o, k){ return o !== null && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k); }
 function dshIsObj(o){ return o !== null && typeof o === 'object' && !Array.isArray(o); }
 function dshPlanNum(v){ return v === null || (typeof v === 'number' && isFinite(v) && v > 0 && Math.floor(v) === v); }
-function dshHoldJudge(price, plan){
-  var keys = ['stop', 't1', 't2'], i, s, a, b;
+function dshHoldJudge(price, plan, qty){
+  var keys = ['stop', 't1', 't2'], i, s, a, b, cmp;
   if (!(typeof price === 'number' && isFinite(price) && price > 0)) return {act: 'STALE', label: '갱신 필요', why: '현재가를 받지 못했거나 오래됨'};
   if (!dshIsObj(plan)) return {act: 'WAIT', label: '판단 대기 — 투자팀 미제시', why: ''};
   for (i = 0; i < keys.length; i++) if (!dshHasKey(plan, keys[i]) || !dshPlanNum(plan[keys[i]])) return {act: 'ERR', label: '규격 오류 — ' + keys[i] + ' 칸 없음 또는 형식 오류', why: ''};
@@ -15721,7 +15721,11 @@ function dshHoldJudge(price, plan){
   if ((s !== null && a !== null && s >= a) || (a !== null && b !== null && a >= b) || (s !== null && b !== null && s >= b)) return {act: 'ERR', label: '규격 오류 — 선 순서(손절<목표1<목표2) 위반', why: ''};
   if (s !== null && price <= s) return {act: 'SELL_ALL', label: '손절선 이탈 — 매도', why: '현재가 ' + won(price) + ' ≤ 손절 ' + won(s)};
   if (b !== null && price >= b) return {act: 'SELL_ALL', label: '목표2 도달 — 잔량 익절', why: '현재가 ' + won(price) + ' ≥ 목표2 ' + won(b)};
-  if (a !== null && price >= a && !plan.t1Done) return {act: 'SELL_HALF', label: '목표1 도달 — 절반 익절', why: '현재가 ' + won(price) + ' ≥ 목표1 ' + won(a)};
+  if (a !== null && price >= a && !plan.t1Done) {
+    cmp = dshHasKey(plan, 'basisQty') && typeof plan.basisQty === 'number' && typeof qty === 'number' && isFinite(qty) && qty > 0;
+    if (cmp && qty < plan.basisQty) return {act: 'CHECK', label: '목표1 실행 여부 확인 필요', why: '보유 ' + qty + '주 < 계획 기준 ' + plan.basisQty + '주 · 투자팀이 t1Done을 갱신하기 전 (현재가 ' + won(price) + ' ≥ 목표1 ' + won(a) + ')'};
+    return {act: 'SELL_HALF', label: '목표1 도달 — 절반 익절' + (cmp ? '' : ' · 이미 실행했으면 무시(수량 기준 미제시)'), why: '현재가 ' + won(price) + ' ≥ 목표1 ' + won(a)};
+  }
   if (s === null) return {act: 'LIMITED', label: '손절 기준 미제시 — 판단 제한', why: '손절선이 없어 홀딩 여부를 판단할 수 없음 (현재가 ' + won(price) + ')'};
   return {act: 'HOLD', label: plan.t1Done ? '홀딩(목표1 실행됨)' : '홀딩', why: '손절·목표 어느 선도 닿지 않음 (현재가 ' + won(price) + ')'};
 }
@@ -15755,7 +15759,7 @@ function dshPxOf(code){
   return dshIsObj(p) && typeof p.price === 'number' && Date.now() - p.ts <= DSH_PX_STALE_MS ? p : null;
 }
 function liveHoldHTML(a, hp, today){
-  var h = '<div class="dsh-sec">내 보유종목 대응<small>손절·목표는 투자팀 계획 · 매도/홀딩 판정은 앱이 현재가와 비교</small></div>', st, hs, i, x, nm, code, pm, pl, px, price, j, c, cls, pnl, age, ad, b = '', warned, used = {}, extra = 0, k, avgOk, qOk, pe;
+  var h = '<div class="dsh-sec">내 보유종목 대응<small>손절·목표는 투자팀 계획 · 매도/홀딩 판정은 앱이 현재가와 비교</small></div>', st, hs, i, x, nm, code, pm, pl, px, price, j, c, cls, pnl, age, ad, b = '', warned, used = {}, extra = 0, k, avgOk, qOk, pe, xb;
   if (!dshIsObj(a)) return h + '<div class="dsh-empty">계좌 자료 없음 — data.js가 구버전입니다. node build-data.js 를 다시 실행하세요.</div>';
   st = a.status;
   if (st === 'missing') return h + '<div class="dsh-empty">계좌 미입력 — 대표님 회신 대기</div>' + acctSyncHTML(a.sync);
@@ -15782,16 +15786,19 @@ function liveHoldHTML(a, hp, today){
     pl = code !== null && pm.ok && dshHasKey(pm.map, code) ? pm.map[code] : null;
     if (code !== null && pl !== null) used[code] = true;
     px = code !== null ? dshPxOf(code) : null; price = px ? px.price : null;
-    j = code !== null && pm.ok && dshHasKey(pm.dup, code) ? {act: 'ERR', label: '규격 오류 — 같은 코드 계획이 2건 이상', why: ''} : dshHoldJudge(price, code === null ? null : pl);
+    avgOk = typeof x.avgPrice === 'number' && isFinite(x.avgPrice) && x.avgPrice > 0; qOk = typeof x.qty === 'number' && isFinite(x.qty) && x.qty > 0;
+    j = code !== null && pm.ok && dshHasKey(pm.dup, code) ? {act: 'ERR', label: '규격 오류 — 같은 코드 계획이 2건 이상', why: ''} : dshHoldJudge(price, code === null ? null : pl, qOk ? x.qty : null);
     pe = dshIsObj(pl) ? dshPlanBad(pl, today) : null;
     if (pe !== null && j.act !== 'ERR') j = {act: 'ERR', label: '계획 오류 — ' + pe, why: ''};
     if (code === null) j = {act: 'ERR', label: '코드 미확인 — 판정 불가', why: ''};
     nm = typeof x.name === 'string' && x.name !== '' ? x.name : (dshIsObj(pl) && typeof pl.name === 'string' && pl.name !== '' ? pl.name : (px && typeof px.name === 'string' && px.name !== '' && px.name !== code ? px.name : '이름 미확인'));
-    cls = j.act === 'SELL_ALL' ? 'dsh-vsell' : (j.act === 'SELL_HALF' ? 'dsh-vhalf' : (j.act === 'HOLD' ? 'dsh-vhold' : (j.act === 'ERR' ? 'dsh-err' : 'dsh-none')));
-    avgOk = typeof x.avgPrice === 'number' && isFinite(x.avgPrice) && x.avgPrice > 0; qOk = typeof x.qty === 'number' && isFinite(x.qty) && x.qty > 0;
+    cls = j.act === 'SELL_ALL' ? 'dsh-vsell' : (j.act === 'SELL_HALF' ? 'dsh-vhalf' : (j.act === 'HOLD' ? 'dsh-vhold' : (j.act === 'ERR' || j.act === 'CHECK' ? 'dsh-err' : 'dsh-none')));
+    xb = '';
+    if (code !== null && !dshIsObj(pl)) xb += '<span class="dsh-badge dsh-err">계획 없음 · 손절 감시 없음</span>';
+    if (dshIsObj(pl) && pe === null && dshHasKey(pl, 'basisQty') && qOk && avgOk && (x.qty !== pl.basisQty || Math.abs(x.avgPrice - pl.basisAvg) >= 1)) xb += '<span class="dsh-badge dsh-err">계획 재확인 필요</span>';
     pnl = price !== null && avgOk ? (price / x.avgPrice - 1) * 100 : null;
     h += '<div class="dsh-card" style="margin-top:10px"><div class="dsh-hd"><div class="dsh-nm">' + esc(nm) + '<span class="dsh-cd">' + (code !== null ? esc(code) : '<span class="dsh-bad">코드 미확인</span>') + '</span></div><div class="dsh-badges">' +
-      (dshIsObj(pl) && dshHasKey(MODE, pl.mode) ? '<span class="dsh-badge dsh-' + esc(pl.mode) + '">' + esc(MODE[pl.mode].label) + '</span>' : '') + '<span class="dsh-badge ' + cls + '">' + esc(j.label) + '</span></div></div>';
+      (dshIsObj(pl) && dshHasKey(MODE, pl.mode) ? '<span class="dsh-badge dsh-' + esc(pl.mode) + '">' + esc(MODE[pl.mode].label) + '</span>' : '') + '<span class="dsh-badge ' + cls + '">' + esc(j.label) + '</span>' + xb + '</div></div>';
     if (j.why) h += '<div class="dsh-why">사유 · ' + esc(j.why) + '</div>';
     c = dshIsObj(pl) ? pl : {};
     h += '<div class="dsh-vals"><span class="dsh-s">손절 <b>' + (dshIsObj(pl) && typeof c.stop === 'number' ? won(c.stop) : '미제시') + '</b></span><span class="dsh-t">목표1 <b>' + (typeof c.t1 === 'number' ? won(c.t1) : '미제시') + '</b></span><span class="dsh-t">목표2 <b>' + (typeof c.t2 === 'number' ? won(c.t2) : '미제시') + '</b></span></div>';

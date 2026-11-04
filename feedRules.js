@@ -189,6 +189,18 @@
     td = cal(todayKst);
     if (isNaN(td)) return '오늘(KST) 날짜 인자가 올바르지 않음';
     if (d > td) return 'asOf ' + it.asOf + '가 오늘(KST ' + todayKst + ')보다 미래';
+    return checkBasis(it);
+  }
+
+  /* 선택 기준값(basisQty·basisAvg·basisAt) — 3개 모두 없으면 정상, 일부만 있거나 형식이 틀리면 사유 문자열 */
+  function checkBasis(it){
+    var ks = ['basisQty', 'basisAvg', 'basisAt'], n = 0, i;
+    for (i = 0; i < ks.length; i++) if (Object.prototype.hasOwnProperty.call(it, ks[i])) n++;
+    if (n === 0) return null;
+    if (n < 3) return 'basisQty·basisAvg·basisAt는 셋이 함께 있어야 함';
+    if (!(typeof it.basisQty === 'number' && isFinite(it.basisQty) && it.basisQty > 0 && Math.floor(it.basisQty) === it.basisQty)) return 'basisQty가 0보다 큰 정수가 아님';
+    if (!(typeof it.basisAvg === 'number' && isFinite(it.basisAvg) && it.basisAvg > 0)) return 'basisAvg가 0보다 큰 수가 아님';
+    if (!isoOk(it.basisAt)) return 'basisAt이 ISO 8601 +09:00 형식이 아님';
     return null;
   }
 
