@@ -15724,7 +15724,7 @@ function dshHoldJudge(price, plan, qty){
   if (a !== null && price >= a && !plan.t1Done) {
     cmp = dshHasKey(plan, 'basisQty') && typeof plan.basisQty === 'number' && typeof qty === 'number' && isFinite(qty) && qty > 0;
     if (cmp && qty < plan.basisQty) return {act: 'CHECK', label: '목표1 실행 여부 확인 필요', why: '보유 ' + qty + '주 < 계획 기준 ' + plan.basisQty + '주 · 투자팀이 t1Done을 갱신하기 전 (현재가 ' + won(price) + ' ≥ 목표1 ' + won(a) + ')'};
-    return {act: 'SELL_HALF', label: '목표1 도달 — 절반 익절' + (cmp ? '' : ' · 이미 실행했으면 무시(수량 기준 미제시)'), why: '현재가 ' + won(price) + ' ≥ 목표1 ' + won(a)};
+    return {act: 'SELL_HALF', label: '목표1 도달 — 절반 익절' + (cmp ? '' : (dshHasKey(plan, 'basisQty') && typeof plan.basisQty === 'number' ? ' · 이미 실행했으면 무시(보유 수량 미확인)' : ' · 이미 실행했으면 무시(수량 기준 미제시)')), why: '현재가 ' + won(price) + ' ≥ 목표1 ' + won(a)};
   }
   if (s === null) return {act: 'LIMITED', label: '손절 기준 미제시 — 판단 제한', why: '손절선이 없어 홀딩 여부를 판단할 수 없음 (현재가 ' + won(price) + ')'};
   return {act: 'HOLD', label: plan.t1Done ? '홀딩(목표1 실행됨)' : '홀딩', why: '손절·목표 어느 선도 닿지 않음 (현재가 ' + won(price) + ')'};
